@@ -1,0 +1,4 @@
+.agent/logs/
+.agent/reports/
+.agent/task-*.json
+.codex
