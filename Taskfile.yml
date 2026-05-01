@@ -19,6 +19,12 @@ tasks:
     cmds:
       - go test -race ./...
 
+  build:
+    aliases: ["b"]
+    cmds:
+      - mkdir -p bin
+      - go build -o bin/orc ./cmd/orc
+
   fix:
     aliases: ["f"]
     cmds:
@@ -31,6 +37,7 @@ tasks:
       - task format
       - task lint
       - task tests
+      - task build
 
   goimports:
     cmds:

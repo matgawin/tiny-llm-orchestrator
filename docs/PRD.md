@@ -567,8 +567,6 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 
 ## Open Questions
 
-- **Owner**: User. **Question**: What exact workflow file schema should be used for branching transitions? **Suggested resolution path**: Start with a compact YAML schema for the implementation workflow only, then validate it against real dogfooding runs.
-
 - **Owner**: User. **Question**: What exact final-summary format is most useful during manual review? **Suggested resolution path**: Start with sections for changes, tests, VCS summary, suggested task-system notes, risks, follow-ups, and review checklist.
 
 - **Owner**: User. **Question**: Should `orc run next` remain inspect-only, or should it optionally launch the selected step? **Suggested resolution path**: Keep `run next` inspect-only in v1. `worker launch-next` performs launch. Add a convenience `run advance` command later if needed.
