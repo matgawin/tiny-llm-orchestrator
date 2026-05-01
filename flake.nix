@@ -24,12 +24,45 @@
 
       exec "$real_codex" --add-dir "$BEADS_DIR" "$@"
     '';
+    orc = pkgs.buildGoModule {
+      pname = "orc";
+      version = "0.1.0";
+      src = ./.;
+      vendorHash = null;
+      subPackages = ["cmd/orc"];
+
+      ldflags = [
+        "-s"
+        "-w"
+        "-X tiny-llm-orchestrator/orc/internal/cli.version=0.1.0"
+      ];
+    };
   in {
+    packages.${system} = {
+      default = orc;
+      orc = orc;
+    };
+
+    apps.${system} = {
+      default = self.apps.${system}.orc;
+      orc = {
+        type = "app";
+        program = "${orc}/bin/orc";
+      };
+    };
+
     devShells.${system}.default = pkgs.mkShell {
       packages = with pkgs;
         [
           codexWithBeads
+
           go
+          gofumpt
+          golangci-lint
+          go-tools
+          gotools
+          go-task
+
           jq
           jujutsu
           zellij

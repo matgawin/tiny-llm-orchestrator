@@ -8,8 +8,6 @@ Run `bd prime` for workflow contex.
 **Quick reference:**
 - `bd ready` - Find unblocked work
 - `bd create "Title" --type task --priority 2` - Create issue
-- `bd close <id>` - Complete work
-- `bd dolt push` - Push beads to remote
 
 For full workflow details: `bd prime`
 
@@ -21,4 +19,7 @@ Important:
 - Do not use `bd edit`; use `bd update` with flags.
 - Before work: `bd ready --json`.
 - Claim work: `bd update <id> --claim`.
+- Never close issues on your own, only if asked by reviewer.
+- Most of the nix and task files will need eleveated execution, so ask for it.
+- Never add mocs/stubs to tests, always test actual logic, which may require splitting functions.
 

@@ -1,0 +1,54 @@
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list-all
+
+  tests:
+    aliases: ["t"]
+    cmds:
+      - go test ./...
+
+  tests-race:
+    aliases: ["tr"]
+    cmds:
+      - task test-unit-race
+
+  test-unit-race:
+    cmds:
+      - go test -race ./...
+
+  fix:
+    aliases: ["f"]
+    cmds:
+      - go fix -all ./...
+
+  check:
+    aliases: ["c"]
+    cmds:
+      - task fix
+      - task format
+      - task lint
+      - task tests
+
+  goimports:
+    cmds:
+      - echo "Running goimports..."
+      - find . -type f -name '*.go' -not -path "./vendor/*" -not -path "*gen/*" -exec goimports -w {} \;
+
+  gofumpt:
+    cmds:
+      - echo "Running gofumpt..."
+      - find . -type f -name '*.go' -not -path "./vendor/*" -not -path "*gen.go" -exec gofumpt -w {} \;
+
+  format:
+    aliases: ["fm"]
+    deps: ["goimports", "gofumpt"]
+    cmds:
+      - echo "Formatting complete."
+
+  lint:
+    aliases: ["l"]
+    cmds:
+      - golangci-lint run --config .golangci.yml
