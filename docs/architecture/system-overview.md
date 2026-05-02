@@ -28,7 +28,7 @@ The only runnable service today is the `orc` CLI:
 - `internal/cli` handles command dispatch and user-facing output.
 - `internal/config` loads and validates `.orc` project configuration.
 
-The CLI currently exposes help and version behavior. Config loading and validation are implemented as package logic and are exercised by tests and fixtures. Durable run-state primitives are implemented in `internal/runstore`; no CLI run commands consume them yet.
+The CLI currently exposes help and version behavior. Config loading and validation, deterministic workflow transitions, and durable run-state primitives are implemented as package logic and are exercised by tests and fixtures. No CLI run commands consume the run store or workflow engine yet.
 
 ## Core Data Flow
 
@@ -45,7 +45,7 @@ Config loading follows this shape:
 These packages define or reserve ownership for orchestration behavior outside the config-loading boundary:
 
 - `internal/runstore`: inspectable persistent run state under `.orc/runs/<run-id>`.
-- `internal/workflow`: future deterministic workflow graph transitions.
+- `internal/workflow`: deterministic workflow graph transitions.
 - `internal/launcher`: future worker process start and supervision.
 
 Do not push future launcher or run-store concerns into `internal/config`; config validation should remain a contract-loading boundary.

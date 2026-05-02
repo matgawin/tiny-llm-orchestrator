@@ -262,9 +262,9 @@ steps:
 
 The exact schema may change during implementation, but the invariant is fixed: workers report facts; Go selects the next state.
 
-For a terminal worker outcome, the workflow engine evaluates retry policy before applying the step's `on:` transition. If retries remain for the `(status, result)` pair, the engine creates a new attempt for the same step. If retries are exhausted or no retry is configured, the engine applies the step's `on:` transition.
+For a terminal worker outcome, the workflow engine evaluates retry policy before applying the step's `on:` transition. If retries remain for the `(status, result)` pair, the engine returns a retry decision for the same step; the caller creates and persists any replacement attempt. If retries are exhausted or no retry is configured, the engine applies the step's `on:` transition.
 
-Retry counters are scoped to a step execution lineage. A retry count increments when the same step is retried after a terminal failure result. The count resets when the workflow transitions away from that step and later re-enters it through normal routing.
+Retry counters are keyed by terminal `(status, result)` pair and scoped to a step execution lineage. The relevant pair's count increments when the same step is retried. Counts reset when the workflow applies an `on:` transition and later enters the step through normal routing, even when that transition targets the same step.
 
 Run statuses are:
 
@@ -446,7 +446,7 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 - A valid worker report is terminal for the active attempt; after a short grace period, any still-running worker process is terminated.
 - If a worker exits without a valid report, it is retried according to workflow policy.
 - If a worker exceeds its configured timeout without a valid report, the launcher terminates it and applies workflow retry policy.
-- Retry counters are scoped to a step execution lineage and reset when the workflow transitions away from the step and later re-enters it.
+- Retry counters are keyed by `status/result`, scoped to a step execution lineage, and reset whenever the workflow applies an `on:` transition, even when that transition targets the same step.
 - If retries are exhausted, the run enters `blocked_for_human` unless the workflow routes the exhausted outcome elsewhere.
 - If tests require network or approval, the worker reports blocked and the run stops.
 - Direct filesystem report persistence is the v1 transport.

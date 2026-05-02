@@ -98,6 +98,7 @@ Use this category for:
 
 - `.orc` config surfaces
 - `.orc/runs` durable state contracts
+- workflow engine transition contracts
 - lookup-heavy material that should stay literal and searchable
 
 ## Recommended Reading Paths

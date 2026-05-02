@@ -21,7 +21,9 @@ Contributors, maintainers, reviewers, operators, and code agents landing in the 
 
 ## Repository At A Glance
 
-Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration. The current code scaffolds and validates `.orc` project configuration, workflow definitions, and role descriptors, and it provides the durable run-store primitives that future commands will use to persist inspectable run state.
+Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration.
+The current code scaffolds and validates `.orc` configuration, evaluates
+deterministic workflow transitions, and provides durable run-store primitives.
 
 Runtime entrypoint:
 
@@ -50,7 +52,7 @@ Entrypoints:
 
 - CLI behavior: `internal/cli`
 - project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md)
-- future workflow transition logic: `internal/workflow`
+- deterministic workflow transition logic: `internal/workflow` and [docs/reference/workflow-engine.md](docs/reference/workflow-engine.md)
 - run persistence: `internal/runstore` and [docs/reference/run-store.md](docs/reference/run-store.md)
 - future worker process supervision: `internal/launcher`
 - local setup and troubleshooting: [docs/getting-started/README.md](docs/getting-started/README.md)
@@ -68,7 +70,7 @@ Entrypoints:
 
 ### Runtime Packages
 
-- `internal/workflow`: future deterministic workflow transition package.
+- `internal/workflow`: deterministic workflow transition engine.
 - `internal/runstore`: persistent run-state package.
 - `internal/launcher`: future external worker launcher package.
 

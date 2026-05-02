@@ -25,7 +25,7 @@ Contributors navigating the codebase or deciding where new code and docs should 
 - `internal/cli`: command parsing, help/version output, and CLI stream handling.
 - `internal/initconfig`: project scaffold planning; see [../reference/configuration.md](../reference/configuration.md).
 - `internal/config`: `.orc` project config loading, YAML parsing, path safety, workflow validation, and agent descriptor validation.
-- `internal/workflow`: future deterministic workflow graph execution logic.
+- `internal/workflow`: deterministic workflow graph transition logic.
 - `internal/runstore`: persistent orchestration run state.
 - `internal/launcher`: future worker process launcher and supervision code.
 - `docs`: durable repository documentation.
@@ -40,7 +40,7 @@ Contributors navigating the codebase or deciding where new code and docs should 
 
 Useful split in practice:
 
-- `docs/features/`: durable CLI, config, and run-store behavior areas
-- `docs/reference/`: lookup-heavy config and run-store contract material
+- `docs/features/`: durable CLI, config, workflow, and run-store behavior areas
+- `docs/reference/`: lookup-heavy config, workflow engine, and run-store contract material
 - `docs/architecture/`: package ownership and boundary rules
 - subsystem-local docs: implementation details that are only meaningful inside one package
