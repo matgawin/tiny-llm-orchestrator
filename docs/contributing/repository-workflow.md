@@ -52,8 +52,8 @@ The repository uses beads for tracked work.
 Common update-together expectations in this repo:
 
 - CLI behavior or command output -> root README or feature docs when the behavior is durable
-- config schema or validation behavior -> reference/config docs and config fixtures
-- workflow graph semantics -> architecture or feature docs plus config fixtures
+- config schema or validation behavior -> reference/config docs and scaffold source
+- workflow graph semantics -> architecture or feature docs plus scaffold source
 - local workflow or test-command change -> getting-started/testing docs
 
 ## Commit Conventions

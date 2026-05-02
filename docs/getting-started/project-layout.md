@@ -23,11 +23,11 @@ Contributors navigating the codebase or deciding where new code and docs should 
 
 - `cmd/orc`: CLI process entrypoint.
 - `internal/cli`: command parsing, help/version output, and CLI stream handling.
+- `internal/initconfig`: project scaffold planning; see [../reference/configuration.md](../reference/configuration.md).
 - `internal/config`: `.orc` project config loading, YAML parsing, path safety, workflow validation, and agent descriptor validation.
 - `internal/workflow`: future deterministic workflow graph execution logic.
 - `internal/runstore`: future persistent orchestration run state.
 - `internal/launcher`: future worker process launcher and supervision code.
-- `testdata/config`: config fixtures used by package tests.
 - `docs`: durable repository documentation.
 - `.agents`: Codex guidance and repo-local workflow skills.
 - `nix`, `flake.nix`, `flake.lock`: reproducible development shell and package definition.

@@ -42,7 +42,9 @@ Project-local Tiny Orc configuration is expected under `.orc/` in the project be
 - workflow files referenced from `.orc/config.yaml`
 - agent descriptor files referenced from `.orc/config.yaml`
 
-The repository fixture at `testdata/config/valid/.orc` documents the current v1 config shape used by tests.
+Create or preview project-local scaffold changes with `orc init`. For dry-run,
+prompt, `.gitignore`, and `AGENTS.md` behavior, see
+[../reference/configuration.md](../reference/configuration.md).
 
 ## Local Workflow
 
@@ -83,4 +85,4 @@ go run ./cmd/orc version
 
 - If `task` runs the wrong executable, enter `nix develop` or use the `.envrc` wrapper `t`.
 - If Go cache permissions under `$HOME/.cache` fail in a restricted environment, rerun with workspace-local cache variables before treating the failure as a code issue.
-- If `orc` cannot load a config fixture, check that referenced workflow and agent paths stay under `.orc`; symlink escapes are rejected.
+- If `orc` cannot load a project config, check that referenced workflow and agent paths stay under `.orc`; symlink escapes are rejected.

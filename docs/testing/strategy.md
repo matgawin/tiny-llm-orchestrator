@@ -62,7 +62,8 @@ Use package tests when the behavior needs real package wiring but not a full pro
 
 - `internal/cli` command output and errors
 - `internal/config` loading and validation
-- fixture-backed config behavior under `testdata/config`
+- config behavior backed by `internal/initconfig/scaffold/.orc`; see
+  [../reference/configuration.md](../reference/configuration.md)
 
 ### Integration Behavior
 
@@ -97,7 +98,7 @@ Practical reading of this policy:
 ## Change-Oriented Guidance
 
 - CLI changes usually need focused `internal/cli` tests.
-- Config schema or validation changes usually need `internal/config` tests and fixture updates.
+- Config schema or validation changes usually need `internal/config` tests and scaffold source updates when the valid config shape changes.
 - Workflow semantics usually need deterministic package tests for transition and terminal-state behavior.
 - Launcher or run-store changes should prefer real temp directories, real processes where practical, and race checks for shared mutable state.
 - Documentation-only changes usually need link/path review and a grep check for stale placeholders or dead references.

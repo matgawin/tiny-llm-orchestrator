@@ -12,7 +12,7 @@ import (
 )
 
 func TestLoadValidImplementationWorkflow(t *testing.T) {
-	project, err := Load(fixturePath("valid"))
+	project, err := Load(validScaffoldPath())
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -195,8 +195,8 @@ This descriptor is outside .orc.
 	assertLoadErrorContains(t, root, "path must not escape .orc")
 }
 
-func fixturePath(name string) string {
-	return filepath.Join("..", "..", "testdata", "config", name)
+func validScaffoldPath() string {
+	return filepath.Join("..", "initconfig", "scaffold")
 }
 
 type projectFixture struct {

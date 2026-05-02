@@ -22,7 +22,8 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 ## Main Boundaries
 
 - `cmd/orc` owns process startup only.
-- `internal/cli` owns CLI argument handling, help/version output, stream injection, and command-level user messages.
+- `internal/cli` owns the command boundary.
+- `internal/initconfig` owns the project-local `orc init` scaffold.
 - `internal/config` owns `.orc` config loading, path safety, YAML parsing, workflow validation, and agent descriptor validation.
 - `internal/workflow` should own deterministic workflow transitions when runtime execution is implemented.
 - `internal/runstore` should own persistent run state when orchestration runs become inspectable.
@@ -31,7 +32,9 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 ## Boundary Rules
 
 - Keep config schema validation independent from process-launch behavior.
-- Keep user-facing command output in CLI code, not in low-level config parsing helpers.
+- Keep command routing, help output, and command-level error wrapping in
+  `internal/cli`; command packages such as `internal/initconfig` own
+  domain-specific prompts and status output.
 - Keep future runtime state transitions out of the file-loading layer.
 - Add narrow package-local helpers before introducing shared abstractions.
 - When a behavior spans CLI and config validation, test the deterministic validation logic directly and keep CLI tests focused on command behavior.

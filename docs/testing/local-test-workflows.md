@@ -11,7 +11,7 @@ Contributors running tests locally during development or review.
 ## Read This When
 
 - You need the standard test commands.
-- You need to know where config fixtures live.
+- You need the scaffold source policy.
 - You are looking for local test support utilities.
 
 ## Related Docs
@@ -59,7 +59,8 @@ task check
 
 ## Fixtures
 
-- `testdata/config/valid/.orc`: valid v1 project config fixture.
+- Config tests use `internal/initconfig/scaffold/.orc` as the canonical valid
+  scaffold source; see [../reference/configuration.md](../reference/configuration.md).
 - Tests under `internal/config` create additional temporary invalid projects for validation coverage.
 
 ## If You Changed X, Run Y

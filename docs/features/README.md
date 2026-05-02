@@ -25,6 +25,6 @@ Dedicated current-behavior feature docs have not been split out yet. Until they 
 
 - CLI command behavior: [../../README.md](../../README.md) and `internal/cli`
 - `.orc` config schema and validation: [../reference/configuration.md](../reference/configuration.md)
-- workflow graph semantics: [../architecture/system-overview.md](../architecture/system-overview.md) and `testdata/config/valid/.orc`
+- workflow graph semantics: [../architecture/system-overview.md](../architecture/system-overview.md) and [../reference/configuration.md](../reference/configuration.md)
 
 Add a dedicated feature doc here when a behavior area grows beyond what belongs in the root README or reference docs.

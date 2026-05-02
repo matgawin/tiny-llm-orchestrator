@@ -22,4 +22,4 @@ Contributors adding or modifying tests, reviewing coverage, or validating behavi
 ## Docs
 
 - [strategy.md](strategy.md): test philosophy and coverage expectations
-- [local-test-workflows.md](local-test-workflows.md): local commands, fixtures, and test directories
+- [local-test-workflows.md](local-test-workflows.md): local commands, scaffold source, and test directories

@@ -6,13 +6,13 @@ Provide a code-backed reference for the repository's configuration files and con
 
 ## Audience
 
-Contributors and maintainers changing config loading, validation, fixtures, or future init behavior.
+Contributors and maintainers changing config loading, validation, scaffold source, or init behavior.
 
 ## Read This When
 
 - You need to know which `.orc` files are consumed by the app.
 - You are updating config schema validation.
-- You are updating config fixtures or generated init output.
+- You are updating scaffold source or generated init output.
 
 ## Related Docs
 
@@ -29,7 +29,28 @@ It reads:
 - workflow files referenced by `workflows` entries
 - agent descriptor files referenced by `agents` entries
 
-The public fixture for the current v1 shape is `testdata/config/valid/.orc`.
+The canonical scaffold source for the current v1 shape is
+`internal/initconfig/scaffold/.orc`.
+
+## Init Scaffolding
+
+`orc init` scaffolds the v1 `.orc` configuration shape into the current working
+directory:
+
+- `orc init --dry-run` previews planned files without writing.
+- `orc init --yes` creates missing scaffold files noninteractively.
+- Interactive `orc init` prompts before overwriting differing scaffold files and
+  before creating a missing `.gitignore`.
+- Instruction files: interactive init prompts before creating or updating
+  `AGENTS.md`; `--yes` skips `AGENTS.md` creation or update; v1 only supports
+  `AGENTS.md`.
+- `orc init` creates and ignores `.orc/runs/`.
+- Persistent files under `.orc/` are user-owned and reviewable; runtime run
+  state belongs under the ignored `.orc/runs/` directory when run storage is
+  implemented.
+- If `.gitignore` broadly ignores `.orc`, `orc init` fails and asks you to
+  replace that broad rule with `.orc/runs/` so persistent config remains
+  trackable.
 
 ## `.orc/config.yaml`
 
@@ -79,9 +100,7 @@ Each step must declare:
 - `allowed_results`: a non-empty map of allowed statuses to non-empty result lists
 - `on`: a deterministic transition map keyed by `status/result`
 
-Allowed result values must be non-empty strings. Every `on` key must be declared in `allowed_results`, and every declared `status/result` pair must have a matching `on` transition. Transition targets must be either another declared step or a supported terminal state.
-
-Workflow transitions are deterministic: every allowed result pair must have an `on` transition to another step or a supported terminal state.
+Allowed result values must be non-empty strings. Every `on` key must be declared in `allowed_results`, and every declared `status/result` pair must have a deterministic transition to another step or a supported terminal state.
 
 Supported terminal states:
 

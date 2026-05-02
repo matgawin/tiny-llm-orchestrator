@@ -14,10 +14,8 @@ defaults:
     failed/invalid_report: 0
     failed/process_error: 1
     failed/error: 0
-# This fixture is intentionally explicit, without YAML anchors, because it
-# documents the plain v1 config shape that orc init should generate.
-# The repeated failed/* policy is the standard v1 worker-failure policy; it is
-# repeated per step so generated config remains ordinary editable YAML.
+# This workflow repeats failure-result transitions instead of using YAML anchors
+# so each generated step is ordinary editable YAML.
 steps:
   plan:
     agent: planner

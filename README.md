@@ -21,7 +21,7 @@ Contributors, maintainers, reviewers, operators, and code agents landing in the 
 
 ## Repository At A Glance
 
-Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration. The current code validates `.orc` project configuration, workflow definitions, and role descriptors; future runtime packages will use that validated configuration to launch workers and persist inspectable run state.
+Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration. The current code scaffolds and validates `.orc` project configuration, workflow definitions, and role descriptors; future runtime packages will use that validated configuration to launch workers and persist inspectable run state.
 
 Runtime entrypoint:
 
@@ -49,8 +49,7 @@ Entrypoints:
 ## Where To Look For X
 
 - CLI behavior: `internal/cli`
-- project config loading and validation: `internal/config`
-- workflow graph schema and fixtures: `testdata/config/valid/.orc`
+- project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md)
 - future workflow transition logic: `internal/workflow`
 - future run persistence: `internal/runstore`
 - future worker process supervision: `internal/launcher`
@@ -64,6 +63,7 @@ Entrypoints:
 
 - `cmd/orc/main.go`: process entrypoint.
 - `internal/cli`: CLI command parsing and output.
+- `internal/initconfig`: project-local `orc init` scaffold planning and writes.
 - `internal/config`: `.orc` config, workflow, and agent descriptor loading/validation.
 
 ### Runtime Packages
@@ -79,7 +79,7 @@ Use these docs instead of treating this page as the only setup guide:
 - [docs/getting-started/local-development.md](docs/getting-started/local-development.md): local toolchain and commands
 - [docs/getting-started/project-layout.md](docs/getting-started/project-layout.md): where code and docs live
 - [docs/reference/configuration.md](docs/reference/configuration.md): `.orc` config files and schema surfaces
-- [docs/testing/local-test-workflows.md](docs/testing/local-test-workflows.md): test commands and fixture layout
+- [docs/testing/local-test-workflows.md](docs/testing/local-test-workflows.md): test commands and config fixture policy
 
 The shortest local-start sequence is:
 
