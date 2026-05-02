@@ -28,7 +28,7 @@ tasks:
   fix:
     aliases: ["f"]
     cmds:
-      - go fix -all ./...
+      - go fix ./...
 
   check:
     aliases: ["c"]

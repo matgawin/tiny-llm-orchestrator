@@ -21,5 +21,5 @@ Contributors changing system structure, package wiring, or cross-cutting behavio
 
 ## Docs
 
-- [system-overview.md](system-overview.md): runtime shape, dependencies, and config-loading flow
+- [system-overview.md](system-overview.md): runtime shape, package ownership, config-loading flow, and run-state flow
 - [service-boundaries.md](service-boundaries.md): package ownership boundaries and responsibilities

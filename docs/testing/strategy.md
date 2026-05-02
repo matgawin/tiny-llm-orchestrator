@@ -100,7 +100,8 @@ Practical reading of this policy:
 - CLI changes usually need focused `internal/cli` tests.
 - Config schema or validation changes usually need `internal/config` tests and scaffold source updates when the valid config shape changes.
 - Workflow semantics usually need deterministic package tests for transition and terminal-state behavior.
-- Launcher or run-store changes should prefer real temp directories, real processes where practical, and race checks for shared mutable state.
+- Run-store changes should use real temporary project directories and assert persisted events, latest status, artifact refs, recovery, and malformed-state errors directly.
+- Launcher changes should prefer real processes where practical and race checks for shared mutable state.
 - Documentation-only changes usually need link/path review and a grep check for stale placeholders or dead references.
 
 ## Change Expectations

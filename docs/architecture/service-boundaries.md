@@ -25,8 +25,8 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `internal/cli` owns the command boundary.
 - `internal/initconfig` owns the project-local `orc init` scaffold.
 - `internal/config` owns `.orc` config loading, path safety, YAML parsing, workflow validation, and agent descriptor validation.
+- `internal/runstore` owns persistent run state under `.orc/runs/<run-id>`.
 - `internal/workflow` should own deterministic workflow transitions when runtime execution is implemented.
-- `internal/runstore` should own persistent run state when orchestration runs become inspectable.
 - `internal/launcher` should own worker process launch and supervision.
 
 ## Boundary Rules
@@ -36,5 +36,8 @@ Contributors changing package structure, config validation, CLI behavior, or fut
   `internal/cli`; command packages such as `internal/initconfig` own
   domain-specific prompts and status output.
 - Keep future runtime state transitions out of the file-loading layer.
+- Keep workflow routing, worker launch, content redaction, and cross-process
+  write coordination out of `internal/runstore`; it is the persistence
+  boundary for v1.
 - Add narrow package-local helpers before introducing shared abstractions.
 - When a behavior spans CLI and config validation, test the deterministic validation logic directly and keep CLI tests focused on command behavior.

@@ -25,7 +25,7 @@ Contributors preparing, validating, and packaging repository changes.
 - `task tests`: run `go test ./...`.
 - `task tests-race`: run the race-detector test suite through `task test-unit-race`.
 - `task test-unit-race`: run `go test -race ./...`.
-- `task fix`: run `go fix -all ./...`.
+- `task fix`: run `go fix ./...`.
 - `task format`: run `goimports` and `gofumpt` on Go files.
 - `task lint`: run `golangci-lint` with `.golangci.yml`.
 - `task build`: build `cmd/orc` to `bin/orc`.

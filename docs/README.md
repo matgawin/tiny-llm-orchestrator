@@ -97,6 +97,7 @@ Use this category for:
 Use this category for:
 
 - `.orc` config surfaces
+- `.orc/runs` durable state contracts
 - lookup-heavy material that should stay literal and searchable
 
 ## Recommended Reading Paths
@@ -108,3 +109,4 @@ If you are:
 - changing durable CLI, parsing, or validation behavior: start with [features/README.md](features/README.md)
 - changing tests: read [testing/strategy.md](testing/strategy.md), then [testing/local-test-workflows.md](testing/local-test-workflows.md)
 - changing runtime config: read [reference/configuration.md](reference/configuration.md)
+- changing run persistence: read [reference/run-store.md](reference/run-store.md), then [architecture/service-boundaries.md](architecture/service-boundaries.md) if the change touches package ownership

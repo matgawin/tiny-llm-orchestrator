@@ -341,7 +341,7 @@ Example report payload:
 
 ```json
 {
-  "run_id": "2026-05-01T120000-implementation",
+  "run_id": "20260501T120000Z-implementation-main-997-a1b2c3",
   "step": "test",
   "agent": "tester",
   "attempt": 2,
@@ -356,9 +356,12 @@ Example report payload:
       "details": "Current work only covers unit-level recovery behavior."
     }
   ],
-  "report_path": "reports/tester.md"
+  "report_path": "reports/000004-tester.md"
 }
 ```
+
+Report artifact paths are assigned by the run store and use sequence-prefixed
+filenames.
 
 Reports are one-way. A worker report never directly chooses the next worker. The workflow engine chooses the next step from the validated `(step, status, result)` tuple.
 

@@ -1,0 +1,176 @@
+package runstore
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestCreateRunCreatesInitialArtifacts(t *testing.T) {
+	root := t.TempDir()
+	store := openStore(t, root)
+	now := time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC)
+
+	run, err := store.Create(CreateRunRequest{
+		Workflow: "implementation",
+		TaskSlug: "main-997",
+		Time:     now,
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	if ok := regexp.MustCompile(`^20260502T143022Z-implementation-main-997-[0-9a-f]{6}$`).MatchString(run.ID); !ok {
+		t.Fatalf("run id %q did not match expected safe generated shape", run.ID)
+	}
+	assertDir(t, filepath.Join(root, ".orc", "runs", run.ID))
+	for _, rel := range artifactDirs() {
+		assertDir(t, filepath.Join(run.Path, rel))
+	}
+	assertFile(t, filepath.Join(run.Path, followupsName))
+	status := readRunStatus(t, run)
+	if status.RunID != run.ID || status.Workflow != "implementation" || status.State != stateRunning {
+		t.Fatalf("status = %+v, want run/workflow/running state", status)
+	}
+	if status.LastSequence != 1 {
+		t.Fatalf("last sequence = %d, want 1", status.LastSequence)
+	}
+	events := readRunEvents(t, run)
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	if events[0].Type != eventRunCreated || events[0].Sequence != 1 || events[0].RunID != run.ID {
+		t.Fatalf("event = %+v, want initial run.created event", events[0])
+	}
+}
+
+func TestCreateRunRejectsExplicitIDCollision(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	req := CreateRunRequest{RunID: "manual-run", Workflow: "implementation"}
+	if _, err := store.Create(req); err != nil {
+		t.Fatalf("first Create returned error: %v", err)
+	}
+	_, err := store.Create(req)
+	requireErrorContains(t, err, "already exists")
+}
+
+func TestCreateRunIDSlugFallbackAndTruncation(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{
+		Workflow: "Implementation!!! Workflow",
+		TaskSlug: "!!!",
+		Time:     time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if ok := regexp.MustCompile(`^20260502T143022Z-implementation-workflow-task-[0-9a-f]{6}$`).MatchString(run.ID); !ok {
+		t.Fatalf("run id %q did not use sanitized workflow and task fallback", run.ID)
+	}
+
+	longRun, err := store.Create(CreateRunRequest{
+		Workflow: strings.Repeat("a", 80),
+		TaskSlug: "task",
+		Time:     time.Date(2026, 5, 2, 14, 31, 22, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Create with long workflow returned error: %v", err)
+	}
+	parts := strings.Split(longRun.ID, "-")
+	if len(parts[1]) != 48 {
+		t.Fatalf("workflow slug len = %d, want 48 in %q", len(parts[1]), longRun.ID)
+	}
+}
+
+func TestCreateRejectsUnsluggableWorkflowForGeneratedRunID(t *testing.T) {
+	store := openStore(t, t.TempDir())
+
+	_, err := store.Create(CreateRunRequest{Workflow: "!!!", TaskSlug: "main-997"})
+	requireErrorContains(t, err, "workflow slug")
+}
+
+func TestCreateRejectsInvalidExplicitRunIDs(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	for _, id := range []string{".", "..", "a/b", `a\b`, "has space"} {
+		t.Run(id, func(t *testing.T) {
+			_, err := store.Create(CreateRunRequest{RunID: id, Workflow: "implementation"})
+			requireErrorContains(t, err)
+		})
+	}
+}
+
+func TestCreateGeneratesRunIDWhenExplicitIDEmpty(t *testing.T) {
+	store := openStore(t, t.TempDir())
+
+	run, err := store.Create(CreateRunRequest{RunID: "", Workflow: "implementation"})
+	if err != nil {
+		t.Fatalf("Create with empty id returned error: %v", err)
+	}
+	if run.ID == "" {
+		t.Fatal("run id is empty, want generated id")
+	}
+}
+
+func TestCreateRejectsSymlinkedStoreParents(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, root string)
+	}{
+		{
+			name: "orc",
+			setup: func(t *testing.T, root string) {
+				outside := filepath.Join(root, "outside-orc")
+				if err := os.Mkdir(outside, 0o750); err != nil {
+					t.Fatalf("mkdir outside .orc: %v", err)
+				}
+				symlinkPath(t, filepath.Join(root, orcDirName), outside)
+			},
+		},
+		{
+			name: "runs",
+			setup: func(t *testing.T, root string) {
+				if err := os.Mkdir(filepath.Join(root, orcDirName), 0o750); err != nil {
+					t.Fatalf("mkdir .orc: %v", err)
+				}
+				outside := filepath.Join(root, "outside-runs")
+				if err := os.Mkdir(outside, 0o750); err != nil {
+					t.Fatalf("mkdir outside runs: %v", err)
+				}
+				symlinkPath(t, filepath.Join(root, orcDirName, runsDirName), outside)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			tc.setup(t, root)
+			store := openStore(t, root)
+
+			_, err := store.Create(CreateRunRequest{RunID: "parent-symlink", Workflow: "implementation"})
+			requireErrorContains(t, err, "symlink")
+		})
+	}
+}
+
+func TestCleanupCreatedRunDirRemovesPartialRun(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	if err := ensureRunsDir(store.orcDir, store.runsDir); err != nil {
+		t.Fatalf("ensure runs dir: %v", err)
+	}
+	runDir := filepath.Join(store.runsDir, "partial-run")
+	if err := os.Mkdir(runDir, 0o750); err != nil {
+		t.Fatalf("mkdir partial run: %v", err)
+	}
+	cause := errors.New("bootstrap failed")
+
+	err := cleanupCreatedRunDir("partial-run", runDir, cause)
+	if !errors.Is(err, cause) {
+		t.Fatalf("cleanup error = %v, want original cause", err)
+	}
+	if _, statErr := os.Stat(runDir); !os.IsNotExist(statErr) {
+		t.Fatalf("partial run stat err = %v, want removed directory", statErr)
+	}
+}

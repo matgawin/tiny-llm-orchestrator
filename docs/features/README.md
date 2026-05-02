@@ -21,10 +21,9 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 
 ## Current Feature Areas
 
-Dedicated current-behavior feature docs have not been split out yet. Until they are, use these canonical homes:
-
+- Run-store behavior: currently documented in [../reference/run-store.md](../reference/run-store.md)
 - CLI command behavior: [../../README.md](../../README.md) and `internal/cli`
 - `.orc` config schema and validation: [../reference/configuration.md](../reference/configuration.md)
 - workflow graph semantics: [../architecture/system-overview.md](../architecture/system-overview.md) and [../reference/configuration.md](../reference/configuration.md)
 
-Add a dedicated feature doc here when a behavior area grows beyond what belongs in the root README or reference docs.
+Add a dedicated feature doc here when another behavior area grows beyond what belongs in the root README or reference docs.

@@ -67,6 +67,7 @@ task check
 
 - CLI command behavior: `go test ./internal/cli`
 - config parsing, path safety, or workflow validation: `go test ./internal/config`
+- run-store persistence: `go test ./internal/runstore`
 - package boundaries or shared behavior: `go test ./internal/...`
 - task commands, toolchain docs, or build behavior: `task build` and `task tests`
 - concurrency-sensitive future runtime behavior: `task tests-race`

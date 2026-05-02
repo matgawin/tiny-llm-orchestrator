@@ -46,8 +46,8 @@ directory:
   `AGENTS.md`.
 - `orc init` creates and ignores `.orc/runs/`.
 - Persistent files under `.orc/` are user-owned and reviewable; runtime run
-  state belongs under the ignored `.orc/runs/` directory when run storage is
-  implemented.
+  state belongs under the ignored `.orc/runs/` directory; see
+  [run-store.md](run-store.md) for the durable file contract.
 - If `.gitignore` broadly ignores `.orc`, `orc init` fails and asks you to
   replace that broad rule with `.orc/runs/` so persistent config remains
   trackable.

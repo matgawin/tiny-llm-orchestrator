@@ -21,3 +21,4 @@ Contributors and maintainers who need quick factual lookup docs rather than narr
 ## Docs
 
 - [configuration.md](configuration.md): code-backed `.orc` config reference and schema notes
+- [run-store.md](run-store.md): durable `.orc/runs/<run-id>` file layout and event/status contract

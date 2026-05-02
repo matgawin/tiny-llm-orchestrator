@@ -21,7 +21,7 @@ Contributors, maintainers, reviewers, operators, and code agents landing in the 
 
 ## Repository At A Glance
 
-Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration. The current code scaffolds and validates `.orc` project configuration, workflow definitions, and role descriptors; future runtime packages will use that validated configuration to launch workers and persist inspectable run state.
+Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration. The current code scaffolds and validates `.orc` project configuration, workflow definitions, and role descriptors, and it provides the durable run-store primitives that future commands will use to persist inspectable run state.
 
 Runtime entrypoint:
 
@@ -44,14 +44,14 @@ Entrypoints:
 - [docs/testing/README.md](docs/testing/README.md): test strategy and local verification paths
 - [docs/operations/README.md](docs/operations/README.md): runtime stack notes
 - [docs/features/README.md](docs/features/README.md): durable behavior areas
-- [docs/reference/README.md](docs/reference/README.md): configuration lookup docs
+- [docs/reference/README.md](docs/reference/README.md): configuration and durable contract lookup docs
 
 ## Where To Look For X
 
 - CLI behavior: `internal/cli`
 - project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md)
 - future workflow transition logic: `internal/workflow`
-- future run persistence: `internal/runstore`
+- run persistence: `internal/runstore` and [docs/reference/run-store.md](docs/reference/run-store.md)
 - future worker process supervision: `internal/launcher`
 - local setup and troubleshooting: [docs/getting-started/README.md](docs/getting-started/README.md)
 - tests, local verification, and coverage expectations: [docs/testing/README.md](docs/testing/README.md)
@@ -69,7 +69,7 @@ Entrypoints:
 ### Runtime Packages
 
 - `internal/workflow`: future deterministic workflow transition package.
-- `internal/runstore`: future persistent run-state package.
+- `internal/runstore`: persistent run-state package.
 - `internal/launcher`: future external worker launcher package.
 
 ## Local Workflow Index
