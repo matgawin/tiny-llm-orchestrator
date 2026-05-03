@@ -122,4 +122,12 @@ The descriptor id must match the key used in `.orc/config.yaml`.
 
 ## Environment Variables
 
-The application currently has no runtime environment-variable configuration surface. Tooling-related environment variables, such as `BEADS_DIR` and `CODEX_BIN`, belong to the development shell and agent workflow rather than the `orc` app config schema.
+The application has no general runtime environment-variable configuration
+surface. Tooling-related environment variables such as `CODEX_BIN` belong to
+the development shell and agent workflow rather than the `orc` app config
+schema.
+
+`orc run start --bead <id>` observes inherited `BEADS_DIR` as command source
+metadata, not as a `.orc/config.yaml` schema field. See
+[../features/run-start.md](../features/run-start.md) for run-start task-source
+behavior.

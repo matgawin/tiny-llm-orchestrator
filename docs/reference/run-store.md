@@ -78,6 +78,8 @@ task/context.md
 task/snapshot.json
 ```
 
+Task artifact contents are caller-owned.
+
 ## Filesystem Safety
 
 `.orc`, `.orc/runs`, and each run directory must be real directories, not
@@ -231,6 +233,12 @@ Supported artifact kinds map to paths as follows:
 `task_context` and `task_snapshot` are singleton artifacts: each fixed path may
 be written once per run. Repeatable artifacts use six-digit sequence-prefixed
 filenames, such as `000004`.
+
+For runs created through `orc run start`, the run-start layer owns
+`task/context.md` and `task/snapshot.json` contents. The Run Store owns only
+their paths, singleton behavior, and event references. See
+[../features/run-start.md](../features/run-start.md#task-snapshot-schema) for
+the task snapshot schema.
 
 `followup` appends new content by rewriting `followups.md` before the
 `artifact.written` event is appended.

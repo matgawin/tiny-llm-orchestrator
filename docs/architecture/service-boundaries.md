@@ -25,6 +25,8 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `internal/cli` owns the command boundary.
 - `internal/initconfig` owns the project-local `orc init` scaffold.
 - `internal/config` owns `.orc` config loading, path safety, YAML parsing, workflow validation, and agent descriptor validation.
+- `internal/runstart` owns explicit task-context resolution for `orc run start`.
+  Feature semantics live in [../features/run-start.md](../features/run-start.md).
 - `internal/runstore` owns persistent run state under `.orc/runs/<run-id>`.
 - `internal/workflow` owns deterministic workflow transitions for validated workflow definitions and in-memory run state.
 - `internal/launcher` should own worker process launch and supervision.

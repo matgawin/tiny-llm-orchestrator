@@ -21,6 +21,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 
 ## Current Feature Areas
 
+- Run start and task context capture: [run-start.md](run-start.md)
 - Run-store behavior: currently documented in [../reference/run-store.md](../reference/run-store.md)
 - CLI command behavior: [../../README.md](../../README.md) and `internal/cli`
 - `.orc` config schema and validation: [../reference/configuration.md](../reference/configuration.md)

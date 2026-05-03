@@ -1,16 +1,20 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
+	"tiny-llm-orchestrator/orc/internal/runstart"
 )
 
 const (
 	appName        = "orc"
 	defaultVersion = "dev"
+	helpFlag       = "--help"
+	helpCommand    = "help"
 )
 
 var version = defaultVersion
@@ -28,7 +32,7 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 	}
 
 	switch args[0] {
-	case "-h", "--help", "help":
+	case "-h", helpFlag, helpCommand:
 		return printHelp(stdout)
 	case "version":
 		if _, err := fmt.Fprintf(stdout, "%s %s\n", appName, version); err != nil {
@@ -37,6 +41,8 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return nil
 	case "init":
 		return executeInit(args[1:], stdin, stdout, stderr)
+	case "run":
+		return executeRun(args[1:], stdin, stdout, stderr)
 	default:
 		if _, err := fmt.Fprintf(stderr, "%s: unknown command %q\n\n", appName, args[0]); err != nil {
 			return err
@@ -59,7 +65,7 @@ func executeInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 			opts.DryRun = true
 		case "--yes":
 			opts.Yes = true
-		case "-h", "--help", "help":
+		case "-h", helpFlag, helpCommand:
 			return printInitHelp(stdout)
 		default:
 			if _, err := fmt.Fprintf(stderr, "%s init: unknown flag %q\n\n", appName, arg); err != nil {
@@ -86,6 +92,92 @@ func executeInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error
 	return nil
 }
 
+func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return printRunHelp(stdout)
+	}
+	switch args[0] {
+	case "-h", helpFlag, helpCommand:
+		return printRunHelp(stdout)
+	case "start":
+		return executeRunStart(args[1:], stdin, stdout, stderr)
+	default:
+		if _, err := fmt.Fprintf(stderr, "%s run: unknown command %q\n\n", appName, args[0]); err != nil {
+			return err
+		}
+		if err := printRunHelp(stderr); err != nil {
+			return err
+		}
+		return fmt.Errorf("unknown run command: %s", args[0])
+	}
+}
+
+func executeRunStart(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	opts := runstart.Options{
+		Stdin: stdin,
+	}
+	stringFlags := map[string]*string{
+		"--workflow":           &opts.Workflow,
+		"--bead":               &opts.BeadID,
+		"--fallback-task-file": &opts.FallbackTaskFile,
+		"--task-file":          &opts.TaskFile,
+		"--task":               &opts.TaskText,
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if target, ok := stringFlags[arg]; ok {
+			if !assignFlagValue(args, &i, target) {
+				return runStartFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+			continue
+		}
+		switch arg {
+		case "-h", helpFlag, helpCommand:
+			return printRunStartHelp(stdout)
+		case "--task-stdin":
+			opts.TaskStdin = true
+		default:
+			return runStartFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
+		}
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	opts.Root = root
+	result, err := runstart.Start(context.Background(), opts)
+	if err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s run start: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "started run %s\n", result.RunID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func assignFlagValue(args []string, index *int, target *string) bool {
+	next := *index + 1
+	if next >= len(args) || args[next] == "" {
+		return false
+	}
+	*index = next
+	*target = args[next]
+	return true
+}
+
+func runStartFlagError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s run start: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	if helpErr := printRunStartHelp(stderr); helpErr != nil {
+		return helpErr
+	}
+	return err
+}
+
 func printHelp(w io.Writer) error {
 	_, err := fmt.Fprintf(w, `%s is the Tiny LLM Orchestrator control plane.
 
@@ -95,10 +187,46 @@ Usage:
 Available Commands:
   help        Show command help
   init        Scaffold project-local Tiny Orc config
+  run         Manage orchestration runs
   version     Print version information
 
 Flags:
   -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printRunHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run manages orchestration runs.
+
+Usage:
+  %s run [command]
+
+Available Commands:
+  start       Start a run from explicit task context
+
+Flags:
+  -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printRunStartHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run start creates a durable run from explicit task context.
+
+Usage:
+  %s run start --workflow <name> (--bead <id> [--fallback-task-file <path>] | --task-file <path> | --task <markdown> | --task-stdin)
+
+Flags:
+      --workflow <name>            Workflow to start
+      --bead <id>                  Read bead context through bd without mutating beads
+      --fallback-task-file <path>  Markdown task file to use if explicit bead lookup fails
+      --task-file <path>           Markdown task file to snapshot
+      --task <markdown>            Inline Markdown task context
+      --task-stdin                 Read Markdown task context from stdin
+  -h, --help                       Show command help
 `, appName, appName)
 
 	return err

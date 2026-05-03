@@ -54,7 +54,7 @@ The Go CLI owns deterministic behavior:
 
 Worker agents are treated as useful but unreliable executors. A worker succeeds only when it provides a valid structured report. If a worker exits without reporting, times out, reports invalid data, needs approval, or hits unclear scope, the CLI records that outcome and follows the workflow's deterministic retry or `blocked_for_human` policy.
 
-Beads remains the preferred external issue tracker when available. The CLI may read bead context, but v1 does not write bead notes or close beads. If beads is unavailable or a run is started without a bead, the CLI falls back to local Markdown task context. Task closure remains a manual human action after review.
+Beads remains the preferred external issue tracker when available. The CLI may read bead context, but v1 does not write bead notes or close beads. If beads is unavailable or a run is started without a bead, the CLI uses explicit local Markdown task context. Task closure remains a manual human action after review.
 
 ## Determinism Model
 
@@ -90,7 +90,7 @@ V1 should implement the smallest useful orchestrator loop.
 - `orc run start --workflow implementation --task-file <path>`
 - `orc run start --workflow implementation --task "..."`
 - `orc run start --workflow implementation --task-stdin`
-- `orc run start --workflow implementation` for interactive human use only
+- `orc run start --workflow implementation` is reserved for later interactive human use
 - `orc run status <run-id>`
 - `orc run next <run-id>`
 - `orc worker launch-next <run-id>`
@@ -401,13 +401,13 @@ Runs may use bead context, local Markdown task context, or an inline task prompt
 
 Beads are preferred when available because they are the project's external issue tracker. A run may start with `--bead <id>`, in which case the CLI imports read-only bead context into the run store. The orchestrator does not write bead notes in v1. Ready-for-review summaries may include suggested bead notes for the human to apply manually.
 
-If a bead id is explicitly provided and cannot be read, the run fails unless an explicit fallback task source is also provided, such as `--fallback-task-file <path>`. If no bead id is provided and beads are unavailable, the CLI uses local Markdown task context.
+If a bead id is explicitly provided and cannot be read, the run fails unless an explicit fallback task source is also provided, such as `--fallback-task-file <path>`. If no bead id is provided and beads are unavailable, the CLI uses explicit local Markdown task context.
 
 When beads are unavailable or the user does not want a bead-backed run, a run may start with `--task-file <path>`. The CLI copies or snapshots that Markdown task file into the run store as the task context. Markdown task context is local to the run and does not imply any external issue lifecycle.
 
-When no bead id or task file is provided, the CLI may create a local Markdown task file from `--task`, `--task-stdin`, or an interactive editor prompt, then snapshot that file into the run store. In noninteractive mode, `run start` must receive `--bead`, `--task-file`, `--task`, or `--task-stdin`; it must not open an editor or prompt.
+When no bead id or task file is provided, the CLI may create local Markdown task context from `--task` or `--task-stdin`, then snapshot that context into the run store. Interactive editor prompting is reserved for a later slice. In noninteractive mode, `run start` must receive `--bead`, `--task-file`, `--task`, or `--task-stdin`; it must not open an editor or prompt.
 
-Orchestrator usage must use noninteractive task input. Plain `orc run start --workflow implementation` is for humans only and may prompt or open an editor.
+Orchestrator usage must use noninteractive task input. Plain `orc run start --workflow implementation` is reserved for humans and fails until interactive prompting is implemented.
 
 Workflows may declare whether task context is required and whether beads are required, optional, or disabled. The built-in implementation workflow should allow bead context, Markdown task-file context, or CLI-created local Markdown task context.
 
@@ -452,16 +452,16 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 - Direct filesystem report persistence is the v1 transport.
 - A localhost HTTP report server is deferred until direct reports are proven insufficient.
 - Logs are debugging artifacts and fallback evidence, not the primary integration surface.
-- Dirty working copy at start stops the run by default unless the workflow explicitly allows it.
-- VCS inspection prefers jj, then git, then no VCS.
-- The runtime records pre-run and post-run VCS summaries.
-- The runtime flags unexpected changed paths without reverting them.
+- After the VCS/dirty-start slice, dirty working copy at start stops the run by default unless the workflow explicitly allows it.
+- VCS inspection belongs to the VCS/dirty-start slice and prefers jj, then git, then no VCS.
+- The VCS/dirty-start slice records pre-run and post-run VCS summaries.
+- The VCS/dirty-start slice flags unexpected changed paths without reverting them.
 - Beads remains external.
 - Beads are optional in v1.
 - The CLI may import read-only bead context when a bead id is provided.
 - If an explicit bead id cannot be read, the run fails unless an explicit fallback task source is provided.
 - The CLI supports local Markdown task context when beads are unavailable or not used.
-- If no bead id or task file is provided, the CLI creates local Markdown task context from `--task`, `--task-stdin`, or an interactive prompt before starting the run.
+- If no bead id or task file is provided, the CLI creates local Markdown task context from `--task` or `--task-stdin` before starting the run; interactive prompting is reserved for a later slice.
 - Noninteractive run start must not prompt; it requires bead context or an explicit task source.
 - The orchestrator does not write bead notes in v1.
 - Ready-for-review summaries may include suggested bead notes for the human to apply manually.
