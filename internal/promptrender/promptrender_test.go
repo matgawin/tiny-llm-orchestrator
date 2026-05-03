@@ -1,0 +1,521 @@
+package promptrender
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
+)
+
+func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n\nBuild prompt rendering.\n", fixedPromptTime().Add(time.Minute))
+	if _, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindReport,
+		Name:    "plan",
+		Content: []byte("# Prior Plan\n\nUse existing run-store artifacts.\n"),
+		Time:    fixedPromptTime().Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteArtifact report returned error: %v", err)
+	}
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
+		Time:      fixedPromptTime().Add(3 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	if result.Ref.Kind != runstore.KindPrompt || result.Ref.Path != "prompts/000004-plan.md" {
+		t.Fatalf("prompt ref = %+v, want sequence 4 plan prompt", result.Ref)
+	}
+	persisted := readPromptFile(t, filepath.Join(root, ".orc", "runs", runID, filepath.FromSlash(result.Ref.Path)))
+	if !bytes.Equal(result.Content, persisted) {
+		t.Fatal("returned content differs from persisted prompt")
+	}
+	prompt := string(result.Content)
+	assertPromptContainsAll(t, prompt, []string{
+		"# Tiny Orc Worker Prompt\n",
+		"- run_id: `prompt-run`\n",
+		"- step_id: `plan`\n",
+		"- agent_id: `planner`\n",
+		"- attempt_id: `attempt-001`\n",
+		"Creates implementation plans and scope boundaries.",
+		"Plan the work and report readiness.",
+		"# Task\n\nBuild prompt rendering.",
+		"### reports/000003-plan.md\n",
+		"# Prior Plan\n\nUse existing run-store artifacts.",
+		"`done/ready`",
+		"`blocked/blocked`",
+		"`failed/error`",
+		"orc report --run prompt-run --step plan --agent planner --attempt attempt-001 --status <status> --result <result> --summary \"<summary>\"",
+	})
+
+	loaded, err := store.Load(runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Status.LastSequence != 4 {
+		t.Fatalf("last sequence = %d, want 4", loaded.Status.LastSequence)
+	}
+	if got := latestArtifactKind(loaded.Status.Artifacts); got != runstore.KindPrompt {
+		t.Fatalf("latest artifact kind = %s, want prompt", got)
+	}
+	if got := latestEventType(t, loaded.Events); got != "artifact.written" {
+		t.Fatalf("latest event type = %s, want artifact.written", got)
+	}
+}
+
+func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+
+	result, err := Render(context.Background(), Options{
+		Root:                root,
+		RunID:               runID,
+		StepID:              "test",
+		AgentID:             "tester",
+		AttemptID:           "attempt-test",
+		AllowUnselectedStep: true,
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	prompt := string(result.Content)
+	assertPromptContainsAll(t, prompt, []string{
+		"- step_id: `test`\n",
+		"- agent_id: `tester`\n",
+		"`done/passed`",
+		"`done/failed`",
+		"`blocked/blocked`",
+	})
+	if strings.Contains(prompt, "approved") || strings.Contains(prompt, "changes_requested") {
+		t.Fatalf("tester prompt includes reviewer-only results:\n%s", prompt)
+	}
+}
+
+func TestRenderRefusesNonSelectedStepUnlessAllowed(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+
+	_, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "test",
+		AgentID:   "tester",
+		AttemptID: "attempt-test",
+	})
+	if err == nil {
+		t.Fatal("Render returned nil error, want non-selected step refusal")
+	}
+	if !strings.Contains(err.Error(), `step "test" is not selected`) {
+		t.Fatalf("error = %q, want non-selected step context", err)
+	}
+	loaded, loadErr := store.Load(runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if got := countArtifacts(loaded.Status.Artifacts, runstore.KindPrompt); got != 0 {
+		t.Fatalf("prompt artifacts = %d, want none after refusal", got)
+	}
+}
+
+func TestRenderRefusesTerminalRun(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusReadyForHuman)
+
+	_, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
+	})
+	if err == nil {
+		t.Fatal("Render returned nil error, want terminal refusal")
+	}
+	if !strings.Contains(err.Error(), "has no selected runnable step") {
+		t.Fatalf("error = %q, want no selected runnable step", err)
+	}
+}
+
+func TestRenderRequiresCallerProvidedAttemptMetadata(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+
+	_, err := Render(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		StepID:  "plan",
+		AgentID: "planner",
+	})
+	if err == nil || !strings.Contains(err.Error(), "attempt id is required") {
+		t.Fatalf("Render error = %v, want missing attempt id", err)
+	}
+}
+
+func TestRenderHonorsCanceledContextBeforeWritingPrompt(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := Render(ctx, Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Render error = %v, want context canceled", err)
+	}
+	loaded, loadErr := store.Load(runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if got := countArtifacts(loaded.Status.Artifacts, runstore.KindPrompt); got != 0 {
+		t.Fatalf("prompt artifacts = %d, want none after canceled context", got)
+	}
+}
+
+func TestRenderReturnsCommittedPromptRefOnStatusMaterializationFailure(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	runPath := filepath.Join(root, ".orc", "runs", runID)
+	denyStatusMaterializationOrSkip(t, runPath)
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
+	})
+	var materializationErr *runstore.StatusMaterializationError
+	if !errors.As(err, &materializationErr) {
+		t.Fatalf("Render error = %T %v, want StatusMaterializationError", err, err)
+	}
+	if result.Ref.Kind != runstore.KindPrompt || result.Ref.Path == "" || result.Path == "" {
+		t.Fatalf("result = %+v, want committed prompt ref despite error", result)
+	}
+	persisted := readPromptFile(t, filepath.Join(runPath, filepath.FromSlash(result.Ref.Path)))
+	if !bytes.Equal(result.Content, persisted) {
+		t.Fatal("returned content differs from committed prompt")
+	}
+}
+
+func TestRenderRejectsInvalidRequestedMetadataBeforeWritingPrompt(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Options
+		want string
+	}{
+		{
+			name: "undeclared step",
+			opts: Options{
+				StepID:              "deploy",
+				AgentID:             "tester",
+				AttemptID:           "attempt-001",
+				AllowUnselectedStep: true,
+			},
+			want: `step "deploy" is not declared`,
+		},
+		{
+			name: "agent mismatch",
+			opts: Options{
+				StepID:              "test",
+				AgentID:             "planner",
+				AttemptID:           "attempt-001",
+				AllowUnselectedStep: true,
+			},
+			want: `step "test" uses agent "tester", not "planner"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writePromptProject(t, root)
+			runID := createPromptRun(t, root, workflow.RunStatusRunning)
+			tt.opts.Root = root
+			tt.opts.RunID = runID
+
+			_, err := Render(context.Background(), tt.opts)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Render error = %v, want %q", err, tt.want)
+			}
+			store := openPromptStore(t, root)
+			loaded, loadErr := store.Load(runID)
+			if loadErr != nil {
+				t.Fatalf("Load returned error: %v", loadErr)
+			}
+			if got := countArtifacts(loaded.Status.Artifacts, runstore.KindPrompt); got != 0 {
+				t.Fatalf("prompt artifacts = %d, want none after invalid metadata", got)
+			}
+		})
+	}
+}
+
+func TestRenderRequiresTaskContextArtifact(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+
+	_, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no task context artifact") {
+		t.Fatalf("Render error = %v, want missing task context", err)
+	}
+}
+
+func TestShellQuoteQuotesOpaqueAttemptIDs(t *testing.T) {
+	got := shellQuote("attempt with space")
+	if got != "'attempt with space'" {
+		t.Fatalf("shellQuote returned %q, want quoted opaque id", got)
+	}
+}
+
+func writePromptProject(t *testing.T, root string) {
+	t.Helper()
+	orcDir := filepath.Join(root, ".orc")
+	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
+		t.Fatalf("create workflows dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
+		t.Fatalf("create agents dir: %v", err)
+	}
+	writePromptFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+  tester: agents/tester.md
+  reviewer: agents/reviewer.md
+`)
+	writePromptFile(t, filepath.Join(orcDir, "agents", "planner.md"), `---
+id: planner
+role: planner
+description: Creates implementation plans and scope boundaries.
+---
+
+Plan the work and report readiness.
+`)
+	writePromptFile(t, filepath.Join(orcDir, "agents", "tester.md"), `---
+id: tester
+role: tester
+description: Runs verification and reports pass, fail, or blocked outcomes.
+---
+
+Run relevant tests and report exact command results.
+`)
+	writePromptFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), `---
+id: reviewer
+role: reviewer
+description: Reviews completed work.
+---
+
+Review the change and report approval or requested changes.
+`)
+	writePromptFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries:
+    failed/error: 0
+steps:
+  plan:
+    agent: planner
+    allowed_results:
+      done: [ready]
+      blocked: [blocked]
+      failed: [error]
+    on:
+      done/ready: test
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+  test:
+    agent: tester
+    allowed_results:
+      done: [passed, failed]
+      blocked: [blocked]
+      failed: [error]
+    on:
+      done/passed: review
+      done/failed: plan
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+  review:
+    agent: reviewer
+    allowed_results:
+      done: [approved, changes_requested]
+      blocked: [blocked]
+      failed: [error]
+    on:
+      done/approved: ready_for_human
+      done/changes_requested: plan
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+`)
+}
+
+func createPromptRun(t *testing.T, root, state string) string {
+	t.Helper()
+	store := openPromptStore(t, root)
+	run, err := store.Create(runstore.CreateRunRequest{
+		RunID:    "prompt-run",
+		Workflow: "implementation",
+		Time:     fixedPromptTime(),
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if state != workflow.RunStatusRunning {
+		if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: state, Time: fixedPromptTime().Add(time.Minute)}); err != nil {
+			t.Fatalf("UpdateStatus returned error: %v", err)
+		}
+	}
+	return run.ID
+}
+
+func openPromptStore(t *testing.T, root string) *runstore.Store {
+	t.Helper()
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	return store
+}
+
+func writeTaskContextArtifact(t *testing.T, store *runstore.Store, runID, content string, at time.Time) {
+	t.Helper()
+	if _, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindTaskContext,
+		Name:    "task",
+		Content: []byte(content),
+		Time:    at,
+	}); err != nil {
+		t.Fatalf("WriteArtifact task returned error: %v", err)
+	}
+}
+
+func latestArtifactKind(refs []runstore.ArtifactRef) runstore.ArtifactKind {
+	if len(refs) == 0 {
+		return ""
+	}
+	return refs[len(refs)-1].Kind
+}
+
+func latestEventType(t *testing.T, events []runstore.Event) string {
+	t.Helper()
+	if len(events) == 0 {
+		t.Fatal("events are empty")
+	}
+	var payload struct {
+		Artifact runstore.ArtifactRef `json:"artifact"`
+	}
+	if err := json.Unmarshal(events[len(events)-1].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal latest payload: %v", err)
+	}
+	if payload.Artifact.Kind != runstore.KindPrompt {
+		t.Fatalf("latest artifact payload = %+v, want prompt", payload.Artifact)
+	}
+	return events[len(events)-1].Type
+}
+
+func countArtifacts(refs []runstore.ArtifactRef, kind runstore.ArtifactKind) int {
+	count := 0
+	for _, ref := range refs {
+		if ref.Kind == kind {
+			count++
+		}
+	}
+	return count
+}
+
+func assertPromptContainsAll(t *testing.T, prompt string, wants []string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func readPromptFile(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return content
+}
+
+func writePromptFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func denyStatusMaterializationOrSkip(t *testing.T, runPath string) {
+	t.Helper()
+	if err := os.Chmod(runPath, 0o500); err != nil {
+		t.Fatalf("chmod run dir read-only: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(runPath, 0o750)
+	})
+	temp, err := os.CreateTemp(runPath, ".status-probe-*.tmp")
+	if err == nil {
+		name := temp.Name()
+		_ = temp.Close()
+		_ = os.Remove(name)
+		t.Skip("chmod did not deny temp file creation in run directory")
+	}
+}
+
+func fixedPromptTime() time.Time {
+	return time.Date(2026, 5, 3, 21, 30, 0, 0, time.UTC)
+}

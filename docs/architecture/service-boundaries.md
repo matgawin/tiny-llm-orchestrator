@@ -30,6 +30,9 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `internal/runinspect` owns read-only run inspection for `orc run status` and
   `orc run next`. Feature semantics live in
   [../features/run-inspection.md](../features/run-inspection.md).
+- `internal/promptrender` owns role-specific worker prompt rendering and prompt
+  artifact persistence. Feature semantics live in
+  [../features/worker-prompt-rendering.md](../features/worker-prompt-rendering.md).
 - `internal/runstore` owns persistent run state under `.orc/runs/<run-id>`.
 - `internal/workflow` owns deterministic workflow transitions for validated workflow definitions and in-memory run state.
 - `internal/launcher` should own worker process launch and supervision.

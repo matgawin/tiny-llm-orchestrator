@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -281,6 +282,35 @@ func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, err
 		return ref, err
 	}
 	return ref, nil
+}
+
+// ReadArtifact reads a persisted artifact through a validated run-store path.
+func (s *Store) ReadArtifact(runID string, ref ArtifactRef) ([]byte, error) {
+	if err := validateRunID(runID); err != nil {
+		return nil, err
+	}
+	run, err := s.load(runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateArtifactRef(ref, 0); err != nil {
+		return nil, err
+	}
+	if !slices.Contains(run.Status.Artifacts, ref) {
+		return nil, fmt.Errorf("artifact %s is not recorded for run %q", ref.Path, runID)
+	}
+	if err := validateArtifactParentDir(run.Path, ref.Path); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(run.Path, filepath.FromSlash(ref.Path))
+	if err := validateRegularFile(path, "artifact "+ref.Path); err != nil {
+		return nil, err
+	}
+	content, err := os.ReadFile(path) // #nosec G304 -- path is scoped to the validated run directory.
+	if err != nil {
+		return nil, err
+	}
+	return content, nil
 }
 
 func (s *Store) runDir(runID string) string {

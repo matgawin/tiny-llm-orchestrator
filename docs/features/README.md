@@ -23,6 +23,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 
 - Run start and task context capture: [run-start.md](run-start.md)
 - Run inspection commands: [run-inspection.md](run-inspection.md)
+- Worker prompt rendering: [worker-prompt-rendering.md](worker-prompt-rendering.md)
 - Run-store behavior: currently documented in [../reference/run-store.md](../reference/run-store.md)
 - CLI command behavior: [../../README.md](../../README.md) and `internal/cli`
 - `.orc` config schema and validation: [../reference/configuration.md](../reference/configuration.md)

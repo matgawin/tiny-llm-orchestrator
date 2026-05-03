@@ -248,6 +248,53 @@ func TestWriteArtifactPersistsSupportedArtifactsAndLoadsRefs(t *testing.T) {
 	}
 }
 
+func TestReadArtifactReadsRecordedArtifact(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "read-artifact")
+	ref, err := store.WriteArtifact(run.ID, Artifact{
+		Kind:    KindPrompt,
+		Name:    "plan",
+		Content: []byte("Prompt\n"),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact returned error: %v", err)
+	}
+
+	content, err := store.ReadArtifact(run.ID, ref)
+	if err != nil {
+		t.Fatalf("ReadArtifact returned error: %v", err)
+	}
+	if string(content) != "Prompt\n" {
+		t.Fatalf("artifact content = %q, want prompt content", string(content))
+	}
+}
+
+func TestReadArtifactRejectsUnrecordedRefs(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "unrecorded-artifact")
+
+	_, err := store.ReadArtifact(run.ID, ArtifactRef{
+		Kind:          KindReport,
+		Path:          "reports/000002-plan.md",
+		Name:          "plan",
+		EventSequence: 2,
+	})
+	requireErrorContains(t, err, "is not recorded")
+}
+
+func TestReadArtifactRejectsMalformedRefs(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "malformed-artifact-ref")
+
+	_, err := store.ReadArtifact(run.ID, ArtifactRef{
+		Kind:          KindReport,
+		Path:          "prompts/000002-plan.md",
+		Name:          "plan",
+		EventSequence: 2,
+	})
+	requireErrorContains(t, err, "does not match kind")
+}
+
 func assertLatestArtifactWrite(t *testing.T, run *Run, artifact Artifact, ref ArtifactRef) {
 	t.Helper()
 	artifactPath := filepath.Join(run.Path, filepath.FromSlash(ref.Path))

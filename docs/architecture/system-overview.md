@@ -32,10 +32,10 @@ The CLI currently exposes help, version, init, `run start`, and read-only
 `run status` / `run next` behavior.
 
 Config loading and validation, deterministic workflow transitions,
-task-context resolution, inspection, and durable run persistence are
-implemented as package logic and are exercised by tests and fixtures. Later run
-commands will consume the run store and workflow engine for prompt rendering,
-report handling, and worker launch.
+task-context resolution, inspection, prompt rendering, and durable run
+persistence are implemented as package logic and are exercised by tests and
+fixtures. Later run commands will consume the run store and workflow engine for
+report handling and worker launch.
 
 ## Core Data Flow
 
@@ -60,6 +60,8 @@ These packages define or reserve ownership for orchestration behavior outside th
 - `internal/runstart`: explicit task-context resolution and run creation for
   `orc run start`.
 - `internal/runinspect`: read-only run status and next-action inspection.
+- `internal/promptrender`: role-specific worker prompt rendering for selected
+  workflow steps.
 - `internal/workflow`: deterministic workflow graph transitions.
 - `internal/launcher`: future worker process start and supervision.
 
