@@ -73,6 +73,63 @@ func TestExecuteRunStartInlineTaskCreatesRun(t *testing.T) {
 	}
 }
 
+func TestExecuteRunInspectCommands(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args func(runID string) []string
+		want string
+	}{
+		{
+			name: "status",
+			args: func(runID string) []string { return []string{"run", "status", runID} },
+			want: "state: running",
+		},
+		{
+			name: "next",
+			args: func(runID string) []string { return []string{"run", "next", runID} },
+			want: "decision: select_step",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+			output := executeCLICommand(t, tc.args(result.runID))
+			if !strings.Contains(output, tc.want) {
+				t.Fatalf("%s output missing %q:\n%s", tc.name, tc.want, output)
+			}
+		})
+	}
+}
+
+func TestExecuteRunInspectUnknownRunFailsClearly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "status", args: []string{"run", "status", "missing-run"}, want: `orc run status: run "missing-run" not found`},
+		{name: "next", args: []string{"run", "next", "missing-run"}, want: `orc run next: run "missing-run" not found`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+
+			var stdout, stderr bytes.Buffer
+			if err := Execute(tc.args, &stdout, &stderr); err == nil {
+				t.Fatal("Execute returned nil error, want missing run failure")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if got := stderr.String(); !strings.Contains(got, tc.want) {
+				t.Fatalf("stderr = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExecuteRunStartStdinTaskCreatesRun(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
@@ -365,6 +422,18 @@ func executeCLIRunStart(t *testing.T, root string, sourceArgs []string, stdin *s
 		runID:    runID,
 		snapshot: readCLISnapshot(t, root, runID),
 	}
+}
+
+func executeCLICommand(t *testing.T, args []string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	if err := Execute(args, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	return stdout.String()
 }
 
 func cliStartedRunID(t *testing.T, output string) string {

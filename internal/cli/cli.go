@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
+	"tiny-llm-orchestrator/orc/internal/runinspect"
 	"tiny-llm-orchestrator/orc/internal/runstart"
 )
 
@@ -101,6 +102,10 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return printRunHelp(stdout)
 	case "start":
 		return executeRunStart(args[1:], stdin, stdout, stderr)
+	case "status":
+		return executeRunInspect("status", args[1:], stdout, stderr, runinspect.Status)
+	case "next":
+		return executeRunInspect("next", args[1:], stdout, stderr, runinspect.Next)
 	default:
 		if _, err := fmt.Fprintf(stderr, "%s run: unknown command %q\n\n", appName, args[0]); err != nil {
 			return err
@@ -110,6 +115,31 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		}
 		return fmt.Errorf("unknown run command: %s", args[0])
 	}
+}
+
+func executeRunInspect(command string, args []string, stdout, stderr io.Writer, inspect func(context.Context, runinspect.Options) error) error {
+	if len(args) != 1 || args[0] == "" {
+		if _, err := fmt.Fprintf(stderr, "%s run %s: requires <run-id>\n", appName, command); err != nil {
+			return err
+		}
+		return fmt.Errorf("run %s requires run id", command)
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	opts := runinspect.Options{
+		Root:   root,
+		RunID:  args[0],
+		Stdout: stdout,
+	}
+	if err := inspect(context.Background(), opts); err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s run %s: %v\n", appName, command, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	return nil
 }
 
 func executeRunStart(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -204,7 +234,9 @@ Usage:
   %s run [command]
 
 Available Commands:
+  next        Inspect the next workflow action without launching it
   start       Start a run from explicit task context
+  status      Show persisted run state
 
 Flags:
   -h, --help  Show command help

@@ -27,6 +27,9 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `internal/config` owns `.orc` config loading, path safety, YAML parsing, workflow validation, and agent descriptor validation.
 - `internal/runstart` owns explicit task-context resolution for `orc run start`.
   Feature semantics live in [../features/run-start.md](../features/run-start.md).
+- `internal/runinspect` owns read-only run inspection for `orc run status` and
+  `orc run next`. Feature semantics live in
+  [../features/run-inspection.md](../features/run-inspection.md).
 - `internal/runstore` owns persistent run state under `.orc/runs/<run-id>`.
 - `internal/workflow` owns deterministic workflow transitions for validated workflow definitions and in-memory run state.
 - `internal/launcher` should own worker process launch and supervision.
