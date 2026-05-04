@@ -27,7 +27,7 @@ Contributors navigating the codebase or deciding where new code and docs should 
 - `internal/config`: `.orc` project config loading, YAML parsing, path safety, workflow validation, and agent descriptor validation.
 - `internal/workflow`: deterministic workflow graph transition logic.
 - `internal/runstore`: persistent orchestration run state.
-- `internal/launcher`: future worker process launcher and supervision code.
+- `internal/launcher`: worker process launcher and supervision code.
 - `docs`: durable repository documentation.
 - `.agents`: Codex guidance and repo-local workflow skills.
 - `nix`, `flake.nix`, `flake.lock`: reproducible development shell and package definition.

@@ -25,7 +25,8 @@ Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration.
 The current code scaffolds and validates `.orc` configuration, starts durable
 runs from explicit bead or Markdown task context, evaluates deterministic
 workflow transitions, exposes read-only run inspection, renders internal worker
-prompts, and provides durable run-store primitives.
+prompts, launches workflow-selected worker processes, and provides durable
+run-store primitives.
 
 Runtime entrypoint:
 
@@ -56,10 +57,10 @@ Entrypoints:
 - run start and task context capture: `internal/runstart` and [docs/features/run-start.md](docs/features/run-start.md)
 - run inspection behavior: [docs/features/run-inspection.md](docs/features/run-inspection.md)
 - worker prompt rendering: `internal/promptrender` and [docs/features/worker-prompt-rendering.md](docs/features/worker-prompt-rendering.md)
+- worker launching and process supervision: `internal/launcher` and [docs/features/worker-launching.md](docs/features/worker-launching.md)
 - project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md)
 - deterministic workflow transition logic: `internal/workflow` and [docs/reference/workflow-engine.md](docs/reference/workflow-engine.md)
 - run persistence: `internal/runstore` and [docs/reference/run-store.md](docs/reference/run-store.md)
-- future worker process supervision: `internal/launcher`
 - local setup and troubleshooting: [docs/getting-started/README.md](docs/getting-started/README.md)
 - tests, local verification, and coverage expectations: [docs/testing/README.md](docs/testing/README.md)
 - contributor workflow and repo rules: [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/contributing/README.md](docs/contributing/README.md)
@@ -80,7 +81,7 @@ Entrypoints:
 - `internal/runinspect`: read-only run inspection command implementation.
 - `internal/promptrender`: internal role-specific worker prompt renderer.
 - `internal/runstore`: persistent run-state package.
-- `internal/launcher`: future external worker launcher package.
+- `internal/launcher`: external worker launcher package.
 
 ## Local Workflow Index
 

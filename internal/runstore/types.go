@@ -9,11 +9,18 @@ import (
 const (
 	schemaVersion = 1
 
-	stateRunning = "running"
+	stateRunning        = "running"
+	attemptStatusFailed = "failed"
 
-	eventRunCreated      = "run.created"
-	eventStatusUpdated   = "status.updated"
-	eventArtifactWritten = "artifact.written"
+	eventRunCreated       = "run.created"
+	eventStatusUpdated    = "status.updated"
+	eventArtifactWritten  = "artifact.written"
+	eventAttemptStarted   = "attempt.started"
+	eventAttemptPrompted  = "attempt.prompted"
+	eventAttemptLogged    = "attempt.logged"
+	eventAttemptProcess   = "attempt.process_started"
+	eventAttemptFinished  = "attempt.finished"
+	eventAttemptRecovered = "attempt.recovered"
 
 	KindTaskContext  ArtifactKind = "task_context"
 	KindTaskSnapshot ArtifactKind = "task_snapshot"
@@ -57,6 +64,8 @@ type Status struct {
 	UpdatedAt     time.Time     `json:"updated_at"`
 	LastSequence  int           `json:"last_sequence"`
 	Artifacts     []ArtifactRef `json:"artifacts"`
+	ActiveAttempt *Attempt      `json:"active_attempt,omitempty"`
+	Attempts      []Attempt     `json:"attempts"`
 }
 
 // StatusUpdate describes latest-state fields to materialize with an event.
@@ -94,6 +103,40 @@ type ArtifactRef struct {
 	EventSequence int          `json:"event_sequence"`
 }
 
+// Attempt is a durable worker attempt materialized from attempt events.
+type Attempt struct {
+	RunID            string       `json:"run_id"`
+	StepID           string       `json:"step_id"`
+	AgentID          string       `json:"agent_id"`
+	AttemptID        string       `json:"attempt_id"`
+	State            string       `json:"state"`
+	Status           string       `json:"status,omitempty"`
+	Result           string       `json:"result,omitempty"`
+	PID              int          `json:"pid,omitempty"`
+	ProcessStartTime string       `json:"process_start_time,omitempty"`
+	ExitCode         *int         `json:"exit_code,omitempty"`
+	ExitState        string       `json:"exit_state,omitempty"`
+	Timeout          string       `json:"timeout"`
+	ReportExitGrace  string       `json:"report_exit_grace"`
+	PromptRef        *ArtifactRef `json:"prompt_ref,omitempty"`
+	LogRef           *ArtifactRef `json:"log_ref,omitempty"`
+	StartedAt        time.Time    `json:"started_at"`
+	FinishedAt       *time.Time   `json:"finished_at,omitempty"`
+	Recovered        bool         `json:"recovered,omitempty"`
+}
+
+const (
+	AttemptStateStarting      = "starting"
+	AttemptStateActive        = "active"
+	AttemptStateMissingReport = "missing_report"
+	AttemptStateProcessError  = "process_error"
+	AttemptStateTimedOut      = "timed_out"
+
+	AttemptResultMissingReport = "missing_report"
+	AttemptResultProcessError  = "process_error"
+	AttemptResultTimeout       = "timeout"
+)
+
 type createRunPayload struct {
 	Workflow string `json:"workflow"`
 	TaskSlug string `json:"task_slug,omitempty"`
@@ -105,6 +148,80 @@ type statusUpdatedPayload struct {
 
 type artifactWrittenPayload struct {
 	Artifact ArtifactRef `json:"artifact"`
+}
+
+// StartAttemptRequest describes the active worker attempt to persist.
+type StartAttemptRequest struct {
+	StepID          string
+	AgentID         string
+	AttemptID       string
+	Timeout         time.Duration
+	ReportExitGrace time.Duration
+	Time            time.Time
+}
+
+// AttemptPromptRequest links the rendered prompt artifact to the active attempt.
+type AttemptPromptRequest struct {
+	AttemptID string
+	PromptRef ArtifactRef
+	Time      time.Time
+}
+
+// AttemptLogRequest links a log artifact to the active attempt.
+type AttemptLogRequest struct {
+	AttemptID string
+	LogRef    ArtifactRef
+	Time      time.Time
+}
+
+// AttemptProcessRequest records process metadata for the active attempt.
+type AttemptProcessRequest struct {
+	AttemptID        string
+	PID              int
+	ProcessStartTime string
+	Time             time.Time
+}
+
+// FinishAttemptRequest terminalizes the active attempt with a synthesized outcome.
+type FinishAttemptRequest struct {
+	AttemptID string
+	State     string
+	Status    string
+	Result    string
+	ExitCode  *int
+	ExitState string
+	LogRef    *ArtifactRef
+	Time      time.Time
+}
+
+type attemptStartedPayload struct {
+	Attempt Attempt `json:"attempt"`
+}
+
+type attemptPromptedPayload struct {
+	AttemptID string      `json:"attempt_id"`
+	PromptRef ArtifactRef `json:"prompt_ref"`
+}
+
+type attemptLoggedPayload struct {
+	AttemptID string      `json:"attempt_id"`
+	LogRef    ArtifactRef `json:"log_ref"`
+}
+
+type attemptProcessPayload struct {
+	AttemptID        string `json:"attempt_id"`
+	PID              int    `json:"pid"`
+	ProcessStartTime string `json:"process_start_time,omitempty"`
+}
+
+type attemptFinishedPayload struct {
+	AttemptID string       `json:"attempt_id"`
+	State     string       `json:"state"`
+	Status    string       `json:"status"`
+	Result    string       `json:"result"`
+	ExitCode  *int         `json:"exit_code,omitempty"`
+	ExitState string       `json:"exit_state,omitempty"`
+	LogRef    *ArtifactRef `json:"log_ref,omitempty"`
 }
 
 // StatusMaterializationError means durable event/artifact state committed, but status.json was not refreshed.

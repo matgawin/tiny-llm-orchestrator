@@ -13,11 +13,16 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
-const notAvailable = "not available"
+const (
+	notAvailable         = "not available"
+	none                 = "none"
+	pendingWorkerOutcome = "pending_worker_outcome"
+)
 
 // Options describes a read-only run inspection request.
 type Options struct {
@@ -81,31 +86,23 @@ func loadProjectRun(opts Options) (config.Workflow, *runstore.Run, error) {
 	if opts.RunID == "" {
 		return config.Workflow{}, nil, errors.New("run id is required")
 	}
-	project, err := config.Load(opts.Root)
-	if err != nil {
-		return config.Workflow{}, nil, fmt.Errorf("load project config: %w", err)
-	}
-	store, err := runstore.Open(project.Root)
-	if err != nil {
-		return config.Workflow{}, nil, err
-	}
-	run, err := store.Load(opts.RunID)
+	loaded, err := runcontext.Load(opts.Root, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return config.Workflow{}, nil, fmt.Errorf("run %q not found", opts.RunID)
 		}
 		return config.Workflow{}, nil, err
 	}
-	workflowConfig, ok := project.Workflows[run.Status.Workflow]
-	if !ok {
-		return config.Workflow{}, nil, fmt.Errorf("workflow %q from run %q is not configured", run.Status.Workflow, run.ID)
-	}
-	return workflowConfig, run, nil
+	return loaded.Workflow, loaded.Run, nil
 }
 
 func evaluate(workflowConfig config.Workflow, run *runstore.Run) (workflow.Decision, error) {
+	if _, ok := runstore.PendingLauncherOutcome(run.Status); ok {
+		return workflow.Decision{Kind: workflow.DecisionTerminal, RunStatus: pendingWorkerOutcome}, nil
+	}
 	state := workflow.RunState{
-		Status: run.Status.State,
+		Status:        run.Status.State,
+		ActiveAttempt: run.Status.ActiveAttempt != nil,
 	}
 	decision, err := workflow.Evaluate(workflowConfig, state)
 	if err != nil {
@@ -121,7 +118,7 @@ func renderStatus(w io.Writer, run *runstore.Run, decision workflow.Decision) {
 	_, _ = fmt.Fprintf(w, "updated_at: %s\n", formatTime(run.Status.UpdatedAt))
 	_, _ = fmt.Fprintf(w, "last_sequence: %d\n", run.Status.LastSequence)
 	_, _ = fmt.Fprintf(w, "selected_step: %s\n", selectedStep(decision))
-	_, _ = fmt.Fprintf(w, "active_attempt: %s\n", notAvailable)
+	_, _ = fmt.Fprintf(w, "active_attempt: %s\n", activeAttemptValue(run.Status.ActiveAttempt))
 	_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", terminalReason(decision))
 	reports := reportPaths(run.Status.Artifacts)
 	printReportPaths(w, reports)
@@ -138,6 +135,13 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 		_, _ = fmt.Fprintf(w, "selected_step: %s\n", decision.Step)
 		_, _ = fmt.Fprintf(w, "agent: %s\n", step.Agent)
 		_, _ = fmt.Fprintln(w, "launch: not launched")
+	case workflow.DecisionWaitActiveAttempt:
+		_, _ = fmt.Fprintf(w, "active_attempt: %s\n", activeAttemptValue(run.Status.ActiveAttempt))
+		if run.Status.ActiveAttempt != nil {
+			_, _ = fmt.Fprintf(w, "selected_step: %s\n", run.Status.ActiveAttempt.StepID)
+			_, _ = fmt.Fprintf(w, "agent: %s\n", run.Status.ActiveAttempt.AgentID)
+		}
+		_, _ = fmt.Fprintln(w, "launch: already active")
 	case workflow.DecisionTerminal:
 		_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", terminalReason(decision))
 		_, _ = fmt.Fprintln(w, "launch: no worker should launch")
@@ -145,6 +149,13 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 		printReportPaths(w, reports)
 		printTerminalHumanState(w, run, reports)
 	}
+}
+
+func activeAttemptValue(attempt *runstore.Attempt) string {
+	if attempt == nil {
+		return none
+	}
+	return attempt.AttemptID
 }
 
 func printRunHeader(w io.Writer, run *runstore.Run) {
@@ -156,12 +167,12 @@ func selectedStep(decision workflow.Decision) string {
 	if decision.Kind == workflow.DecisionSelectStep {
 		return decision.Step
 	}
-	return "none"
+	return none
 }
 
 func terminalReason(decision workflow.Decision) string {
 	if decision.Kind != workflow.DecisionTerminal {
-		return "none"
+		return none
 	}
 	return decision.RunStatus
 }

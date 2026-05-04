@@ -1,0 +1,783 @@
+package launcher
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"tiny-llm-orchestrator/orc/internal/promptrender"
+	"tiny-llm-orchestrator/orc/internal/runcontext"
+	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
+)
+
+const (
+	reportStatusFailed = "failed"
+
+	resultMissingReport = runstore.AttemptResultMissingReport
+	resultProcessError  = runstore.AttemptResultProcessError
+	resultTimeout       = runstore.AttemptResultTimeout
+
+	exitStateUnknown          = "unknown"
+	exitStateCanceled         = "canceled"
+	exitStateInvalidCommand   = "invalid_command"
+	exitStatePromptRenderFail = "prompt_render_failed"
+	exitStatePromptRecordFail = "prompt_record_failed"
+	exitStateLogStartFailed   = "log_start_failed"
+	exitStateStartFailed      = "start_failed"
+	exitStateTimeout          = "timeout"
+	exitStateExited           = "exited"
+
+	execHelperEnv = "ORC_LAUNCHER_EXEC_HELPER"
+	execHelperArg = "__orc-launcher-exec-helper"
+	execHelperFD  = uintptr(3)
+
+	launchCleanupTimeout = 2 * time.Second
+)
+
+var defaultCommand = []string{"codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check", "-"}
+
+func init() {
+	if len(os.Args) >= 3 && os.Args[1] == execHelperArg {
+		os.Exit(runExecHelper(os.Args[2], os.Args[3:]))
+	}
+}
+
+// Options describes a worker launch request.
+type Options struct {
+	Root    string
+	RunID   string
+	Command []string
+	Env     []string
+	Time    time.Time
+	Stdout  io.Writer
+}
+
+// Result describes the persisted launch outcome.
+type Result struct {
+	RunID     string
+	Attempt   runstore.Attempt
+	Prompt    runstore.ArtifactRef
+	Log       runstore.ArtifactRef
+	Launched  bool
+	Recovered bool
+}
+
+// LaunchNext launches the workflow-selected worker process for a run.
+func LaunchNext(ctx context.Context, opts Options) (Result, error) {
+	if ctx == nil {
+		return Result{}, errors.New("context is required")
+	}
+	if opts.Root == "" {
+		return Result{}, errors.New("project root is required")
+	}
+	if opts.RunID == "" {
+		return Result{}, errors.New("run id is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+
+	loaded, err := loadLaunchContext(opts.Root, opts.RunID)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	if attempt, ok := runstore.PendingLauncherOutcome(loaded.Run.Status); ok {
+		return Result{RunID: opts.RunID, Attempt: attempt}, fmt.Errorf("run %q has pending worker outcome %s/%s for attempt %q; no launchable worker until report routing handles it", opts.RunID, attempt.Status, attempt.Result, attempt.AttemptID)
+	}
+	decision, err := workflow.Evaluate(loaded.Workflow, workflow.RunState{
+		Status:        loaded.Run.Status.State,
+		ActiveAttempt: loaded.Run.Status.ActiveAttempt != nil,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("evaluate run %q: %w", opts.RunID, err)
+	}
+	if decision.Kind == workflow.DecisionWaitActiveAttempt {
+		result, err := recoverOrRefuseActiveAttempt(loaded.Store, loaded.Run)
+		if err == nil {
+			printLaunchResult(opts.Stdout, result)
+		}
+		return result, err
+	}
+	if decision.Kind != workflow.DecisionSelectStep {
+		return Result{}, fmt.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
+	}
+	step := loaded.Workflow.Steps[decision.Step]
+	at := normalizeTime(opts.Time)
+	attemptID, err := newAttemptID(at, decision.Step)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	attempt, _, err := loaded.Store.StartAttemptContext(ctx, opts.RunID, runstore.StartAttemptRequest{
+		StepID:          decision.Step,
+		AgentID:         step.Agent,
+		AttemptID:       attemptID,
+		Timeout:         loaded.Workflow.Defaults.Timeout.Duration,
+		ReportExitGrace: loaded.Workflow.Defaults.ReportExitGrace.Duration,
+		Time:            at,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
+		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished}, finishErr)
+	}
+
+	prompt, err := promptrender.Render(ctx, promptrender.Options{
+		Root:      opts.Root,
+		RunID:     opts.RunID,
+		StepID:    attempt.StepID,
+		AgentID:   attempt.AgentID,
+		AttemptID: attempt.AttemptID,
+		Time:      at,
+	})
+	if err != nil {
+		exitState := exitStatePromptRenderFail
+		if isContextError(err) {
+			exitState = exitStateCanceled
+		}
+		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitState, runstore.ArtifactRef{}, at, err)
+		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished}, finishErr)
+	}
+	attempt, _, err = loaded.Store.RecordAttemptPrompt(opts.RunID, runstore.AttemptPromptRequest{
+		AttemptID: attempt.AttemptID,
+		PromptRef: prompt.Ref,
+		Time:      at,
+	})
+	if err != nil {
+		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
+		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, Prompt: prompt.Ref}, finishErr)
+	}
+
+	attempt, logRef, launched, err := runProcess(ctx, loaded, opts, attempt, prompt.Content, at)
+	result := Result{RunID: opts.RunID, Attempt: attempt, Prompt: prompt.Ref, Log: logRef, Launched: launched}
+	if err != nil {
+		if result.Attempt.AttemptID != "" {
+			printLaunchResult(opts.Stdout, result)
+		}
+		return result, err
+	}
+	printLaunchResult(opts.Stdout, result)
+	return result, nil
+}
+
+func finishAttemptWithCleanupContext(store *runstore.Store, runID string, req runstore.FinishAttemptRequest) (runstore.Attempt, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), launchCleanupTimeout)
+	defer cancel()
+	finished, _, err := store.FinishAttemptContext(ctx, runID, req)
+	return finished, err
+}
+
+func finishProcessErrorAttempt(store *runstore.Store, runID, attemptID, exitState string, logRef runstore.ArtifactRef, at time.Time, causes ...error) (runstore.Attempt, error) {
+	finished, finishErr := finishAttemptWithCleanupContext(store, runID, runstore.FinishAttemptRequest{
+		AttemptID: attemptID,
+		State:     runstore.AttemptStateProcessError,
+		Status:    reportStatusFailed,
+		Result:    resultProcessError,
+		ExitState: exitState,
+		LogRef:    refPtr(logRef),
+		Time:      at,
+	})
+	return finished, errors.Join(append(causes, finishErr)...)
+}
+
+func terminalLaunchResult(stdout io.Writer, result Result, err error) (Result, error) {
+	if result.Attempt.AttemptID != "" {
+		printLaunchResult(stdout, result)
+	}
+	return result, err
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func loadLaunchContext(root, runID string) (runcontext.Context, error) {
+	return runcontext.Load(root, runID)
+}
+
+func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt []byte, at time.Time) (runstore.Attempt, runstore.ArtifactRef, bool, error) {
+	runner := workerRunner{
+		ctx:     ctx,
+		loaded:  loaded,
+		opts:    opts,
+		attempt: attempt,
+		prompt:  prompt,
+		at:      at,
+	}
+	return runner.run()
+}
+
+type workerRunner struct {
+	ctx         context.Context
+	loaded      runcontext.Context
+	opts        Options
+	attempt     runstore.Attempt
+	prompt      []byte
+	at          time.Time
+	command     []string
+	workerEnv   []string
+	logRef      runstore.ArtifactRef
+	logFile     *os.File
+	cmd         *exec.Cmd
+	releaseExec func(bool) error
+	stdin       io.WriteCloser
+}
+
+func (r *workerRunner) run() (runstore.Attempt, runstore.ArtifactRef, bool, error) {
+	if finished, err := r.selectCommand(); err != nil {
+		return finished, runstore.ArtifactRef{}, false, err
+	}
+	if finished, err := r.openLog(); err != nil {
+		return finished, r.logRef, false, err
+	}
+	defer func() {
+		_ = r.logFile.Close()
+	}()
+	if finished, err := r.prepareWorkerCommand(); err != nil {
+		return finished, r.logRef, false, err
+	}
+	defer func() {
+		if r.releaseExec != nil {
+			_ = r.releaseExec(false)
+		}
+	}()
+	if finished, err := r.startWorker(); err != nil {
+		return finished, r.logRef, false, err
+	}
+	if finished, err := r.recordProcessAndRelease(); err != nil {
+		return finished, r.logRef, false, err
+	}
+	finished, err := r.feedPromptWaitAndFinish()
+	return finished, r.logRef, true, err
+}
+
+func (r *workerRunner) selectCommand() (runstore.Attempt, error) {
+	r.command = r.opts.Command
+	if len(r.command) == 0 {
+		r.command = defaultCommand
+	}
+	if r.command[0] == "" {
+		err := errors.New("worker command is required")
+		return r.finishPreStart(exitStateInvalidCommand, runstore.ArtifactRef{}, err)
+	}
+	if err := r.ctx.Err(); err != nil {
+		return r.finishPreStart(exitStateCanceled, runstore.ArtifactRef{}, err)
+	}
+	return runstore.Attempt{}, nil
+}
+
+func (r *workerRunner) openLog() (runstore.Attempt, error) {
+	logRef, logFile, err := openStreamingLog(r.loaded.Store, r.loaded.Run, r.attempt, r.at)
+	if err != nil {
+		return r.finishPreStart(exitStateLogStartFailed, runstore.ArtifactRef{}, err)
+	}
+	r.logRef = logRef
+	r.logFile = logFile
+	return runstore.Attempt{}, nil
+}
+
+func (r *workerRunner) prepareWorkerCommand() (runstore.Attempt, error) {
+	if err := r.ctx.Err(); err != nil {
+		return r.finishPreStart(exitStateCanceled, r.logRef, err)
+	}
+	r.workerEnv = os.Environ()
+	if r.opts.Env != nil {
+		r.workerEnv = r.opts.Env
+	}
+	cmd, releaseExec, err := newWorkerCommand(r.command, r.workerEnv, r.loaded.Project.Root)
+	if err != nil {
+		return r.finishLoggedStartFailure(exitStateStartFailed, err)
+	}
+	r.cmd = cmd
+	r.releaseExec = releaseExec
+	r.cmd.Dir = r.loaded.Project.Root
+	r.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	r.cmd.Env = append(filteredExecEnv(append([]string(nil), r.workerEnv...)), r.cmd.Env...)
+	r.cmd.Stdout = r.logFile
+	r.cmd.Stderr = r.logFile
+	return runstore.Attempt{}, nil
+}
+
+func (r *workerRunner) startWorker() (runstore.Attempt, error) {
+	stdin, err := r.cmd.StdinPipe()
+	if err != nil {
+		return r.finishLoggedStartFailure(exitStateStartFailed, err)
+	}
+	r.stdin = stdin
+	if err := r.cmd.Start(); err != nil {
+		return r.finishLoggedStartFailure(exitStateStartFailed, err)
+	}
+	return runstore.Attempt{}, nil
+}
+
+func (r *workerRunner) recordProcessAndRelease() (runstore.Attempt, error) {
+	processStartTime, err := processStartIdentity(r.cmd.Process.Pid)
+	if err != nil {
+		return r.finishStartedProcessErrorWithLog(err)
+	}
+	started, _, err := r.loaded.Store.RecordAttemptProcessContext(r.ctx, r.loaded.Run.ID, runstore.AttemptProcessRequest{
+		AttemptID:        r.attempt.AttemptID,
+		PID:              r.cmd.Process.Pid,
+		ProcessStartTime: processStartTime,
+		Time:             r.at,
+	})
+	if err != nil {
+		return r.finishStartedProcessErrorWithLog(err)
+	}
+	if err := r.ctx.Err(); err != nil {
+		return r.finishStartedProcessErrorSilent(err)
+	}
+	if err := r.releaseExec(true); err != nil {
+		return r.finishStartedProcessErrorWithLog(err)
+	}
+	r.attempt = started
+	return runstore.Attempt{}, nil
+}
+
+func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
+	promptWriteDone := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(r.stdin, bytes.NewReader(r.prompt))
+		closeErr := r.stdin.Close()
+		promptWriteDone <- errors.Join(err, closeErr)
+	}()
+	waitResult := waitWithTimeout(r.ctx, r.loaded.Workflow.Defaults.Timeout.Duration, r.cmd)
+	promptWriteErr := <-promptWriteDone
+	if promptWriteErr != nil && waitResult.err != nil {
+		_, _ = r.logFile.WriteString(promptWriteErr.Error() + "\n")
+	}
+	logErr := r.logFile.Sync()
+	finished, finishErr := r.finishWaitOutcome(waitResult)
+	var ctxErr error
+	if waitResult.ctxErr != nil && !waitResult.workflowTimeout {
+		ctxErr = waitResult.ctxErr
+	}
+	return finished, errors.Join(logErr, finishErr, ctxErr)
+}
+
+func (r *workerRunner) finishWaitOutcome(waitResult waitResult) (runstore.Attempt, error) {
+	state, result, exitCode, exitState := outcomeFromWait(waitResult)
+	finishReq := runstore.FinishAttemptRequest{
+		AttemptID: r.attempt.AttemptID,
+		State:     state,
+		Status:    reportStatusFailed,
+		Result:    result,
+		ExitCode:  exitCode,
+		ExitState: exitState,
+		LogRef:    refPtr(r.logRef),
+		Time:      r.at,
+	}
+	if waitResult.ctxErr != nil && !waitResult.workflowTimeout {
+		return finishAttemptWithCleanupContext(r.loaded.Store, r.loaded.Run.ID, finishReq)
+	}
+	finished, _, err := r.loaded.Store.FinishAttempt(r.loaded.Run.ID, finishReq)
+	return finished, err
+}
+
+func (r *workerRunner) finishPreStart(exitState string, logRef runstore.ArtifactRef, causes ...error) (runstore.Attempt, error) {
+	return finishProcessErrorAttempt(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, exitState, logRef, r.at, causes...)
+}
+
+func (r *workerRunner) finishLoggedStartFailure(exitState string, err error) (runstore.Attempt, error) {
+	_, logErr := r.logFile.WriteString(err.Error() + "\n")
+	return r.finishPreStart(exitState, r.logRef, err, logErr)
+}
+
+func (r *workerRunner) finishStartedProcessErrorWithLog(err error) (runstore.Attempt, error) {
+	_, logErr := r.logFile.WriteString(err.Error() + "\n")
+	return r.finishStartedProcessError(err, logErr)
+}
+
+func (r *workerRunner) finishStartedProcessErrorSilent(err error) (runstore.Attempt, error) {
+	return r.finishStartedProcessError(err, nil)
+}
+
+func (r *workerRunner) finishStartedProcessError(err, logErr error) (runstore.Attempt, error) {
+	terminateProcessGroup(r.cmd.Process.Pid)
+	_, _ = r.cmd.Process.Wait()
+	exitState := exitStateStartFailed
+	if isContextError(err) {
+		exitState = exitStateCanceled
+	}
+	return finishProcessErrorAttempt(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, exitState, r.logRef, r.at, err, logErr)
+}
+
+func newWorkerCommand(command, env []string, dir string) (*exec.Cmd, func(bool) error, error) {
+	execPath, err := resolveWorkerExecutable(command[0], env, dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	helperPath, err := os.Executable()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve launcher helper: %w", err)
+	}
+	helperToken, err := newExecHelperToken()
+	if err != nil {
+		return nil, nil, err
+	}
+	helperArgs := append([]string{execHelperArg, helperToken, execPath}, command[1:]...)
+	readFile, writeFile, err := os.Pipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	released := false
+	release := func(start bool) error {
+		if released {
+			return nil
+		}
+		released = true
+		defer func() {
+			_ = writeFile.Close()
+		}()
+		_ = readFile.Close()
+		if !start {
+			return nil
+		}
+		if _, err := writeFile.WriteString(helperToken + "\n"); err != nil {
+			return fmt.Errorf("release worker exec: %w", err)
+		}
+		return nil
+	}
+	cmd := exec.Command(helperPath, helperArgs...) // #nosec G204,G702 -- re-execing the current launcher binary is intentional; helper execs the configured worker only after durable PID recording.
+	cmd.ExtraFiles = []*os.File{readFile}
+	cmd.Env = []string{execHelperEnv + "=" + helperToken}
+	return cmd, release, nil
+}
+
+func resolveWorkerExecutable(name string, env []string, cwd string) (string, error) {
+	execPath := name
+	if strings.ContainsRune(execPath, os.PathSeparator) {
+		statPath := execPath
+		if !filepath.IsAbs(statPath) {
+			statPath = filepath.Join(cwd, statPath)
+		}
+		info, err := os.Stat(statPath)
+		if err != nil {
+			return "", err
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("%s is a directory", execPath)
+		}
+		if info.Mode()&0o111 == 0 {
+			return "", fmt.Errorf("%s is not executable", execPath)
+		}
+		return execPath, nil
+	}
+	for _, dir := range workerPath(env) {
+		if dir == "" {
+			dir = "."
+		}
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(cwd, dir)
+		}
+		candidate := filepath.Join(dir, execPath)
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			continue
+		}
+		return candidate, nil
+	}
+	return "", exec.ErrNotFound
+}
+
+func workerPath(env []string) []string {
+	const prefix = "PATH="
+	for i := len(env) - 1; i >= 0; i-- {
+		if after, ok := strings.CutPrefix(env[i], prefix); ok {
+			return filepath.SplitList(after)
+		}
+	}
+	return nil
+}
+
+func runExecHelper(wantToken string, command []string) int {
+	if wantToken == "" || os.Getenv(execHelperEnv) != wantToken {
+		return 125
+	}
+	if len(command) == 0 || command[0] == "" {
+		return 125
+	}
+	handshake := os.NewFile(execHelperFD, "launcher-handshake")
+	if handshake == nil {
+		return 125
+	}
+	token, err := readExecHelperToken(handshake)
+	closeErr := handshake.Close()
+	if err != nil || closeErr != nil || token != wantToken {
+		return 125
+	}
+	env := filteredExecEnv(os.Environ())
+	if err := syscall.Exec(command[0], command, env); err != nil { // #nosec G204,G702 -- worker launching intentionally execs the configured Codex command after the parent records process metadata.
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		return 126
+	}
+	return 0
+}
+
+func newExecHelperToken() (string, error) {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("generate exec helper token: %w", err)
+	}
+	return hex.EncodeToString(buf[:]), nil
+}
+
+func readExecHelperToken(reader io.Reader) (string, error) {
+	var buf [33]byte
+	n, err := io.ReadFull(reader, buf[:])
+	if err != nil {
+		return "", err
+	}
+	if n != len(buf) || buf[len(buf)-1] != '\n' {
+		return "", errors.New("invalid exec helper token")
+	}
+	return string(buf[:len(buf)-1]), nil
+}
+
+func filteredExecEnv(env []string) []string {
+	out := env[:0]
+	prefix := execHelperEnv + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+type waitResult struct {
+	err             error
+	ctxErr          error
+	workflowTimeout bool
+}
+
+func outcomeFromWait(result waitResult) (string, string, *int, string) {
+	if result.workflowTimeout {
+		return runstore.AttemptStateTimedOut, resultTimeout, nil, exitStateTimeout
+	}
+	if result.ctxErr != nil {
+		return runstore.AttemptStateProcessError, resultProcessError, nil, exitStateCanceled
+	}
+	if result.err == nil {
+		code := 0
+		return runstore.AttemptStateMissingReport, resultMissingReport, &code, exitStateExited
+	}
+	var exitErr *exec.ExitError
+	if errors.As(result.err, &exitErr) {
+		code := exitErr.ExitCode()
+		return runstore.AttemptStateProcessError, resultProcessError, &code, exitStateExited
+	}
+	return runstore.AttemptStateProcessError, resultProcessError, nil, result.err.Error()
+}
+
+func waitWithTimeout(ctx context.Context, timeout time.Duration, cmd *exec.Cmd) waitResult {
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		terminateProcessGroup(cmd.Process.Pid)
+		return waitResult{err: err}
+	case <-timer.C:
+		terminateProcessGroup(cmd.Process.Pid)
+		err := <-done
+		if err != nil {
+			return waitResult{err: err, workflowTimeout: true}
+		}
+		return waitResult{err: context.DeadlineExceeded, workflowTimeout: true}
+	case <-ctx.Done():
+		ctxErr := ctx.Err()
+		terminateProcessGroup(cmd.Process.Pid)
+		err := <-done
+		if err != nil {
+			return waitResult{err: err, ctxErr: ctxErr}
+		}
+		return waitResult{err: ctxErr, ctxErr: ctxErr}
+	}
+}
+
+func terminateProcessGroup(pid int) {
+	if pid <= 0 {
+		return
+	}
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err == nil {
+		time.Sleep(25 * time.Millisecond)
+	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+}
+
+func openStreamingLog(store *runstore.Store, run *runstore.Run, attempt runstore.Attempt, at time.Time) (runstore.ArtifactRef, *os.File, error) {
+	ref, err := store.WriteArtifact(run.ID, runstore.Artifact{
+		Kind:    runstore.KindLog,
+		Name:    attempt.StepID + "-" + attempt.AttemptID,
+		Content: nil,
+		Time:    at,
+	})
+	if err != nil {
+		return runstore.ArtifactRef{}, nil, err
+	}
+	_, _, err = store.RecordAttemptLog(run.ID, runstore.AttemptLogRequest{
+		AttemptID: attempt.AttemptID,
+		LogRef:    ref,
+		Time:      at,
+	})
+	if err != nil {
+		return ref, nil, err
+	}
+	file, err := store.OpenArtifactAppend(run.ID, ref)
+	if err != nil {
+		return ref, nil, err
+	}
+	return ref, file, nil
+}
+
+func recoverOrRefuseActiveAttempt(store *runstore.Store, run *runstore.Run) (Result, error) {
+	active := *run.Status.ActiveAttempt
+	if attemptStillStarting(active, time.Now().UTC()) {
+		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has starting attempt %q", run.ID, active.AttemptID)
+	}
+	if active.PID > 0 && processIdentityMatches(active.PID, active.ProcessStartTime) {
+		if attemptTimedOut(active, time.Now().UTC()) {
+			terminateProcessGroup(active.PID)
+			recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateTimedOut, resultTimeout, exitStateTimeout)
+			return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
+		}
+		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has active attempt %q", run.ID, active.AttemptID)
+	}
+	recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateProcessError, resultProcessError, exitStateUnknown)
+	if err != nil {
+		return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
+	}
+	return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, nil
+}
+
+func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runstore.Attempt, state, result, exitState string) (runstore.Attempt, error) {
+	recovered, _, err := store.RecoverAttempt(run.ID, runstore.FinishAttemptRequest{
+		AttemptID: active.AttemptID,
+		State:     state,
+		Status:    reportStatusFailed,
+		Result:    result,
+		ExitState: exitState,
+		LogRef:    active.LogRef,
+		Time:      time.Now().UTC(),
+	})
+	return recovered, err
+}
+
+func attemptStillStarting(attempt runstore.Attempt, now time.Time) bool {
+	if attempt.State != runstore.AttemptStateStarting || attempt.PID != 0 {
+		return false
+	}
+	return !attemptTimedOut(attempt, now)
+}
+
+func attemptTimedOut(attempt runstore.Attempt, now time.Time) bool {
+	timeout, err := time.ParseDuration(attempt.Timeout)
+	if err != nil || timeout <= 0 {
+		return false
+	}
+	return now.Sub(attempt.StartedAt) > timeout
+}
+
+func processIdentityMatches(pid int, wantStartTime string) bool {
+	if wantStartTime == "" {
+		return false
+	}
+	gotStartTime, err := processStartIdentity(pid)
+	if err != nil {
+		return false
+	}
+	return gotStartTime == wantStartTime
+}
+
+func processStartIdentity(pid int) (string, error) {
+	if runtime.GOOS != "linux" {
+		return "", fmt.Errorf("process identity requires linux procfs, got %s", runtime.GOOS)
+	}
+	content, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat") // #nosec G304 -- pid is numeric and scoped to procfs.
+	if err != nil {
+		return "", fmt.Errorf("read process identity for pid %d: %w", pid, err)
+	}
+	return parseProcStatStartTime(string(content))
+}
+
+func parseProcStatStartTime(stat string) (string, error) {
+	end := strings.LastIndex(stat, ") ")
+	if end == -1 {
+		return "", errors.New("parse process identity: missing command field")
+	}
+	fields := strings.Fields(stat[end+2:])
+	const startTimeIndexAfterCommand = 19
+	if len(fields) <= startTimeIndexAfterCommand {
+		return "", errors.New("parse process identity: missing starttime field")
+	}
+	if _, err := strconv.ParseUint(fields[startTimeIndexAfterCommand], 10, 64); err != nil {
+		return "", fmt.Errorf("parse process identity starttime: %w", err)
+	}
+	return fields[startTimeIndexAfterCommand], nil
+}
+
+func newAttemptID(now time.Time, step string) (string, error) {
+	var buf [3]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("generate attempt id: %w", err)
+	}
+	return fmt.Sprintf("%s-%s-%s", now.UTC().Format("20060102T150405Z"), step, hex.EncodeToString(buf[:])), nil
+}
+
+func normalizeTime(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Now().UTC()
+	}
+	return value.UTC()
+}
+
+func refPtr(ref runstore.ArtifactRef) *runstore.ArtifactRef {
+	if ref.Path == "" {
+		return nil
+	}
+	return &ref
+}
+
+func printLaunchResult(w io.Writer, result Result) {
+	if w == nil {
+		return
+	}
+	action := "launched"
+	if result.Recovered {
+		action = "recovered"
+	} else if !result.Launched {
+		action = "terminalized"
+	}
+	_, _ = fmt.Fprintf(w, "%s attempt %s\n", action, result.Attempt.AttemptID)
+	_, _ = fmt.Fprintf(w, "step: %s\n", result.Attempt.StepID)
+	_, _ = fmt.Fprintf(w, "agent: %s\n", result.Attempt.AgentID)
+	_, _ = fmt.Fprintf(w, "result: %s/%s\n", result.Attempt.Status, result.Attempt.Result)
+	if result.Log.Path != "" {
+		_, _ = fmt.Fprintf(w, "log: %s\n", result.Log.Path)
+	}
+}

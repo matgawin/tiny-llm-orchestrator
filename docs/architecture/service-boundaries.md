@@ -33,9 +33,11 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `internal/promptrender` owns role-specific worker prompt rendering and prompt
   artifact persistence. Feature semantics live in
   [../features/worker-prompt-rendering.md](../features/worker-prompt-rendering.md).
-- `internal/runstore` owns persistent run state under `.orc/runs/<run-id>`.
+- `internal/runstore` owns persistent run state under `.orc/runs/<run-id>` and
+  the narrow per-run locking needed to keep store-owned event/status writes
+  consistent.
 - `internal/workflow` owns deterministic workflow transitions for validated workflow definitions and in-memory run state.
-- `internal/launcher` should own worker process launch and supervision.
+- `internal/launcher` owns worker process launch and supervision.
 
 ## Boundary Rules
 
@@ -43,9 +45,10 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - Keep command routing, help output, and command-level error wrapping in
   `internal/cli`; command packages such as `internal/initconfig` own
   domain-specific prompts and status output.
-- Keep future runtime state transitions out of the file-loading layer.
-- Keep workflow routing, worker launch, content redaction, and cross-process
-  write coordination out of `internal/runstore`; it is the persistence
-  boundary for v1.
+- Keep runtime state transitions out of the file-loading layer.
+- Keep workflow routing, worker launch, content redaction, and process
+  supervision out of `internal/runstore`; it is the persistence boundary for
+  v1. Run Store may own narrowly scoped per-run locking for persistence
+  consistency, but not higher-level orchestration policy.
 - Add narrow package-local helpers before introducing shared abstractions.
 - When a behavior spans CLI and config validation, test the deterministic validation logic directly and keep CLI tests focused on command behavior.

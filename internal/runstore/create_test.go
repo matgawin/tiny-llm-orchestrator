@@ -1,11 +1,11 @@
 package runstore
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -56,6 +56,54 @@ func TestCreateRunRejectsExplicitIDCollision(t *testing.T) {
 	}
 	_, err := store.Create(req)
 	requireErrorContains(t, err, "already exists")
+}
+
+func TestCreateRunRejectsExplicitIDEmptyDirectoryCollision(t *testing.T) {
+	root := t.TempDir()
+	store := openStore(t, root)
+	if err := os.MkdirAll(filepath.Join(root, ".orc", "runs", "manual-run"), 0o750); err != nil {
+		t.Fatalf("create empty run directory collision: %v", err)
+	}
+
+	_, err := store.Create(CreateRunRequest{RunID: "manual-run", Workflow: "implementation"})
+	requireErrorContains(t, err, "already exists")
+}
+
+func TestCreateRunExplicitIDConcurrentCollision(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	req := CreateRunRequest{RunID: "manual-run", Workflow: "implementation"}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			<-start
+			_, err := store.Create(req)
+			errs <- err
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	failures := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		if !strings.Contains(err.Error(), "already exists") {
+			t.Fatalf("Create error = %v, want already exists", err)
+		}
+		failures++
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("Create results = %d successes %d failures, want one of each", successes, failures)
+	}
+	if _, err := store.Load(req.RunID); err != nil {
+		t.Fatalf("Load returned error after concurrent create: %v", err)
+	}
 }
 
 func TestCreateRunIDSlugFallbackAndTruncation(t *testing.T) {
@@ -152,25 +200,5 @@ func TestCreateRejectsSymlinkedStoreParents(t *testing.T) {
 			_, err := store.Create(CreateRunRequest{RunID: "parent-symlink", Workflow: "implementation"})
 			requireErrorContains(t, err, "symlink")
 		})
-	}
-}
-
-func TestCleanupCreatedRunDirRemovesPartialRun(t *testing.T) {
-	store := openStore(t, t.TempDir())
-	if err := ensureRunsDir(store.orcDir, store.runsDir); err != nil {
-		t.Fatalf("ensure runs dir: %v", err)
-	}
-	runDir := filepath.Join(store.runsDir, "partial-run")
-	if err := os.Mkdir(runDir, 0o750); err != nil {
-		t.Fatalf("mkdir partial run: %v", err)
-	}
-	cause := errors.New("bootstrap failed")
-
-	err := cleanupCreatedRunDir("partial-run", runDir, cause)
-	if !errors.Is(err, cause) {
-		t.Fatalf("cleanup error = %v, want original cause", err)
-	}
-	if _, statErr := os.Stat(runDir); !os.IsNotExist(statErr) {
-		t.Fatalf("partial run stat err = %v, want removed directory", statErr)
 	}
 }

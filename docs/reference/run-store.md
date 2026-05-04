@@ -60,6 +60,7 @@ Each created run starts with this layout:
 
 ```text
 .orc/runs/<run-id>/
+  .lock
   events.jsonl
   status.json
   task/
@@ -116,8 +117,10 @@ Latest-state changes are recorded as `status.updated` events and then materializ
 ### Caller Events
 
 Callers may append custom events with non-reserved event types. Reserved event
-types are `run.created`, `status.updated`, and `artifact.written`; those are
-written only through the dedicated store APIs.
+types are `run.created`, `status.updated`, `artifact.written`,
+`attempt.started`, `attempt.prompted`, `attempt.logged`, `attempt.process_started`,
+`attempt.finished`, and `attempt.recovered`; those are written only through the
+dedicated store APIs.
 
 For caller events, callers provide:
 
@@ -138,7 +141,9 @@ references.
 
 ### V1 Event Types
 
-`run.created` is written once when a run directory is created.
+`run.created` is written once when a run directory is created. Explicit run ids
+reserve the final run directory atomically; creation fails if that path already
+exists, including an empty directory.
 
 ```json
 {
@@ -165,6 +170,83 @@ references.
 
 The artifact reference shape is defined in [Artifacts](#artifacts).
 
+`attempt.started` is written when a worker launch creates a `starting` attempt.
+The attempt remains the run's `active_attempt` while launch preparation
+continues.
+
+```json
+{
+  "attempt": {
+    "run_id": "20260502T143022Z-implementation-main-997-a1b2c3",
+    "step_id": "plan",
+    "agent_id": "planner",
+    "attempt_id": "20260504T120000Z-plan-a1b2c3",
+    "state": "starting",
+    "timeout": "30m0s",
+    "report_exit_grace": "30s",
+    "started_at": "2026-05-04T12:00:00Z"
+  }
+}
+```
+
+`attempt.prompted` links the rendered prompt artifact to the current attempt.
+The link is one-time and only valid while the current attempt is `starting`.
+
+```json
+{
+  "attempt_id": "20260504T120000Z-plan-a1b2c3",
+  "prompt_ref": "<artifact reference>"
+}
+```
+
+`attempt.logged` links the durable log artifact to the current attempt before
+the worker process starts. The link is one-time and only valid while the current
+attempt is `starting`.
+
+```json
+{
+  "attempt_id": "20260504T120000Z-plan-a1b2c3",
+  "log_ref": "<artifact reference>"
+}
+```
+
+`attempt.process_started` records worker process metadata and transitions the
+attempt state from `starting` to `active`. The process-start event requires the
+current `starting` attempt to already have both `prompt_ref` and `log_ref`.
+`process_start_time` is the launcher-read process identity from procfs and must
+be a non-empty decimal string.
+
+```json
+{
+  "attempt_id": "20260504T120000Z-plan-a1b2c3",
+  "pid": 12345,
+  "process_start_time": "123456789"
+}
+```
+
+`attempt.finished` terminalizes the active attempt with a
+launcher-synthesized outcome. Terminal state/status/result tuples and
+pre-process restrictions are defined in
+[Attempt Lifecycle Preconditions](#attempt-lifecycle-preconditions).
+
+```json
+{
+  "attempt_id": "20260504T120000Z-plan-a1b2c3",
+  "state": "missing_report",
+  "status": "failed",
+  "result": "missing_report",
+  "exit_code": 0,
+  "exit_state": "exited",
+  "log_ref": "<artifact reference>"
+}
+```
+
+`attempt.recovered` terminalizes an active attempt that cannot be verified after
+launcher restart, or an expired active attempt whose process identity is still
+live. V1 records unverifiable attempts as `failed/process_error` with
+`exit_state=unknown`. Expired live attempts are recorded as `failed/timeout`
+with `state=timed_out` and `exit_state=timeout`.
+
 ## Latest Status
 
 `status.json` is the materialized fast-read state for a run. The append-only
@@ -186,13 +268,72 @@ Store-written status files contain:
   "created_at": "2026-05-02T14:30:22Z",
   "updated_at": "2026-05-02T14:30:22Z",
   "last_sequence": 1,
-  "artifacts": []
+  "artifacts": [],
+  "attempts": []
 }
 ```
 
 In v1, `state` is caller-validated. The store requires status updates and
 `status.updated` event payloads to provide a non-empty state string, but
 workflow/report layers own the allowed-state policy.
+
+When a worker attempt is starting or active, `status.json` includes
+`active_attempt` and an `attempts` history. Terminal attempts remain in
+`attempts`; terminalizing an attempt removes `active_attempt`. The history
+entry below is abbreviated; entries use the same attempt object shape as
+`active_attempt`.
+
+```json
+{
+  "active_attempt": {
+    "run_id": "20260502T143022Z-implementation-main-997-a1b2c3",
+    "step_id": "plan",
+    "agent_id": "planner",
+    "attempt_id": "20260504T120000Z-plan-a1b2c3",
+    "state": "active",
+    "pid": 12345,
+    "process_start_time": "123456789",
+    "timeout": "30m0s",
+    "report_exit_grace": "30s",
+    "prompt_ref": {
+      "kind": "prompt",
+      "path": "prompts/000002-plan.md",
+      "name": "plan",
+      "event_sequence": 2
+    },
+    "log_ref": {
+      "kind": "log",
+      "path": "logs/000003-plan.log",
+      "name": "plan",
+      "event_sequence": 3
+    },
+    "started_at": "2026-05-04T12:00:00Z"
+  },
+  "attempts": [
+    {
+      "attempt_id": "20260504T120000Z-plan-a1b2c3",
+      "state": "active",
+      "prompt_ref": {
+        "path": "prompts/000002-plan.md"
+      },
+      "log_ref": {
+        "path": "logs/000003-plan.log"
+      },
+      "started_at": "2026-05-04T12:00:00Z"
+    }
+  ]
+}
+```
+
+Attempt states currently materialized by the launcher are:
+
+- `starting`
+- `active`
+- `missing_report`
+- `process_error`
+- `timed_out`
+
+Later report and retry slices may add valid-report and superseded states.
 
 ## Artifacts
 
@@ -245,15 +386,27 @@ the task snapshot schema.
 
 ## V1 Operational Rules
 
-V1 is single-writer. Commands that introduce concurrent writers must add an
-explicit locking contract before relying on simultaneous writes.
+### Locking
 
-V1 writes `schema_version: 1` but does not implement migrations.
+V1 serializes status-backed writes per run inside the Run Store. Higher-level
+orchestration still owns domain coordination, such as deciding whether a
+concurrent command should be allowed to mutate the same run.
+Run creation also takes a runs-directory publication lock while reserving and
+publishing the final run directory, so public readers do not observe a
+half-published run layout.
+Public read APIs acquire the same per-run lock before replaying state or
+reading artifacts, so inspection and reload paths observe a stable committed
+snapshot rather than an in-progress event append.
+
+V1 writes `schema_version: 1` and does not implement schema migrations. The
+only metadata backfill is `.lock` creation for legacy run directories that
+predate per-run locking; public reads and writes may create that lock file
+before accessing run state.
 
 V1 treats persisted content as caller-owned. Redaction and size limits belong to
 callers or future policy layers, not the run-store package.
 
-Write failure semantics:
+### Commit Order and Failure Semantics
 
 `AppendEvent`:
 
@@ -266,6 +419,7 @@ Write failure semantics:
 `UpdateStatus`:
 
 - Order: append `status.updated`, then refresh `status.json`.
+- Non-running state updates are rejected while an attempt is active.
 - Ambiguous append: returns the candidate status and event so callers can
   reload before retrying.
 - Status refresh failure: returns `StatusMaterializationError` with the
@@ -275,6 +429,10 @@ Write failure semantics:
 
 - Order: commit the artifact file, append `artifact.written`, then refresh
   `status.json`.
+- Streaming log artifacts are the exception to final-content semantics:
+  `artifact.written` reserves the log destination before process start, and the
+  launcher opens the recorded artifact through the run store and appends
+  stdout/stderr to that file while the worker runs.
 - Ambiguous append: returns the candidate artifact reference and keeps the
   artifact because the event may be durable.
 - Status refresh failure: returns `StatusMaterializationError` with the
@@ -284,6 +442,51 @@ If a `WriteArtifact` event append definitely fails before a line can be
 appended, the store attempts to roll back the artifact file. Retrying after a
 successful event append or status materialization failure is not idempotent
 unless the caller adds its own idempotency key in a future event contract.
+
+Attempt lifecycle APIs follow the same status-backed write failure contract:
+ambiguous append and status refresh failures return the candidate attempt/event
+when the event may have committed, and callers should reload before retrying.
+
+### API Families
+
+- `AppendEvent`, `UpdateStatus`, `WriteArtifact`, `StartAttempt`,
+  `StartAttemptContext`, `RecordAttemptPrompt`, `RecordAttemptLog`,
+  `RecordAttemptProcess`, `RecordAttemptProcessContext`, `FinishAttempt`, and
+  `RecoverAttempt` take a run-level lock, append their event, then refresh
+  `status.json`.
+- `Load`, `ReadArtifact`, and `OpenArtifactAppend` also take the run-level lock.
+  For legacy runs that predate `.lock`, these APIs create the missing lock file
+  as metadata-only backfill before replaying state, reading artifact content, or
+  opening a recorded artifact for append.
+
+## Attempt Lifecycle Preconditions
+
+- `StartAttemptContext` returns the context error without appending an
+  `attempt.started` event if cancellation wins before the attempt commits,
+  including while waiting for the same-process run lock.
+- `StartAttempt` only accepts runs whose latest state is `running`; replay
+  rejects `attempt.started` events after a terminal or human-waiting state.
+- `StartAttempt` rejects attempt ids already present in attempt history, even
+  when the previous attempt is terminal.
+- `FinishAttempt` and `RecoverAttempt` only accept terminal attempt states:
+  `missing_report`, `process_error`, or `timed_out`.
+- Terminal attempts must use the v1 launcher outcome tuple for their state:
+  `failed/missing_report`, `failed/process_error`, or `failed/timeout`.
+- `missing_report` and `timed_out` terminal states require prior
+  `attempt.process_started`; pre-process terminalization is limited to
+  `process_error`.
+- Retrying attempt writes is not idempotent unless the caller first reloads and
+  observes the current active attempt or terminal attempt history.
+- Replay rejects `attempt.started` while a pending launcher-synthesized outcome
+  remains unconsumed.
+
+## Log Append API
+
+- `OpenArtifactAppend` only opens recorded `log` artifacts and rejects
+  symlinks, directories, and other non-regular files before returning an append
+  handle.
+- It only opens the current active attempt's linked log; terminal or unrelated
+  attempt logs are immutable through this API.
 
 Malformed or incomplete event state is not repaired during load. Load errors
 name the broken file or artifact path.

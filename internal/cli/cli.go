@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
+	"tiny-llm-orchestrator/orc/internal/launcher"
 	"tiny-llm-orchestrator/orc/internal/runinspect"
 	"tiny-llm-orchestrator/orc/internal/runstart"
 )
@@ -44,6 +47,8 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return executeInit(args[1:], stdin, stdout, stderr)
 	case "run":
 		return executeRun(args[1:], stdin, stdout, stderr)
+	case "worker":
+		return executeWorker(args[1:], stdout, stderr)
 	default:
 		if _, err := fmt.Fprintf(stderr, "%s: unknown command %q\n\n", appName, args[0]); err != nil {
 			return err
@@ -53,6 +58,54 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		}
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
+}
+
+func executeWorker(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return printWorkerHelp(stdout)
+	}
+	switch args[0] {
+	case "-h", helpFlag, helpCommand:
+		return printWorkerHelp(stdout)
+	case "launch-next":
+		return executeWorkerLaunchNext(args[1:], stdout, stderr)
+	default:
+		if _, err := fmt.Fprintf(stderr, "%s worker: unknown command %q\n\n", appName, args[0]); err != nil {
+			return err
+		}
+		if err := printWorkerHelp(stderr); err != nil {
+			return err
+		}
+		return fmt.Errorf("unknown worker command: %s", args[0])
+	}
+}
+
+func executeWorkerLaunchNext(args []string, stdout, stderr io.Writer) error {
+	if len(args) != 1 || args[0] == "" {
+		if _, err := fmt.Fprintf(stderr, "%s worker launch-next: requires <run-id>\n", appName); err != nil {
+			return err
+		}
+		return fmt.Errorf("worker launch-next requires run id")
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	restoreSignals := context.AfterFunc(ctx, stop)
+	defer restoreSignals()
+	if _, err := launcher.LaunchNext(ctx, launcher.Options{
+		Root:   root,
+		RunID:  args[0],
+		Stdout: stdout,
+	}); err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s worker launch-next: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	return nil
 }
 
 func executeInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -218,7 +271,24 @@ Available Commands:
   help        Show command help
   init        Scaffold project-local Tiny Orc config
   run         Manage orchestration runs
+  worker      Launch and supervise worker attempts
   version     Print version information
+
+Flags:
+  -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printWorkerHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s worker launches and supervises worker attempts.
+
+Usage:
+  %s worker [command]
+
+Available Commands:
+  launch-next  Launch the workflow-selected worker for a run
 
 Flags:
   -h, --help  Show command help

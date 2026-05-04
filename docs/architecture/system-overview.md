@@ -28,14 +28,15 @@ The only runnable service today is the `orc` CLI:
 - `internal/cli` handles command dispatch and user-facing output.
 - `internal/config` loads and validates `.orc` project configuration.
 
-The CLI currently exposes help, version, init, `run start`, and read-only
-`run status` / `run next` behavior.
+The CLI currently exposes help, version, init, `run start`, read-only
+`run status` / `run next` behavior, and `worker launch-next` for launching the
+workflow-selected worker attempt.
 
 Config loading and validation, deterministic workflow transitions,
-task-context resolution, inspection, prompt rendering, and durable run
-persistence are implemented as package logic and are exercised by tests and
-fixtures. Later run commands will consume the run store and workflow engine for
-report handling and worker launch.
+task-context resolution, inspection, prompt rendering, worker launch, and
+durable run persistence are implemented as package logic and are exercised by
+tests and fixtures. Later report commands will consume active-attempt state for
+report validation and workflow retry integration.
 
 ## Core Data Flow
 
@@ -63,6 +64,6 @@ These packages define or reserve ownership for orchestration behavior outside th
 - `internal/promptrender`: role-specific worker prompt rendering for selected
   workflow steps.
 - `internal/workflow`: deterministic workflow graph transitions.
-- `internal/launcher`: future worker process start and supervision.
+- `internal/launcher`: worker process start and supervision.
 
-Do not push future launcher or run-store concerns into `internal/config`; config validation should remain a contract-loading boundary.
+Do not push launcher or run-store concerns into `internal/config`; config validation should remain a contract-loading boundary.

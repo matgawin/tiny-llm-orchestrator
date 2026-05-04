@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const readyForHumanState = "ready_for_human"
+const (
+	readyForHumanState   = "ready_for_human"
+	testProcessStartTime = "123456789"
+)
 
 func openStore(t *testing.T, root string) *Store {
 	t.Helper()
@@ -42,18 +45,9 @@ func createRunWithMutatedArtifactEvent(t *testing.T, store *Store, id string, mu
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
-	events := readRunEvents(t, run)
-	var payload artifactWrittenPayload
-	if err := json.Unmarshal(events[1].Payload, &payload); err != nil {
-		t.Fatalf("unmarshal artifact payload: %v", err)
-	}
-	mutate(run, ref, &payload)
-	nextPayload, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal artifact payload: %v", err)
-	}
-	events[1].Payload = nextPayload
-	writeRunEvents(t, run, events)
+	mutateRunEventPayload(t, run, eventArtifactWritten, func(payload *artifactWrittenPayload) {
+		mutate(run, ref, payload)
+	})
 	return run, ref
 }
 
@@ -147,6 +141,30 @@ func requireErrorContains(t *testing.T, err error, parts ...string) {
 	}
 }
 
+func holdRunLock(t *testing.T, store *Store, runID string) (<-chan struct{}, chan<- struct{}, <-chan error) {
+	t.Helper()
+	locked := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- store.withRunLock(runID, func() error {
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	return locked, release, done
+}
+
+func assertStillBlocked(t *testing.T, done <-chan error, name string) {
+	t.Helper()
+	select {
+	case err := <-done:
+		t.Fatalf("%s completed while run lock was held: %v", name, err)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
 func requireStatusMaterializationError(t *testing.T, err error, runPath string) {
 	t.Helper()
 	if err == nil {
@@ -187,6 +205,29 @@ func readRunEvents(t *testing.T, run *Run) []Event {
 func writeRunEvents(t *testing.T, run *Run, events []Event) {
 	t.Helper()
 	writeEvents(t, runEventsPath(run), events)
+}
+
+func mutateRunEventPayload[T any](t *testing.T, run *Run, eventType string, mutate func(*T)) {
+	t.Helper()
+	events := readRunEvents(t, run)
+	for i := range events {
+		if events[i].Type != eventType {
+			continue
+		}
+		var payload T
+		if err := json.Unmarshal(events[i].Payload, &payload); err != nil {
+			t.Fatalf("unmarshal %s payload: %v", eventType, err)
+		}
+		mutate(&payload)
+		nextPayload, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal %s payload: %v", eventType, err)
+		}
+		events[i].Payload = nextPayload
+		writeRunEvents(t, run, events)
+		return
+	}
+	t.Fatalf("event %s not found", eventType)
 }
 
 func readStatusFile(t *testing.T, path string) Status {
@@ -247,6 +288,14 @@ func writeEvents(t *testing.T, path string, events []Event) {
 
 func denyStatusMaterializationOrSkip(t *testing.T, runPath string) {
 	t.Helper()
+	lockPath := filepath.Join(runPath, ".lock")
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("create run lock: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close run lock: %v", err)
+	}
 	if err := os.Chmod(runPath, 0o500); err != nil {
 		t.Fatalf("chmod run dir read-only: %v", err)
 	}

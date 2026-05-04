@@ -2,13 +2,136 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+
+	"tiny-llm-orchestrator/orc/internal/testutil"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("ORC_CLI_CODEX_SHIM") == "1" && filepath.Base(os.Args[0]) == "codex" {
+		cliCodexShimMain()
+		return
+	}
+	if os.Getenv("ORC_CLI_EXECUTE") == "1" {
+		if err := Execute(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func cliCodexShimMain() {
+	switch os.Getenv("ORC_CLI_CODEX_MODE") {
+	case "child-pid":
+		cliCodexShimChildPID(os.Getenv("ORC_CLI_CODEX_CHILD_PID"))
+	case "count-starts":
+		cliCodexShimCounter(os.Getenv("ORC_CLI_CODEX_COUNTER"))
+	case "record-prompt":
+		cliCodexShimRecordPrompt(os.Getenv("ORC_CLI_CODEX_ARGS"), os.Getenv("ORC_CLI_CODEX_STDIN"))
+	default:
+		os.Exit(2)
+	}
+}
+
+func cliCodexShimChildPID(childPIDPath string) {
+	if childPIDPath == "" {
+		os.Exit(2)
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	cmd := exec.Command("sh", "-c", "echo $$ > "+shellQuoteCLI(childPIDPath)+"; trap \"\" TERM; sleep 30")
+	if err := cmd.Run(); err != nil {
+		os.Exit(6)
+	}
+}
+
+func cliCodexShimCounter(counterPath string) {
+	if counterPath == "" {
+		os.Exit(2)
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	file, err := os.OpenFile(counterPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		os.Exit(7)
+	}
+	if _, err := fmt.Fprintf(file, "%d\n", os.Getpid()); err != nil {
+		_ = file.Close()
+		os.Exit(8)
+	}
+	if err := file.Close(); err != nil {
+		os.Exit(9)
+	}
+	time.Sleep(200 * time.Millisecond)
+}
+
+func cliCodexShimRecordPrompt(argsPath, stdinPath string) {
+	if argsPath == "" || stdinPath == "" {
+		os.Exit(2)
+	}
+	if err := os.WriteFile(argsPath, []byte(strings.Join(os.Args[1:], "\n")+"\n"), 0o600); err != nil {
+		os.Exit(3)
+	}
+	content, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		os.Exit(4)
+	}
+	if err := os.WriteFile(stdinPath, content, 0o600); err != nil {
+		os.Exit(5)
+	}
+	time.Sleep(50 * time.Millisecond)
+}
+
+type cliCodexShim struct {
+	binDir    string
+	argsPath  string
+	stdinPath string
+}
+
+func installCLICodexShim(t *testing.T, root string) cliCodexShim {
+	t.Helper()
+	binDir := filepath.Join(root, "bin")
+	if err := os.Mkdir(binDir, 0o750); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.Symlink(os.Args[0], filepath.Join(binDir, "codex")); err != nil {
+		t.Fatalf("symlink codex shim: %v", err)
+	}
+	return cliCodexShim{
+		binDir:    binDir,
+		argsPath:  filepath.Join(root, "codex-args.txt"),
+		stdinPath: filepath.Join(root, "codex-stdin.md"),
+	}
+}
+
+func (s cliCodexShim) setDefaultEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", s.binDir)
+	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
+	t.Setenv("ORC_CLI_CODEX_MODE", "record-prompt")
+	t.Setenv("ORC_CLI_CODEX_ARGS", s.argsPath)
+	t.Setenv("ORC_CLI_CODEX_STDIN", s.stdinPath)
+}
+
+func (s cliCodexShim) processEnv(mode string, extra ...string) []string {
+	env := append([]string{
+		"ORC_CLI_EXECUTE=1",
+		"ORC_CLI_CODEX_SHIM=1",
+		"ORC_CLI_CODEX_MODE=" + mode,
+		"PATH=" + s.binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}, extra...)
+	return append(os.Environ(), env...)
+}
 
 func TestExecuteHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -18,7 +141,7 @@ func TestExecuteHelp(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, want := range []string{"Usage:", "Available Commands:", "init", "run", "version"} {
+	for _, want := range []string{"Usage:", "Available Commands:", "init", "run", "worker", "version"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)
 		}
@@ -127,6 +250,133 @@ func TestExecuteRunInspectUnknownRunFailsClearly(t *testing.T) {
 				t.Fatalf("stderr = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExecuteWorkerHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Execute([]string{"worker", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	assertCLIOutputContainsAll(t, stdout.String(), []string{"orc worker launches", "launch-next"})
+}
+
+func TestExecuteWorkerLaunchNextRequiresRunID(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Execute([]string{"worker", "launch-next"}, &stdout, &stderr); err == nil {
+		t.Fatal("Execute returned nil error, want missing run id")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "orc worker launch-next: requires <run-id>") {
+		t.Fatalf("stderr = %q, want missing run id", got)
+	}
+}
+
+func TestExecuteWorkerLaunchNextUsesDefaultCodexCommand(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	shim.setDefaultEnv(t)
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	if !strings.Contains(output, "result: failed/missing_report") {
+		t.Fatalf("output missing successful shim missing_report result:\n%s\nlogs:\n%s", output, readCLILaunchLogs(t, root, result.runID))
+	}
+	assertCLIOutputContainsAll(t, output, []string{"launched attempt"})
+	if got := string(readCLIFile(t, shim.argsPath)); got != "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n" {
+		t.Fatalf("codex args = %q, want default launch command args", got)
+	}
+	assertCLIOutputContainsAll(t, string(readCLIFile(t, shim.stdinPath)), []string{
+		"# Tiny Orc Worker Prompt\n",
+		"- run_id: `" + result.runID + "`\n",
+		"- step_id: `plan`\n",
+		"- agent_id: `planner`\n",
+	})
+}
+
+func TestConcurrentWorkerLaunchNextOnlyStartsOneWorker(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	counterPath := filepath.Join(root, "codex-starts.txt")
+	env := shim.processEnv("count-starts", "ORC_CLI_CODEX_COUNTER="+counterPath)
+
+	first := startCLIProcess(t, root, env, "worker", "launch-next", result.runID)
+	second := startCLIProcess(t, root, env, "worker", "launch-next", result.runID)
+	firstErr := first.wait()
+	secondErr := second.wait()
+	if firstErr == nil && secondErr == nil {
+		t.Fatalf("both launch-next commands succeeded, want one refusal\nfirst:\n%s\nsecond:\n%s", first.output(), second.output())
+	}
+	starts := strings.Fields(string(readCLIFile(t, counterPath)))
+	if got := len(starts); got != 1 {
+		t.Fatalf("codex starts = %d (%v), want exactly one\nfirst:\n%s\nsecond:\n%s", got, starts, first.output(), second.output())
+	}
+	combined := first.output() + "\n" + second.output()
+	if !strings.Contains(combined, "result: failed/missing_report") {
+		t.Fatalf("combined output missing launched attempt result:\n%s", combined)
+	}
+	if !strings.Contains(combined, "already has starting attempt") && !strings.Contains(combined, "already has active attempt") {
+		t.Fatalf("combined output missing active-attempt refusal:\n%s", combined)
+	}
+}
+
+func TestWorkerLaunchNextSignalCancelsWorkerProcessGroup(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	childPIDPath := filepath.Join(root, "signal-child.pid")
+	cmd := exec.Command(os.Args[0], "worker", "launch-next", result.runID)
+	cmd.Dir = root
+	cmd.Env = shim.processEnv("child-pid", "ORC_CLI_CODEX_CHILD_PID="+childPIDPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start orc CLI process: %v", err)
+	}
+	eventuallyCLI(t, time.Second, func() bool {
+		_, err := os.Stat(childPIDPath)
+		return err == nil
+	})
+	childPID := readCLIPIDFile(t, childPIDPath)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal orc CLI process: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	waitErr := make(chan error, 1)
+	go func() {
+		waitErr <- cmd.Wait()
+	}()
+	select {
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		t.Fatal("orc CLI process did not exit after SIGTERM")
+	case err := <-waitErr:
+		if err == nil {
+			t.Fatalf("orc CLI process returned nil error, want nonzero cancellation exit\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+		}
+	}
+	eventuallyCLI(t, time.Second, func() bool {
+		return !cliProcessExists(childPID)
+	})
+	output := stdout.String()
+	if !strings.Contains(output, "result: failed/process_error") {
+		t.Fatalf("stdout missing cancellation result:\n%s\nstderr:\n%s", output, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "context canceled") {
+		t.Fatalf("stderr missing context canceled:\n%s", stderr.String())
 	}
 }
 
@@ -340,38 +590,10 @@ func confirmThreeInitPromptsThroughCLI() *strings.Reader {
 
 func writeCLIProject(t *testing.T, root, beads string, markdownFallback bool) {
 	t.Helper()
-	orcDir := filepath.Join(root, ".orc")
-	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
-		t.Fatalf("create workflows dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
-		t.Fatalf("create agents dir: %v", err)
-	}
-	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n")
-	writeCLIFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), cliWorkflowTaskContext(beads, markdownFallback))
-	writeCLIFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
-}
-
-func cliWorkflowTaskContext(beads string, markdownFallback bool) string {
-	return fmt.Sprintf(`name: implementation
-start: plan
-execution:
-  mode: sequential
-task_context:
-  beads: %s
-  markdown_fallback: %t
-defaults:
-  timeout: 30m
-  report_exit_grace: 30s
-  retries: {}
-steps:
-  plan:
-    agent: planner
-    allowed_results:
-      done: [ready]
-    on:
-      done/ready: ready_for_human
-`, beads, markdownFallback)
+	testutil.WriteProject(t, root, testutil.ProjectOptions{
+		Beads:            beads,
+		MarkdownFallback: markdownFallback,
+	})
 }
 
 func writeCLIFile(t *testing.T, path, content string) {
@@ -436,6 +658,33 @@ func executeCLICommand(t *testing.T, args []string) string {
 	return stdout.String()
 }
 
+type cliProcessResult struct {
+	cmd    *exec.Cmd
+	stdout bytes.Buffer
+	stderr bytes.Buffer
+}
+
+func startCLIProcess(t *testing.T, root string, env []string, args ...string) *cliProcessResult {
+	t.Helper()
+	result := &cliProcessResult{cmd: exec.Command(os.Args[0], args...)}
+	result.cmd.Dir = root
+	result.cmd.Env = env
+	result.cmd.Stdout = &result.stdout
+	result.cmd.Stderr = &result.stderr
+	if err := result.cmd.Start(); err != nil {
+		t.Fatalf("start CLI process %v: %v", args, err)
+	}
+	return result
+}
+
+func (r *cliProcessResult) wait() error {
+	return r.cmd.Wait()
+}
+
+func (r *cliProcessResult) output() string {
+	return "stdout:\n" + r.stdout.String() + "\nstderr:\n" + r.stderr.String()
+}
+
 func cliStartedRunID(t *testing.T, output string) string {
 	t.Helper()
 	if !strings.HasPrefix(output, "started run ") {
@@ -468,4 +717,66 @@ func readCLIFile(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return content
+}
+
+func readCLILaunchLogs(t *testing.T, root, runID string) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(root, ".orc", "runs", runID, "logs", "*.log"))
+	if err != nil {
+		t.Fatalf("glob launch logs: %v", err)
+	}
+	var out strings.Builder
+	for _, path := range matches {
+		out.WriteString(path)
+		out.WriteByte('\n')
+		out.Write(readCLIFile(t, path))
+		out.WriteByte('\n')
+	}
+	return out.String()
+}
+
+func assertCLIOutputContainsAll(t *testing.T, output string, wants []string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func eventuallyCLI(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if condition() {
+		return
+	}
+	t.Fatalf("condition not met within %s", timeout)
+}
+
+func readCLIPIDFile(t *testing.T, path string) int {
+	t.Helper()
+	content := strings.TrimSpace(string(readCLIFile(t, path)))
+	pid, err := strconv.Atoi(content)
+	if err != nil {
+		t.Fatalf("parse pid %q: %v", content, err)
+	}
+	return pid
+}
+
+func cliProcessExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil
+}
+
+func shellQuoteCLI(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

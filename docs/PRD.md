@@ -52,7 +52,7 @@ The Go CLI owns deterministic behavior:
 - `blocked_for_human` run-state handling
 - ready-for-human-review terminal state
 
-Worker agents are treated as useful but unreliable executors. A worker succeeds only when it provides a valid structured report. If a worker exits without reporting, times out, reports invalid data, needs approval, or hits unclear scope, the CLI records that outcome and follows the workflow's deterministic retry or `blocked_for_human` policy.
+Worker agents are treated as useful but unreliable executors. A worker succeeds only when it provides a valid structured report. In the current worker-launching slice, if a worker exits without reporting or times out, the CLI records a synthesized outcome and parks it for later report/retry routing. The workflow's deterministic retry or `blocked_for_human` policy is applied by follow-on report-routing work.
 
 Beads remains the preferred external issue tracker when available. The CLI may read bead context, but v1 does not write bead notes or close beads. If beads is unavailable or a run is started without a bead, the CLI uses explicit local Markdown task context. Task closure remains a manual human action after review.
 
@@ -80,9 +80,12 @@ The system is not deterministic where LLMs are inherently not deterministic:
 
 The design therefore treats each worker as an external process that must produce valid structured output. The workflow engine decides what happens next from that output.
 
-## V1 Scope
+## Target V1 Scope
 
-V1 should implement the smallest useful orchestrator loop.
+Target V1 should implement the smallest useful orchestrator loop. The current
+implementation is landing this surface incrementally; for example, the current
+worker-launching slice records synthesized no-report outcomes, while `orc
+report` and report/retry routing remain follow-on target V1 work.
 
 - `orc init`
 - `orc run start --workflow implementation --bead <id>`
@@ -260,11 +263,8 @@ steps:
       failed/process_error: blocked_for_human
 ```
 
-The exact schema may change during implementation, but the invariant is fixed: workers report facts; Go selects the next state.
-
-For a terminal worker outcome, the workflow engine evaluates retry policy before applying the step's `on:` transition. If retries remain for the `(status, result)` pair, the engine returns a retry decision for the same step; the caller creates and persists any replacement attempt. If retries are exhausted or no retry is configured, the engine applies the step's `on:` transition.
-
-Retry counters are keyed by terminal `(status, result)` pair and scoped to a step execution lineage. The relevant pair's count increments when the same step is retried. Counts reset when the workflow applies an `on:` transition and later enters the step through normal routing, even when that transition targets the same step.
+The exact schema may change during implementation, but the invariant is fixed:
+workers report facts; Go selects the next state.
 
 Run statuses are:
 
@@ -279,46 +279,35 @@ V1 workflows are sequential. Exactly one worker step may be active for a run at 
 
 The workflow engine is the only authority for selecting the next step. `orc worker launch-next <run-id>` launches the currently selected runnable step. A debug command may allow launching a named step, but it must refuse to launch a step that is not currently selected unless an explicit force flag is provided.
 
-Each worker launch creates an attempt id. The active attempt records the expected run id, step id, agent id, attempt id, process id when available, timeout, and report-exit grace period.
+## Current v1 Launcher Slice
 
-Attempt states are:
+The current implemented worker-launching slice creates a structured attempt id,
+renders a worker prompt, supervises the worker process group, streams logs, and
+records launcher-synthesized failed outcomes when no valid report exists yet:
 
-- `active`: worker launched and no terminal outcome has been recorded
-- `reported`: valid terminal report received
-- `exited`: process exited after a valid report
-- `terminated`: process killed after report grace, timeout, or cancellation
-- `timed_out`: timeout reached before a valid report
-- `invalid_report`: report received but rejected
-- `missing_report`: process exited zero without a valid report
-- `process_error`: process exited nonzero without a valid report
-- `superseded`: attempt is no longer current because a retry attempt replaced it
+- `failed/missing_report`
+- `failed/process_error`
+- `failed/timeout`
 
-Legal attempt state transitions are:
-
-- `active -> reported`
-- `active -> timed_out`
-- `active -> missing_report`
-- `active -> process_error`
-- `active -> invalid_report`
-- `reported -> exited`
-- `reported -> terminated`
-- `timed_out -> superseded`
-- `missing_report -> superseded`
-- `process_error -> superseded`
-- `invalid_report -> superseded`
-- `terminated -> superseded`
-
-Only the current active attempt can receive a valid report. A retry creates a new active attempt and marks the previous terminal failed attempt as `superseded`. Terminal successful attempts are never superseded.
-
-A terminated attempt may be superseded only when it represents a retryable failed attempt, such as timeout or launcher cancellation before a valid terminal report.
-
-On CLI restart, the run store is the source of truth. If an attempt is `active`, the launcher checks whether the process is still running when possible. If the process is not running and no valid report exists, it records `missing_report` or `process_error` when exit information is available. If exit information is unavailable, it sets the attempt state to `process_error` and records `status=failed`, `result=process_error`, and `exit_state=unknown` metadata.
+The launcher does not yet consume retry policy or launch replacement attempts
+from those synthesized outcomes. It parks the terminal outcome so follow-on
+report/routing work can apply retry accounting deterministically. The
+operational attempt contract lives in
+[worker-launching.md](features/worker-launching.md), and the durable event/status
+shape lives in [run-store.md](reference/run-store.md).
 
 ## Report Model
 
-`orc report` accepts structured fields and validates them before updating run state.
+`orc report` is the target report-authority model for the follow-on
+report-routing slice. It is not exposed by the current public CLI. In the target
+model, only the current active attempt can receive a valid report. Future retry
+routing creates replacement attempts and records retry lineage without allowing
+workers to choose the next step directly.
 
-Required fields:
+When implemented, `orc report` accepts structured fields and validates them
+before updating run state.
+
+Target required fields:
 
 - run id
 - step id
@@ -328,7 +317,7 @@ Required fields:
 - result
 - summary
 
-Optional fields:
+Target optional fields:
 
 - changed paths
 - commands run
@@ -337,7 +326,7 @@ Optional fields:
 - follow-up suggestions
 - Markdown report file
 
-Example report payload:
+Example target report payload:
 
 ```json
 {
@@ -360,14 +349,22 @@ Example report payload:
 }
 ```
 
-Report artifact paths are assigned by the run store and use sequence-prefixed
-filenames.
+Target report artifact paths are assigned by the run store and use
+sequence-prefixed filenames. Reports are one-way: a worker report never directly
+chooses the next worker. The workflow engine chooses the next step from the
+validated `(step, status, result)` tuple.
 
-Reports are one-way. A worker report never directly chooses the next worker. The workflow engine chooses the next step from the validated `(step, status, result)` tuple.
+Target validation rules:
 
-Reports are accepted only for the current active worker attempt. The report must match the active run id, expected step id, expected agent id, and expected attempt id.
-
-Malformed or schema-invalid reports for the current active attempt terminalize that attempt as `failed/invalid_report`. Reports for stale attempts, wrong steps, wrong agents, or future steps are recorded as ignored invalid report events. Ignored invalid report events do not change the active attempt state, do not consume retries, and do not advance the workflow.
+- Reports are accepted only for the current active worker attempt.
+- The report must match the active run id, expected step id, expected agent id,
+  and expected attempt id.
+- Malformed or schema-invalid reports for the current active attempt terminalize
+  that attempt as `failed/invalid_report`.
+- Reports for stale attempts, wrong steps, wrong agents, or future steps are
+  recorded as ignored invalid report events.
+- Ignored invalid report events do not change the active attempt state, consume
+  retries, or advance the workflow.
 
 The global status enum is:
 
@@ -375,25 +372,29 @@ The global status enum is:
 - `blocked`
 - `failed`
 
-Each workflow step defines the allowed result values for each status. Invalid status/result pairs are rejected and recorded as invalid reports.
+Each workflow step defines the allowed result values for each status. Invalid
+status/result pairs are rejected and recorded as invalid reports. Worker report
+status is distinct from run terminal state. Workers may report `status=blocked`
+and `result=blocked`; the workflow may route that outcome to the run terminal
+state `blocked_for_human`.
 
-Worker report status is distinct from run terminal state. Workers may report `status=blocked` and `result=blocked`; the workflow may route that outcome to the run terminal state `blocked_for_human`.
+Target report authority:
 
-Workers never write directly into `.orc/runs`. Workers call `orc report`; the CLI validates and persists the report. Direct filesystem persistence is an implementation detail of the report command.
+- Workers never write directly into `.orc/runs`; they call `orc report`.
+- A valid report is terminal for the worker attempt.
+- If a valid report exists, the report controls workflow routing even when the
+  worker later exits nonzero.
+- If a valid report exists but the worker keeps running past
+  `report_exit_grace`, the launcher terminates the process and the valid report
+  still controls routing.
+- No-report outcomes, invalid reports, timeouts, and process errors feed retry
+  policy in the report-routing slice.
 
-A valid report is terminal for the worker attempt. After receiving a valid report, the launcher waits up to the configured `report_exit_grace` for the worker process to exit. If the process does not exit within that grace period, the launcher terminates it. The valid report still controls workflow routing.
-
-Worker process outcomes are interpreted with this precedence:
-
-- If a valid report exists, the report controls workflow routing.
-- If a valid report exists but the worker exits nonzero, the report still controls routing and the run store records a warning event with the process exit code.
-- If no valid report exists and the worker exits zero, the launcher records `status=failed` and `result=missing_report`.
-- If no valid report exists and the worker exits nonzero, the launcher records `status=failed` and `result=process_error`.
-- If the worker exceeds its timeout without a valid report, the launcher terminates it and records `status=failed` and `result=timeout`.
-
-Timeout, missing-report, invalid-report, and process-error outcomes follow the workflow retry policy. If retries are exhausted, the workflow applies the configured `on:` transition, which commonly routes to `blocked_for_human`.
-
-Retry policy is keyed by reported or synthesized `(status, result)` pairs. Missing-report, timeout, invalid-report, process-error, and generic error retries are configured through the workflow's `retries` map.
+Target retry policy is keyed by reported or synthesized `(status, result)` pairs
+and scoped to a step execution lineage. The relevant pair's count increments
+when the same step is retried. Counts reset when the workflow applies an `on:`
+transition and later enters the step through normal routing, even when that
+transition targets the same step.
 
 ## Task Context Model
 
@@ -442,10 +443,10 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 - Worker prompts must include the exact `orc report` command contract.
 - V1 runs are sequential. Exactly one worker may be active for a run at a time.
 - Workers are launched with `orc worker launch-next <run-id>` so the CLI, not the orchestrator, selects the runnable step.
-- Each worker launch creates an active attempt id that reports must include.
+- Each worker launch creates an attempt id that reports must include; the attempt is `starting` until process metadata is recorded.
 - A valid worker report is terminal for the active attempt; after a short grace period, any still-running worker process is terminated.
-- If a worker exits without a valid report, it is retried according to workflow policy.
-- If a worker exceeds its configured timeout without a valid report, the launcher terminates it and applies workflow retry policy.
+- If a worker exits without a valid report, the launcher records a synthesized failed outcome; retry application is deferred to report-routing work.
+- If a worker exceeds its configured timeout without a valid report, the launcher terminates it and records a synthesized failed timeout outcome; retry application is deferred to report-routing work.
 - Retry counters are keyed by `status/result`, scoped to a step execution lineage, and reset whenever the workflow applies an `on:` transition, even when that transition targets the same step.
 - If retries are exhausted, the run enters `blocked_for_human` unless the workflow routes the exhausted outcome elsewhere.
 - If tests require network or approval, the worker reports blocked and the run stops.
@@ -493,13 +494,13 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 
 - **Name**: Worker Launcher
 - **Responsibility**: Start Codex CLI worker processes.
-- **Interface**: Launches only the workflow-selected next step by default. Creates an attempt id, records the active attempt state, accepts an agent descriptor, rendered prompt, run environment, sandbox settings, additional readable directories, timeout policy, report-exit grace period, and log destination. Returns process lifecycle status and retry outcomes. Recovers active attempts from run state after restart.
+- **Interface**: Current v1 public surface is `orc worker launch-next <run-id>`. It launches only the workflow-selected next step, creates an attempt id, renders the prompt, records prompt/log/process metadata, supervises the worker process group, and records launcher-synthesized terminal outcomes. Sandbox flags, additional readable-directory flags, and retry outcome routing are future report/routing surfaces rather than current launcher inputs.
 - **Tested**: targeted integration coverage if practical
 
-- **Name**: Report Command
-- **Responsibility**: Validate and persist structured worker reports.
-- **Interface**: Accepts report fields from CLI flags or a JSON file, validates required fields, active attempt identity, and allowed status/result values, writes through the Run Store, and updates latest state.
-- **Tested**: yes
+- **Name**: Report Command (future)
+- **Responsibility**: Validate and persist structured worker reports in the follow-on report-routing slice.
+- **Interface**: Not exposed by the current public CLI. The target surface accepts report fields from CLI flags or a JSON file, validates required fields, active attempt identity, and allowed status/result values, writes through the Run Store, and updates latest state.
+- **Tested**: no; current tests cover launcher-synthesized no-report outcomes only.
 
 - **Name**: Beads Context Reader
 - **Responsibility**: Import optional read-only bead context for a run.
@@ -533,19 +534,13 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 
 ## Testing Decisions
 
-- V1 tests prioritize config loading, workflow transitions, run-store persistence, report validation, and init dry-run behavior.
-- Tests should verify external behavior and persisted artifacts rather than internal implementation details.
-- Workflow tests should cover success paths, failed tests looping back to coding, reviewer changes-requested loops, blocked worker outcomes, invalid transitions, and retry exhaustion.
-- Workflow tests should cover retry-before-transition behavior and retry exhaustion applying the configured `on:` transition.
-- Workflow tests should cover retry counters resetting after a step is left and later re-entered.
-- Workflow tests should cover sequential execution and refusal to launch non-selected steps without an explicit force/debug path.
-- Report tests should cover required fields, active attempt mismatches, stale attempt ids, invalid status/result values, optional Markdown reports, changed path fields, command/test fields, follow-up appends, and direct file persistence.
-- Run Store tests should cover append-only events, latest status materialization, report persistence, follow-up persistence, and recovery from existing run directories.
-- Agent launcher tests should cover timeout, missing-report, invalid-report, process-error, valid-report-with-nonzero-exit, valid-report-with-hanging-process, report-exit grace behavior, and recovery from active attempts.
-- Config tests should cover workflow references to missing agents, invalid workflow branches, retry-map validation, optional dirty-start behavior, and bead-or-Markdown task context requirements.
-- Init tests should cover dry-run output, idempotent scaffolding, `.gitignore` updates when present, and no instruction-file overwrite without confirmation.
-- Command tests should cover interactive `run start` being rejected in noninteractive mode and bead note writing unavailable in v1.
-- VCS and external command integrations may use narrower unit tests and later integration tests because they depend on local tools.
+- V1 tests prioritize externally observable CLI behavior, deterministic workflow
+  routing, durable run-store state, and process supervision outcomes.
+- Tests should verify persisted artifacts and user-visible results rather than
+  internal implementation choreography.
+- Detailed package commands, race triggers, and local workflow guidance live in
+  [testing/local-test-workflows.md](testing/local-test-workflows.md) and
+  [testing/strategy.md](testing/strategy.md).
 
 ## Out of Scope For V1
 

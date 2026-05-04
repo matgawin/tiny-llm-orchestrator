@@ -71,7 +71,7 @@ func writeStagedFile(path string, content []byte) (string, error) {
 		if closeFile {
 			_ = temp.Close()
 		}
-		_ = os.Remove(tempName)
+		_ = os.Remove(tempName) // #nosec G703 -- tempName comes from os.CreateTemp in the target directory.
 	}
 	if _, err := temp.Write(content); err != nil {
 		cleanup(true)
@@ -125,12 +125,12 @@ func checkArtifactParentDir(runDir, relPath string, createMissing bool) error {
 	for component := range strings.SplitSeq(parent, "/") {
 		current = filepath.Join(current, component)
 		displayPath := filepath.ToSlash(componentPath(runDir, current))
-		info, err := os.Lstat(current)
+		info, err := os.Lstat(current) // #nosec G703 -- current is built from validated relative artifact path components under runDir.
 		if errorsIsNotExist(err) {
 			if !createMissing {
 				return fmt.Errorf("artifact parent %s: %w", displayPath, err)
 			}
-			if err := os.Mkdir(current, 0o750); err != nil {
+			if err := os.Mkdir(current, 0o750); err != nil { // #nosec G703 -- current is built from validated relative artifact path components under runDir.
 				return err
 			}
 			continue
@@ -181,9 +181,12 @@ func validateRunLayout(runDir string) error {
 }
 
 func ensureDir(path string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- caller validates run-store scoped paths before directory checks.
 	if os.IsNotExist(err) {
-		return os.Mkdir(path, 0o750)
+		if err := os.Mkdir(path, 0o750); err != nil && !os.IsExist(err) { // #nosec G703 -- caller validates run-store scoped paths before directory creation.
+			return err
+		}
+		return validateDir(path)
 	}
 	if err != nil {
 		return err
@@ -192,7 +195,7 @@ func ensureDir(path string) error {
 }
 
 func validateDir(path string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- caller validates run-store scoped paths before directory checks.
 	if err != nil {
 		return err
 	}
@@ -210,7 +213,7 @@ func validateDirInfo(path string, info os.FileInfo) error {
 }
 
 func validateArtifactFile(path string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- caller validates run-store scoped paths before file checks.
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -221,7 +224,7 @@ func validateArtifactFile(path string) error {
 }
 
 func validateRegularFile(path, name string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- caller validates run-store scoped paths before file checks.
 	if err != nil {
 		return err
 	}
@@ -239,21 +242,6 @@ func validateFileInfo(name string, info os.FileInfo) error {
 		return fmt.Errorf("%s is not a regular file", name)
 	}
 	return nil
-}
-
-func cleanupCreatedRunDir(runID, runDir string, cause error) error {
-	runsDir := filepath.Dir(runDir)
-	orcDir := filepath.Dir(runsDir)
-	if err := validateRunsDir(orcDir, runsDir); err != nil {
-		return fmt.Errorf("%w; cleanup run %q skipped: %w", cause, runID, err)
-	}
-	if err := validateDir(runDir); err != nil {
-		return fmt.Errorf("%w; cleanup run %q skipped: %w", cause, runID, err)
-	}
-	if err := os.RemoveAll(runDir); err != nil {
-		return fmt.Errorf("%w; cleanup run %q: %w", cause, runID, err)
-	}
-	return cause
 }
 
 func componentPath(root, path string) string {

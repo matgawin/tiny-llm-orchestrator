@@ -29,8 +29,8 @@ or run-store prompt artifacts.
 Prompt rendering is an internal reusable runtime API. The renderer does not
 expose a public debug CLI command and does not launch Codex.
 
-The future worker launcher owns active attempt creation and passes explicit
-metadata into the renderer:
+The worker launcher owns active attempt creation and passes explicit metadata
+into the renderer:
 
 - run id
 - step id
@@ -48,8 +48,15 @@ workflow from persisted run status. That means a newly started `running` run
 selects the workflow start step, while terminal states such as
 `ready_for_human` and `blocked_for_human` have no runnable step.
 
-Richer selected-step state based on active attempts, persisted outcomes, and
-retry lineage belongs to later launcher and report slices.
+The worker launcher intentionally creates the starting attempt before rendering
+the prompt. Prompt rendering still checks the selected step from run status and
+caller-provided step metadata; it does not treat that newly starting attempt as
+a reason to refuse rendering. The attempt transitions to active only after
+process metadata is recorded.
+
+Richer selected-step state based on persisted outcomes and retry lineage belongs
+to later report and retry-routing slices. Active-attempt state is persisted by
+the worker launcher.
 
 An internal unselected-step option may render a declared non-selected step in a
 running run for tests or a future debug caller. It does not override terminal
@@ -86,7 +93,7 @@ orc report --run <run-id> --step <step-id> --agent <agent-id> --attempt <attempt
 ```
 
 `<status>` and `<result>` must be one of the selected step's allowed
-`status/result` pairs from workflow config. The future report command owns
+`status/result` pairs from workflow config. The future report command will own
 final validation and persistence for additional fields such as changed paths,
 commands, tests, risks, follow-ups, and Markdown report details.
 

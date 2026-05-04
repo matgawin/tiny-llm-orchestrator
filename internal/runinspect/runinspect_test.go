@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
@@ -44,7 +45,7 @@ func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 		"state: running\n",
 		"workflow: implementation\n",
 		"selected_step: plan\n",
-		"active_attempt: not available\n",
+		"active_attempt: none\n",
 		"recent_reports:\n  none\n",
 		"artifacts:\n  - task_context: task/context.md\n",
 	})
@@ -71,6 +72,131 @@ func TestNextShowsSelectedStepWithoutLaunching(t *testing.T) {
 	after := snapshotRunDir(t, root, runID)
 	if !maps.Equal(before, after) {
 		t.Fatalf("Next mutated run directory:\nbefore: %+v\nafter: %+v", before, after)
+	}
+}
+
+func TestStatusAndNextShowActiveAttempt(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       "attempt-active",
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+		Time:            fixedTime().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+
+	status, next := inspectStatusAndNext(t, root, runID)
+	assertContainsAll(t, "status", status, []string{
+		"selected_step: none\n",
+		"active_attempt: attempt-active\n",
+	})
+	assertContainsAll(t, "next", next, []string{
+		"decision: wait_active_attempt\n",
+		"active_attempt: attempt-active\n",
+		"selected_step: plan\n",
+		"agent: planner\n",
+		"launch: already active\n",
+	})
+}
+
+func TestNextRefusesPendingLauncherOutcome(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	recordMissingReportAttempt(t, store, runID, "attempt-missing-report")
+
+	status, next := inspectStatusAndNext(t, root, runID)
+	assertContainsAll(t, "status", status, []string{
+		"selected_step: none\n",
+		"active_attempt: none\n",
+		"terminal_reason: pending_worker_outcome\n",
+	})
+	assertContainsAll(t, "next", next, []string{
+		"decision: terminal\n",
+		"terminal_reason: pending_worker_outcome\n",
+		"launch: no worker should launch\n",
+	})
+}
+
+func recordMissingReportAttempt(t *testing.T, store *runstore.Store, runID, attemptID string) {
+	t.Helper()
+	recordLaunchedAttempt(t, store, runID, attemptID)
+	if _, _, err := store.FinishAttempt(runID, runstore.FinishAttemptRequest{
+		AttemptID: attemptID,
+		State:     runstore.AttemptStateMissingReport,
+		Status:    "failed",
+		Result:    runstore.AttemptResultMissingReport,
+		ExitState: "exited",
+		Time:      fixedTime().Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("FinishAttempt returned error: %v", err)
+	}
+}
+
+func recordLaunchedAttempt(t *testing.T, store *runstore.Store, runID, attemptID string) {
+	t.Helper()
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       attemptID,
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+		Time:            fixedTime().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindPrompt,
+		Name:    "plan-" + attemptID,
+		Content: []byte("prompt\n"),
+		Time:    fixedTime().Add(1200 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact prompt returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+		AttemptID: attemptID,
+		PromptRef: promptRef,
+		Time:      fixedTime().Add(1300 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
+	}
+	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindLog,
+		Name:    "plan-" + attemptID,
+		Content: []byte("log\n"),
+		Time:    fixedTime().Add(1400 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact log returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+		AttemptID: attemptID,
+		LogRef:    logRef,
+		Time:      fixedTime().Add(1500 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptLog returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        attemptID,
+		PID:              12345,
+		ProcessStartTime: "123456789",
+		Time:             fixedTime().Add(1600 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 }
 
@@ -247,43 +373,10 @@ func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) st
 
 func writeProject(t *testing.T, root string) {
 	t.Helper()
-	orcDir := filepath.Join(root, ".orc")
-	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
-		t.Fatalf("create workflows dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
-		t.Fatalf("create agents dir: %v", err)
-	}
-	writeFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n")
-	writeFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
-	writeFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
-start: plan
-execution:
-  mode: sequential
-task_context:
-  beads: optional
-  markdown_fallback: true
-defaults:
-  timeout: 30m
-  report_exit_grace: 30s
-  retries: {}
-steps:
-  plan:
-    agent: planner
-    allowed_results:
-      done: [ready]
-      blocked: [blocked]
-    on:
-      done/ready: ready_for_human
-      blocked/blocked: blocked_for_human
-`)
-}
-
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
+	testutil.WriteProject(t, root, testutil.ProjectOptions{
+		MarkdownFallback: true,
+		BlockedResults:   []string{"blocked"},
+	})
 }
 
 func fixedTime() time.Time {

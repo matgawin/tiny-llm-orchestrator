@@ -26,7 +26,7 @@ The repository prefers:
 - direct tests of extracted pure helpers
 - real filesystem fixtures for config-loading behavior
 - package tests around deterministic validation and command behavior
-- integration-style coverage when future runtime behavior depends on real process, storage, or orchestration effects
+- integration-style coverage when runtime behavior depends on real process, storage, or orchestration effects
 
 The repository forbids:
 
@@ -67,7 +67,7 @@ Use package tests when the behavior needs real package wiring but not a full pro
 
 ### Integration Behavior
 
-Use integration-style tests when future behavior depends on real collaborators:
+Use integration-style tests when behavior depends on real collaborators:
 
 - worker process launch and termination
 - persisted run state
@@ -80,7 +80,7 @@ Do not replace these effects with broad mocks when a real test surface is practi
 - Generated mocks: forbidden
 - Shared mock packages: forbidden
 - Repository mocks above the repository layer: forbidden
-- Local stubs, spies, fakes, and handwritten mocks: forbidden
+- Local stubs, spies, fakes, and handwritten mocks for production seams: forbidden
 
 Preferred replacement patterns:
 
@@ -88,12 +88,14 @@ Preferred replacement patterns:
 - use real files and temporary directories for config-loading behavior
 - use CLI stream injection for command output instead of mocking writers
 - use integration-style tests when runtime behavior is what actually matters
+- use bounded executable shims or shell harnesses when the behavior under test is process launch, signal handling, PATH lookup, or stdio persistence
 - simplify production seams when a behavior is otherwise hard to test cleanly
 
 Practical reading of this policy:
 
 - if a behavior can be expressed as mapping, validation, or status logic, extract it and test the pure function
 - if a handler, service, or runtime path is only testable through handwritten doubles, that is a signal to refactor the production code or add integration coverage instead
+- executable shims are acceptable only when they stand in for an external command at the process boundary and the assertion is about durable CLI/runtime behavior, not call choreography
 
 ## Change-Oriented Guidance
 

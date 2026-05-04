@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 const priorReportExcerptLimit = 1200
 
-// Options describes a prompt rendering request from a future worker launcher.
+// Options describes a prompt rendering request from a worker launcher.
 type Options struct {
 	Root      string
 	RunID     string
@@ -120,47 +121,35 @@ func validateOptions(opts Options) error {
 }
 
 func loadRenderContext(opts Options) (renderContext, error) {
-	project, err := config.Load(opts.Root)
-	if err != nil {
-		return renderContext{}, fmt.Errorf("load project config: %w", err)
-	}
-	store, err := runstore.Open(project.Root)
+	loaded, err := runcontext.Load(opts.Root, opts.RunID)
 	if err != nil {
 		return renderContext{}, err
 	}
-	run, err := store.Load(opts.RunID)
+	decision, err := workflow.Evaluate(loaded.Workflow, workflow.RunState{Status: loaded.Run.Status.State})
 	if err != nil {
-		return renderContext{}, err
-	}
-	workflowConfig, ok := project.Workflows[run.Status.Workflow]
-	if !ok {
-		return renderContext{}, fmt.Errorf("workflow %q from run %q is not configured", run.Status.Workflow, run.ID)
-	}
-	decision, err := workflow.Evaluate(workflowConfig, workflow.RunState{Status: run.Status.State})
-	if err != nil {
-		return renderContext{}, fmt.Errorf("evaluate run %q: %w", run.ID, err)
+		return renderContext{}, fmt.Errorf("evaluate run %q: %w", loaded.Run.ID, err)
 	}
 	if decision.Kind != workflow.DecisionSelectStep {
-		return renderContext{}, fmt.Errorf("run %q has no selected runnable step; decision is %s", run.ID, decision.Kind)
+		return renderContext{}, fmt.Errorf("run %q has no selected runnable step; decision is %s", loaded.Run.ID, decision.Kind)
 	}
 	if !opts.AllowUnselectedStep && opts.StepID != decision.Step {
-		return renderContext{}, fmt.Errorf("step %q is not selected for run %q; selected step is %q", opts.StepID, run.ID, decision.Step)
+		return renderContext{}, fmt.Errorf("step %q is not selected for run %q; selected step is %q", opts.StepID, loaded.Run.ID, decision.Step)
 	}
-	step, ok := workflowConfig.Steps[opts.StepID]
+	step, ok := loaded.Workflow.Steps[opts.StepID]
 	if !ok {
-		return renderContext{}, fmt.Errorf("step %q is not declared in workflow %q", opts.StepID, workflowConfig.Name)
+		return renderContext{}, fmt.Errorf("step %q is not declared in workflow %q", opts.StepID, loaded.Workflow.Name)
 	}
 	if step.Agent != opts.AgentID {
 		return renderContext{}, fmt.Errorf("step %q uses agent %q, not %q", opts.StepID, step.Agent, opts.AgentID)
 	}
-	agent, ok := project.Agents[opts.AgentID]
+	agent, ok := loaded.Project.Agents[opts.AgentID]
 	if !ok {
 		return renderContext{}, fmt.Errorf("agent %q is not configured", opts.AgentID)
 	}
 	return renderContext{
-		store:    store,
-		run:      run,
-		workflow: workflowConfig,
+		store:    loaded.Store,
+		run:      loaded.Run,
+		workflow: loaded.Workflow,
 		step:     step,
 		agent:    agent,
 	}, nil
