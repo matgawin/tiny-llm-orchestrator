@@ -289,6 +289,76 @@ func TestExecuteRunInspectUnknownRunFailsClearly(t *testing.T) {
 	}
 }
 
+func TestExecuteRunAddFollowupAppendsFollowup(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+	output := executeCLICommand(t, []string{
+		"run", "add-followup", result.runID,
+		"--title", "Create release note",
+		"--details", "Mention the follow-up recorder.",
+	})
+	assertCLIOutputContainsAll(t, output, []string{"recorded follow-up for run " + result.runID})
+	content := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md")))
+	assertCLIOutputContainsAll(t, content, []string{
+		"## Create release note",
+		"Source: orchestrator",
+		"Recorded-At:",
+		"Mention the follow-up recorder.",
+	})
+	loaded, err := openCLIStore(t, root).Load(result.runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Events[len(loaded.Events)-1].Type; got != "artifact.written" {
+		t.Fatalf("last event type = %q, want artifact.written", got)
+	}
+}
+
+func TestExecuteRunAddFollowupRequiresTitle(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"run", "add-followup", result.runID, "--details", "No title."}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want missing title failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "--title is required") {
+		t.Fatalf("stderr = %q, want missing title", got)
+	}
+}
+
+func TestExecuteRunAddFollowupOnBeadBackedRunDoesNotCallBD(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	beadsDir := filepath.Join(root, "..", ".beads")
+	beadID := "main-readable"
+	path := fakeCLIBDPath(t, beadID, beadsDir, true)
+	t.Setenv("PATH", path)
+	t.Setenv("BEADS_DIR", beadsDir)
+	result := executeCLIRunStart(t, root, []string{"--bead", beadID}, nil)
+
+	t.Setenv("PATH", fakeCLIBDPath(t, beadID, beadsDir, false))
+	output := executeCLICommand(t, []string{
+		"run", "add-followup", result.runID,
+		"--title", "Create bead manually",
+		"--details", "Human should decide whether to create a bead.",
+	})
+	assertCLIOutputContainsAll(t, output, []string{"recorded follow-up for run " + result.runID})
+	content := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md")))
+	assertCLIOutputContainsAll(t, content, []string{
+		"## Create bead manually",
+		"Source: orchestrator",
+		"Human should decide whether to create a bead.",
+	})
+}
+
 func TestExecuteWorkerHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -364,6 +434,14 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 	if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path)))); got != "## Detail\n" {
 		t.Fatalf("report detail = %q, want copied markdown", got)
 	}
+	followups := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md")))
+	assertCLIOutputContainsAll(t, followups, []string{
+		"## Document report summaries",
+		"Source: report",
+		"Step: plan",
+		"Agent: planner",
+		"Attempt: attempt-001",
+	})
 }
 
 func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
@@ -578,6 +656,7 @@ func TestExecuteReportInvalidCurrentAttemptTerminalizesInvalidReport(t *testing.
 		"--status", "done",
 		"--result", "not-allowed",
 		"--summary", "Bad result.",
+		"--follow-up", "Should not append",
 	}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want invalid report error")
@@ -595,6 +674,9 @@ func TestExecuteReportInvalidCurrentAttemptTerminalizesInvalidReport(t *testing.
 	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
 	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != "failed" || attempt.Result != runstore.AttemptResultInvalidReport {
 		t.Fatalf("attempt = %+v, want failed/invalid_report", attempt)
+	}
+	if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md"))); got != "" {
+		t.Fatalf("followups.md = %q, want unchanged empty file", got)
 	}
 }
 
@@ -845,6 +927,13 @@ func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
 	if report.Followups[0].Title != "Later" || report.Followups[0].Details != "Capture summary context." {
 		t.Fatalf("followups = %+v, want JSON followup details", report.Followups)
 	}
+	followups := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md")))
+	assertCLIOutputContainsAll(t, followups, []string{
+		"## Later",
+		"Source: report",
+		"Step: plan",
+		"Capture summary context.",
+	})
 }
 
 func TestExecuteReportJSONFileCopiesMarkdownDetail(t *testing.T) {
@@ -971,6 +1060,7 @@ func TestExecuteReportWrongAttemptRecordsIgnoredEvent(t *testing.T) {
 		"--result", "ready",
 		"--summary", "Stale report.",
 		"--report-file", reportPath,
+		"--follow-up", "Should not append",
 	}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want wrong attempt error")
@@ -995,6 +1085,9 @@ func TestExecuteReportWrongAttemptRecordsIgnoredEvent(t *testing.T) {
 	}
 	if active := loaded.Status.ActiveAttempt; active == nil || active.ReportRef != nil || active.Report != nil {
 		t.Fatalf("active attempt = %+v, want unchanged active attempt without report refs", active)
+	}
+	if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md"))); got != "" {
+		t.Fatalf("followups.md = %q, want unchanged empty file", got)
 	}
 }
 
@@ -1026,6 +1119,7 @@ func TestExecuteReportWrongStepAgentAndStartingAttemptRecordIgnoredEvent(t *test
 				"--status", "done",
 				"--result", "ready",
 				"--summary", "Ignored.",
+				"--follow-up", "Should not append",
 			}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want ignored report error")
@@ -1039,6 +1133,9 @@ func TestExecuteReportWrongStepAgentAndStartingAttemptRecordIgnoredEvent(t *test
 			}
 			if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
 				t.Fatalf("last event type = %q, want report.ignored", got)
+			}
+			if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md"))); got != "" {
+				t.Fatalf("followups.md = %q, want unchanged empty file", got)
 			}
 		})
 	}
@@ -1485,6 +1582,36 @@ func writeCLIFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func fakeCLIBDPath(t *testing.T, beadID, beadsDir string, allowShow bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bd")
+	var script string
+	if allowShow {
+		script = fmt.Sprintf(`#!/bin/sh
+if [ "${BEADS_DIR:-}" != %q ]; then
+  printf 'unexpected BEADS_DIR: %%s\n' "${BEADS_DIR:-}" >&2
+  exit 3
+fi
+if [ "$1" = "show" ] && [ "$2" = %q ] && [ "$3" = "--json" ]; then
+  printf ' [{"id":%q,"title":"Readable bead","description":"Task body"}]\n'
+  exit 0
+fi
+printf 'unexpected bd args: %%s %%s %%s\n' "$1" "$2" "$3" >&2
+exit 2
+`, beadsDir, beadID, beadID)
+	} else {
+		script = `#!/bin/sh
+printf 'bd must not be called during follow-up recording\n' >&2
+exit 9
+`
+	}
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	return dir
 }
 
 type cliTaskSnapshot struct {

@@ -459,8 +459,42 @@ with identical content; different existing content remains an error.
 `RecordAttemptReport` rejects caller-supplied `report_ref` values, so report refs
 are added only when the store stages report content for that event.
 
-`followup` appends new content by rewriting `followups.md` before the
-`artifact.written` event is appended.
+`followup` appends new content by rewriting `followups.md`. Follow-up entries
+are formatted by the typed Run Store follow-up API rather than by callers.
+
+Report-sourced entries use this Markdown shape:
+
+```md
+## <title>
+
+Source: report
+Step: <step-id>
+Agent: <agent-id>
+Attempt: <attempt-id>
+Recorded-At: <RFC3339 timestamp>
+
+<details>
+```
+
+Orchestrator-sourced entries omit step, agent, and attempt metadata:
+
+```md
+## <title>
+
+Source: orchestrator
+Recorded-At: <RFC3339 timestamp>
+
+<details>
+```
+
+The details block is omitted when no details are provided.
+
+Orchestrator-sourced appends are recorded with the existing `artifact.written`
+event for `kind=followup`. Report-sourced appends are staged and committed by
+`RecordAttemptReport`; the resulting `attempt.reported` payload carries
+`followup_refs` so the accepted report and its follow-up artifact share one
+store-owned success boundary. V1 does not emit a separate `followup.recorded`
+event.
 
 ## V1 Operational Rules
 

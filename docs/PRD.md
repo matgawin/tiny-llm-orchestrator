@@ -428,20 +428,22 @@ Workflows may declare whether task context is required and whether beads are req
 
 Substantial new findings should not silently expand a run. When the
 orchestrator or a worker identifies follow-up work that is outside the current
-task, v1 preserves that proposed work as structured follow-up data until the
-follow-up recording slice writes `.orc/runs/<run-id>/followups.md`.
+task, v1 preserves that proposed work in `.orc/runs/<run-id>/followups.md`
+without expanding the active run.
 
 If a valid worker report includes follow-up suggestions, `orc report` preserves
-them in structured report data. The follow-up recording slice appends those
-suggestions to `followups.md`; the orchestrator can also record follow-ups
-directly with `orc run add-followup <run-id> --title "..." --details "..."`.
+them in structured report data and appends them to `followups.md`; the
+orchestrator can also record follow-ups directly with
+`orc run add-followup <run-id> --title "..." --details "..."`.
+`followups.md` is the persisted input consumed by later `orc run
+summary-context` rendering.
 
 Each follow-up requires a `title`; `details` is optional.
 
 If the run is bead-backed, the ready-for-review summary may suggest creating
 beads from those follow-ups, but v1 does not create or close beads
-automatically. If the run is Markdown-backed, `followups.md` is the local
-follow-up artifact once the follow-up recording slice is implemented.
+automatically. `followups.md` is the local follow-up artifact for bead-backed
+and Markdown-backed runs.
 
 ## Implementation Decisions
 
@@ -549,8 +551,8 @@ follow-up artifact once the follow-up recording slice is implemented.
 
 - **Name**: Follow-Up Task Recorder
 - **Responsibility**: Persist substantial out-of-scope findings without expanding the active run.
-- **Interface**: Later slice. Appends structured Markdown entries from preserved report follow-up suggestions or `orc run add-followup` to `.orc/runs/<run-id>/followups.md` and exposes them in summary context.
-- **Tested**: deferred to the follow-up recording slice
+- **Interface**: Appends structured Markdown entries from valid report follow-up suggestions or `orc run add-followup` to `.orc/runs/<run-id>/followups.md` through the Run Store. Report-sourced appends share the accepted report's store-owned commit boundary; orchestrator-sourced appends use `artifact.written`. V1 never mutates beads automatically.
+- **Tested**: run-store follow-up formatting, report-driven append, and CLI add-followup behavior
 
 ## Testing Decisions
 

@@ -34,10 +34,12 @@ Contributors changing package structure, config validation, CLI behavior, or fut
   artifact persistence. Feature semantics live in
   [../features/worker-prompt-rendering.md](../features/worker-prompt-rendering.md).
 - `internal/report` owns worker report validation and report persistence
-  orchestration for `orc report`.
+  orchestration for `orc report`, including handing valid report follow-up
+  suggestions to the Run Store.
 - `internal/runstore` owns persistent run state under `.orc/runs/<run-id>` and
   the narrow per-run locking needed to keep store-owned event/status writes
-  consistent.
+  consistent. It also owns the typed `followups.md` entry formatter so report
+  and CLI callers cannot drift.
 - `internal/workflow` owns deterministic workflow transitions for validated workflow definitions and in-memory run state.
 - `internal/launcher` owns worker process launch and supervision.
 

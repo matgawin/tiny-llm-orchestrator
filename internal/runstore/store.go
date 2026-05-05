@@ -520,6 +520,21 @@ func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, err
 	return ref, nil
 }
 
+// RecordFollowup appends one structured follow-up entry to followups.md.
+func (s *Store) RecordFollowup(runID string, req RecordFollowupRequest) (ArtifactRef, error) {
+	req.Time = normalizeTime(req.Time)
+	content, err := formatFollowupEntry(req)
+	if err != nil {
+		return ArtifactRef{}, err
+	}
+	return s.WriteArtifact(runID, Artifact{
+		Kind:    KindFollowup,
+		Name:    string(req.Source),
+		Content: content,
+		Time:    req.Time,
+	})
+}
+
 // StartAttempt records a new starting worker attempt for a running run.
 func (s *Store) StartAttempt(runID string, req StartAttemptRequest) (Attempt, Event, error) {
 	return s.StartAttemptContext(context.Background(), runID, req)
@@ -705,32 +720,45 @@ func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Atte
 		if !req.ReportContentSet && report.ReportRef != nil {
 			return errors.New("report_ref cannot be supplied by callers; provide report content for the run store to stage")
 		}
-		var staged *stagedArtifact
+		eventTime := normalizeTime(req.Time)
+		eventSequence := nextEventSequence(run)
+		var staged []stagedArtifact
 		if req.ReportContentSet {
-			ref, stagedReport, err := s.stageReportArtifactForEvent(run, req.ReportName, req.ReportContent, nextEventSequence(run))
+			ref, stagedReport, err := s.stageReportArtifactForEvent(run, req.ReportName, req.ReportContent, eventSequence)
 			if err != nil {
 				return err
 			}
-			staged = &stagedReport
-			defer staged.cleanup()
+			staged = append(staged, stagedReport)
 			report.ReportRef = &ref
 		}
+		followupRefs, stagedFollowup, err := s.stageReportFollowupsForEvent(run, report, state, eventTime, eventSequence)
+		if err != nil {
+			cleanupStagedArtifacts(staged)
+			return err
+		}
+		if stagedFollowup != nil {
+			staged = append(staged, *stagedFollowup)
+		}
+		defer cleanupStagedArtifacts(staged)
 		if err := applyAttemptReport(&attempt, state, report); err != nil {
 			return err
 		}
 		payload, err := marshalPayload(attemptReportedPayload{
-			AttemptID: report.AttemptID,
-			State:     state,
-			Report:    *attempt.Report,
+			AttemptID:    report.AttemptID,
+			State:        state,
+			Report:       *attempt.Report,
+			FollowupRefs: followupRefs,
 		})
 		if err != nil {
 			return err
 		}
-		event = Event{Time: req.Time, Type: eventAttemptReported, Payload: payload}
-		if staged != nil {
-			if err := staged.commit(); err != nil {
-				return err
+		event = Event{Time: eventTime, Type: eventAttemptReported, Payload: payload}
+		var committed []stagedArtifact
+		for _, artifact := range staged {
+			if err := artifact.commit(); err != nil {
+				return errors.Join(err, rollbackStagedArtifacts(committed))
 			}
+			committed = append(committed, artifact)
 		}
 		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			finishedAt := event.Time
@@ -747,6 +775,7 @@ func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Atte
 			if attempt.ReportRef != nil {
 				status.Artifacts = append(status.Artifacts, *attempt.ReportRef)
 			}
+			status.Artifacts = append(status.Artifacts, followupRefs...)
 		})
 		event = committedEvent
 		if err != nil {
@@ -754,10 +783,8 @@ func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Atte
 				out = currentOrLatestAttempt(status, report.AttemptID)
 				return err
 			}
-			if staged != nil {
-				if rollbackErr := staged.rollback(); rollbackErr != nil {
-					return errors.Join(err, fmt.Errorf("rollback report artifact %s: %w", attempt.ReportRef.Path, rollbackErr))
-				}
+			if rollbackErr := rollbackStagedArtifacts(committed); rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
 			}
 			return err
 		}
@@ -771,6 +798,76 @@ func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Atte
 		return Attempt{}, Event{}, err
 	}
 	return out, event, nil
+}
+
+func (s *Store) stageReportFollowupsForEvent(run *Run, report Report, state string, at time.Time, sequence int) ([]ArtifactRef, *stagedArtifact, error) {
+	if state != AttemptStateReported || len(report.Followups) == 0 {
+		return nil, nil, nil
+	}
+	var content []byte
+	for _, followup := range report.Followups {
+		entry, err := formatFollowupEntry(RecordFollowupRequest{
+			Followup:  followup,
+			Source:    FollowupSourceReport,
+			StepID:    report.StepID,
+			AgentID:   report.AgentID,
+			AttemptID: report.AttemptID,
+			Time:      at,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		content = append(content, entry...)
+	}
+	ref, staged, err := s.stageFollowupArtifactForEvent(run, FollowupSourceReport, content, sequence)
+	if err != nil {
+		return nil, nil, err
+	}
+	return []ArtifactRef{ref}, &staged, nil
+}
+
+func (s *Store) stageFollowupArtifactForEvent(run *Run, source FollowupSource, content []byte, sequence int) (ArtifactRef, stagedArtifact, error) {
+	relPath, err := artifactPath(KindFollowup, string(source), sequence)
+	if err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	if err := validateRelativeArtifactPath(relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	if err := validateArtifactWriteAllowed(run.Status.Artifacts, KindFollowup, relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	ref := ArtifactRef{
+		Kind:          KindFollowup,
+		Path:          relPath,
+		Name:          string(source),
+		EventSequence: sequence,
+	}
+	path := filepath.Join(run.Path, filepath.FromSlash(relPath))
+	if err := ensureArtifactParentDir(run.Path, relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s: %w", run.ID, relPath, err)
+	}
+	staged, err := stageArtifact(path, Artifact{Kind: KindFollowup, Name: string(source), Content: content})
+	if err != nil {
+		return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s: %w", run.ID, relPath, err)
+	}
+	return ref, staged, nil
+}
+
+func cleanupStagedArtifacts(staged []stagedArtifact) {
+	for _, artifact := range staged {
+		artifact.cleanup()
+	}
+}
+
+func rollbackStagedArtifacts(staged []stagedArtifact) error {
+	var err error
+	for i := len(staged) - 1; i >= 0; i-- {
+		if rollbackErr := staged[i].rollback(); rollbackErr != nil {
+			err = errors.Join(err, rollbackErr)
+		}
+	}
+	return err
 }
 
 func (s *Store) stageReportArtifactForEvent(run *Run, name string, content []byte, sequence int) (ArtifactRef, stagedArtifact, error) {
@@ -1499,6 +1596,60 @@ func normalizeTime(value time.Time) time.Time {
 	return value.UTC()
 }
 
+func formatFollowupEntry(req RecordFollowupRequest) ([]byte, error) {
+	title := strings.TrimSpace(req.Followup.Title)
+	if title == "" {
+		return nil, errors.New("follow-up title is required")
+	}
+	source := req.Source
+	switch source {
+	case FollowupSourceReport:
+		if strings.TrimSpace(req.StepID) == "" {
+			return nil, errors.New("follow-up report step id is required")
+		}
+		if strings.TrimSpace(req.AgentID) == "" {
+			return nil, errors.New("follow-up report agent id is required")
+		}
+		if strings.TrimSpace(req.AttemptID) == "" {
+			return nil, errors.New("follow-up report attempt id is required")
+		}
+	case FollowupSourceOrchestrator:
+	default:
+		return nil, fmt.Errorf("follow-up source %q is not supported", source)
+	}
+	recordedAt := normalizeTime(req.Time)
+	var out strings.Builder
+	fmt.Fprintf(&out, "## %s\n\n", oneLineMetadata(title))
+	fmt.Fprintf(&out, "Source: %s\n", source)
+	if source == FollowupSourceReport {
+		fmt.Fprintf(&out, "Step: %s\n", oneLineMetadata(req.StepID))
+		fmt.Fprintf(&out, "Agent: %s\n", oneLineMetadata(req.AgentID))
+		fmt.Fprintf(&out, "Attempt: %s\n", oneLineMetadata(req.AttemptID))
+	}
+	fmt.Fprintf(&out, "Recorded-At: %s\n", recordedAt.Format(time.RFC3339))
+	details := strings.TrimSpace(req.Followup.Details)
+	if details != "" {
+		out.WriteString("\n")
+		out.WriteString(normalizeMarkdownDetails(details))
+		out.WriteString("\n")
+	}
+	out.WriteString("\n")
+	return []byte(out.String()), nil
+}
+
+func oneLineMetadata(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func normalizeMarkdownDetails(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.TrimSpace(value)
+}
+
 func marshalPayload(payload any) (json.RawMessage, error) {
 	content, err := json.Marshal(payload)
 	if err != nil {
@@ -1945,6 +2096,15 @@ func reportReplayedActiveAttempt(status *Status, event Event, payload attemptRep
 	}
 	if payload.Report.ReportRef != nil {
 		status.Artifacts = append(status.Artifacts, *payload.Report.ReportRef)
+	}
+	for _, ref := range payload.FollowupRefs {
+		if err := validateArtifactRef(ref, event.Sequence); err != nil {
+			return fmt.Errorf("event %d followup artifact %s: %w", event.Sequence, ref.Path, err)
+		}
+		if ref.Kind != KindFollowup {
+			return fmt.Errorf("event %d followup artifact %s kind %q, want %q", event.Sequence, ref.Path, ref.Kind, KindFollowup)
+		}
+		status.Artifacts = append(status.Artifacts, ref)
 	}
 	status.ActiveAttempt = nil
 	return nil

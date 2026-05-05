@@ -24,9 +24,9 @@ Contributors, maintainers, reviewers, operators, and code agents landing in the 
 Tiny Orc is a small Go control-plane CLI for project-local LLM orchestration.
 The current code scaffolds and validates `.orc` configuration, starts durable
 runs from explicit bead or Markdown task context, evaluates deterministic
-workflow transitions, exposes read-only run inspection, renders internal worker
-prompts, launches workflow-selected worker processes, and provides durable
-run-store primitives.
+workflow transitions, records local follow-up work, exposes read-only run
+inspection, renders internal worker prompts, launches workflow-selected worker
+processes, and provides durable run-store primitives.
 
 Runtime entrypoint:
 
@@ -55,6 +55,7 @@ Entrypoints:
 
 - CLI behavior: `internal/cli`
 - run start and task context capture: `internal/runstart` and [docs/features/run-start.md](docs/features/run-start.md)
+- follow-up recording: [docs/features/follow-up-recording.md](docs/features/follow-up-recording.md)
 - run inspection behavior: [docs/features/run-inspection.md](docs/features/run-inspection.md)
 - worker prompt rendering: `internal/promptrender` and [docs/features/worker-prompt-rendering.md](docs/features/worker-prompt-rendering.md)
 - worker launching and process supervision: `internal/launcher` and [docs/features/worker-launching.md](docs/features/worker-launching.md)
@@ -80,6 +81,7 @@ Entrypoints:
 - `internal/runstart`: explicit task-context resolution and run creation for `orc run start`.
 - `internal/runinspect`: read-only run inspection command implementation.
 - `internal/promptrender`: internal role-specific worker prompt renderer.
+- `internal/report`: worker report validation and report-sourced follow-up recording.
 - `internal/runstore`: persistent run-state package.
 - `internal/launcher`: external worker launcher package.
 

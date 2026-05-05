@@ -28,9 +28,10 @@ The only runnable service today is the `orc` CLI:
 - `internal/cli` handles command dispatch and user-facing output.
 - `internal/config` loads and validates `.orc` project configuration.
 
-The CLI currently exposes help, version, init, `run start`, read-only
-`run status` / `run next` behavior, `worker launch-next` for launching the
-workflow-selected worker attempt, and `report` for worker report submission.
+The CLI currently exposes help, version, init, `run start`,
+`run add-followup`, read-only `run status` / `run next` behavior,
+`worker launch-next` for launching the workflow-selected worker attempt, and
+`report` for worker report submission.
 
 Config loading and validation, deterministic workflow transitions,
 task-context resolution, inspection, prompt rendering, worker launch, report
@@ -64,7 +65,7 @@ These packages define or reserve ownership for orchestration behavior outside th
 - `internal/promptrender`: role-specific worker prompt rendering for selected
   workflow steps.
 - `internal/report`: report validation and persistence for active worker
-  attempts.
+  attempts, including report-sourced follow-up recording.
 - `internal/workflow`: deterministic workflow graph transitions.
 - `internal/launcher`: worker process start and supervision.
 

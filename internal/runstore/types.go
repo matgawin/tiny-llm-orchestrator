@@ -191,6 +191,24 @@ type Followup struct {
 	Details string `json:"details,omitempty"`
 }
 
+// FollowupSource identifies where a recorded follow-up was proposed.
+type FollowupSource string
+
+const (
+	FollowupSourceReport       FollowupSource = "report"
+	FollowupSourceOrchestrator FollowupSource = "orchestrator"
+)
+
+// RecordFollowupRequest describes one follow-up entry to append to followups.md.
+type RecordFollowupRequest struct {
+	Followup  Followup
+	Source    FollowupSource
+	StepID    string
+	AgentID   string
+	AttemptID string
+	Time      time.Time
+}
+
 type createRunPayload struct {
 	Workflow string `json:"workflow"`
 	TaskSlug string `json:"task_slug,omitempty"`
@@ -300,9 +318,10 @@ type attemptFinishedPayload struct {
 }
 
 type attemptReportedPayload struct {
-	AttemptID string `json:"attempt_id"`
-	State     string `json:"state"`
-	Report    Report `json:"report"`
+	AttemptID    string        `json:"attempt_id"`
+	State        string        `json:"state"`
+	Report       Report        `json:"report"`
+	FollowupRefs []ArtifactRef `json:"followup_refs,omitempty"`
 }
 
 type reportIgnoredPayload struct {

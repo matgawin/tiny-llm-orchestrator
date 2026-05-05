@@ -1014,6 +1014,9 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 	if payload.State != AttemptStateReported || payload.Report.Summary != "Plan is ready." {
 		t.Fatalf("report payload = %+v, want reported payload", payload)
 	}
+	if len(payload.FollowupRefs) != 1 || payload.FollowupRefs[0].Kind != KindFollowup {
+		t.Fatalf("followup refs = %+v, want one followup artifact ref", payload.FollowupRefs)
+	}
 
 	loaded, err := store.Load(run.ID)
 	if err != nil {
@@ -1025,6 +1028,52 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 	replayed := loaded.Status.Attempts[0]
 	if replayed.Report == nil || replayed.Report.ChangedPaths[0] != "README.md" {
 		t.Fatalf("replayed report = %+v, want structured changed path", replayed.Report)
+	}
+	followups := string(readFile(t, filepath.Join(run.Path, followupsName)))
+	if !strings.Contains(followups, "## Document report summaries") || !strings.Contains(followups, "Source: report") {
+		t.Fatalf("followups.md = %q, want report-sourced followup", followups)
+	}
+	if got := loaded.Status.Artifacts[len(loaded.Status.Artifacts)-1]; got.Kind != KindFollowup || got.EventSequence != event.Sequence {
+		t.Fatalf("last artifact = %+v, want followup ref owned by attempt.reported event %d", got, event.Sequence)
+	}
+}
+
+func TestRecordAttemptReportFollowupStageFailureLeavesAttemptActive(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "record-report-followup-stage-failure")
+	attemptID := "attempt-followup-stage-failure"
+	startAttemptForTest(t, store, run.ID, attemptID)
+	linkPromptAndLogForTest(t, store, run.ID, attemptID)
+	recordProcessForTest(t, store, run.ID, attemptID)
+	denyStatusMaterializationOrSkip(t, run.Path)
+
+	_, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+		State: AttemptStateReported,
+		Report: Report{
+			RunID:     run.ID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: attemptID,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
+			Followups: []Followup{{Title: "Later"}},
+		},
+	})
+	requireErrorContains(t, err, followupsName)
+
+	loaded, loadErr := store.Load(run.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != attemptID {
+		t.Fatalf("active attempt = %+v, want unchanged active attempt", loaded.Status.ActiveAttempt)
+	}
+	if got := loaded.Status.Attempts[len(loaded.Status.Attempts)-1].State; got != AttemptStateActive {
+		t.Fatalf("latest attempt state = %q, want active", got)
+	}
+	if got := string(readFile(t, filepath.Join(run.Path, followupsName))); got != "" {
+		t.Fatalf("followups.md = %q, want unchanged empty file", got)
 	}
 }
 
@@ -2213,6 +2262,111 @@ func TestWriteArtifactAppendsFollowupsToSingleFile(t *testing.T) {
 	}
 	if status.Artifacts[0] != first || status.Artifacts[1] != second {
 		t.Fatalf("status artifact refs = %+v, want [%+v %+v]", status.Artifacts, first, second)
+	}
+}
+
+func TestRecordFollowupAppendsAttributedMarkdown(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "typed-followup-append")
+	recordedAt := time.Date(2026, 5, 4, 12, 3, 0, 0, time.UTC)
+
+	first, err := store.RecordFollowup(run.ID, RecordFollowupRequest{
+		Followup: Followup{
+			Title:   "Document report summaries",
+			Details: "Capture summary context once follow-up recording lands.",
+		},
+		Source:    FollowupSourceReport,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
+		Time:      recordedAt,
+	})
+	if err != nil {
+		t.Fatalf("RecordFollowup report returned error: %v", err)
+	}
+	second, err := store.RecordFollowup(run.ID, RecordFollowupRequest{
+		Followup: Followup{Title: "Create release note"},
+		Source:   FollowupSourceOrchestrator,
+		Time:     recordedAt.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("RecordFollowup orchestrator returned error: %v", err)
+	}
+
+	if first.Kind != KindFollowup || second.Kind != KindFollowup || first.Path != followupsName || second.Path != followupsName {
+		t.Fatalf("followup refs = %+v %+v, want followups.md refs", first, second)
+	}
+	content := string(readFile(t, filepath.Join(run.Path, followupsName)))
+	want := `## Document report summaries
+
+Source: report
+Step: plan
+Agent: planner
+Attempt: attempt-001
+Recorded-At: 2026-05-04T12:03:00Z
+
+Capture summary context once follow-up recording lands.
+
+## Create release note
+
+Source: orchestrator
+Recorded-At: 2026-05-04T12:04:00Z
+
+`
+	if content != want {
+		t.Fatalf("followups.md = %q, want %q", content, want)
+	}
+	loaded, loadErr := store.Load(run.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if got := len(loaded.Status.Artifacts); got != 2 {
+		t.Fatalf("artifact count = %d, want 2", got)
+	}
+}
+
+func TestRecordFollowupUsesSameDefaultTimeForMarkdownAndEvent(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "typed-followup-zero-time")
+
+	ref, err := store.RecordFollowup(run.ID, RecordFollowupRequest{
+		Followup: Followup{Title: "Create release note"},
+		Source:   FollowupSourceOrchestrator,
+	})
+	if err != nil {
+		t.Fatalf("RecordFollowup returned error: %v", err)
+	}
+	loaded, loadErr := store.Load(run.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	event := loaded.Events[len(loaded.Events)-1]
+	if ref.EventSequence != event.Sequence {
+		t.Fatalf("ref sequence = %d, want event sequence %d", ref.EventSequence, event.Sequence)
+	}
+	want := "Recorded-At: " + event.Time.Format(time.RFC3339)
+	if got := string(readFile(t, filepath.Join(run.Path, followupsName))); !strings.Contains(got, want) {
+		t.Fatalf("followups.md = %q, want %q", got, want)
+	}
+}
+
+func TestRecordFollowupRequiresTitleAndReportAttribution(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "typed-followup-validation")
+
+	_, err := store.RecordFollowup(run.ID, RecordFollowupRequest{
+		Followup: Followup{Title: " \t"},
+		Source:   FollowupSourceOrchestrator,
+	})
+	requireErrorContains(t, err, "title is required")
+	_, err = store.RecordFollowup(run.ID, RecordFollowupRequest{
+		Followup: Followup{Title: "Report follow-up"},
+		Source:   FollowupSourceReport,
+		StepID:   "plan",
+	})
+	requireErrorContains(t, err, "agent id is required")
+	if got := string(readFile(t, filepath.Join(run.Path, followupsName))); got != "" {
+		t.Fatalf("followups.md = %q, want unchanged empty file", got)
 	}
 }
 
