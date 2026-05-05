@@ -53,6 +53,23 @@ enforces the workflow's `task_context` policy before creating a run:
 - `markdown_fallback: false` rejects `--task-file`, `--task`, `--task-stdin`,
   and `--fallback-task-file`.
 
+## VCS Policy
+
+After task context is resolved and before any run directory is created, run
+start inspects the project working copy with read-only VCS commands and applies
+workflow `vcs` policy. Detection prefers `jj`, then `git`, then records that no
+supported VCS was detected. See
+[../reference/configuration.md](../reference/configuration.md) for option
+defaults and allowed values.
+
+VCS inspection never reverts, resets, checks out, stages, commits, or otherwise
+mutates repository state. The read-only command sequence is:
+
+- `jj root`, then `jj status` when a jj repository is detected.
+- `git rev-parse --show-toplevel`, then
+  `git status --porcelain=v1 -z --untracked-files=all` when jj is not detected
+  and git is detected.
+
 ## Bead Context
 
 Bead integration is read-only in v1. The command reads explicit bead context
@@ -81,8 +98,14 @@ Each successful start creates a run through the Run Store and writes:
 - `task/snapshot.json`: source metadata, bead lookup result, and fallback
   metadata for the captured context.
 
-Run start initializes durable run state only. It does not launch a worker,
-inspect VCS state, or evaluate the next workflow action.
+Run start initializes durable run state only. It does not launch a worker or
+evaluate the next workflow action.
+
+Successful starts also write `snapshots/<sequence>-vcs-pre-run.json`, a
+run-store snapshot artifact with the pre-run VCS summary. The VCS inspector also
+provides the internal API for recording
+`snapshots/<sequence>-vcs-post-run.json`; later summary-context work decides
+when that API is called.
 
 ## Task Snapshot Schema
 
@@ -153,3 +176,25 @@ bead lookup:
   }
 }
 ```
+
+## VCS Snapshot Schema
+
+The VCS inspector owns the JSON schema for VCS snapshot artifacts:
+
+```json
+{
+  "schema_version": 1,
+  "phase": "pre_run",
+  "kind": "jj",
+  "dirty": false,
+  "summary": "The working copy has no changes.",
+  "changed_paths": [],
+  "commands": [["jj", "root"], ["jj", "status"]]
+}
+```
+
+`phase` is `pre_run` or `post_run`. `kind` is `jj`, `git`, or `none`.
+`changed_paths` are deterministic observations for summary context; they are
+not enforcement rules and are never used to modify the working copy. `error` is
+optional and reserved for future persisted degraded-inspection summaries; run
+start currently fails rather than persisting broken VCS probe errors.

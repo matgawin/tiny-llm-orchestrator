@@ -54,7 +54,7 @@ Entrypoints:
 ## Where To Look For X
 
 - CLI behavior: `internal/cli`
-- run start and task context capture: `internal/runstart` and [docs/features/run-start.md](docs/features/run-start.md)
+- run start, task context capture, and dirty-start VCS policy: `internal/runstart`, `internal/vcs`, and [docs/features/run-start.md](docs/features/run-start.md)
 - follow-up recording: [docs/features/follow-up-recording.md](docs/features/follow-up-recording.md)
 - run inspection behavior: [docs/features/run-inspection.md](docs/features/run-inspection.md)
 - worker prompt rendering: `internal/promptrender` and [docs/features/worker-prompt-rendering.md](docs/features/worker-prompt-rendering.md)
@@ -79,6 +79,7 @@ Entrypoints:
 
 - `internal/workflow`: deterministic workflow transition engine.
 - `internal/runstart`: explicit task-context resolution and run creation for `orc run start`.
+- `internal/vcs`: read-only jj/git/no-VCS inspection and VCS summary snapshot rendering.
 - `internal/runinspect`: read-only run inspection command implementation.
 - `internal/promptrender`: internal role-specific worker prompt renderer.
 - `internal/report`: worker report validation and report-sourced follow-up recording.

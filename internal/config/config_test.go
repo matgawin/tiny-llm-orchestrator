@@ -30,6 +30,12 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	if !workflow.TaskContext.MarkdownFallback.Value {
 		t.Fatal("markdown_fallback = false, want true")
 	}
+	if got := workflow.VCS.EffectiveDirtyStart(); got != VCSDirtyStartBlock {
+		t.Fatalf("vcs dirty_start = %q, want %q", got, VCSDirtyStartBlock)
+	}
+	if got := workflow.VCS.EffectiveNoVCS(); got != VCSNoVCSAllow {
+		t.Fatalf("vcs no_vcs = %q, want %q", got, VCSNoVCSAllow)
+	}
 	if got, want := workflow.Defaults.Timeout.Duration, 30*time.Minute; got != want {
 		t.Fatalf("timeout = %s, want %s", got, want)
 	}
@@ -71,6 +77,14 @@ func TestLoadRejectsGeneratedWorkflowConfig(t *testing.T) {
 			workflow.TaskContext.Beads = "nonsense"
 			return workflow
 		}, `task_context.beads "nonsense" is invalid; allowed: disabled, optional, required`),
+		generatedWorkflowCase(t, "invalid dirty start policy", func(workflow Workflow) Workflow {
+			workflow.VCS.DirtyStart = "prompt"
+			return workflow
+		}, `vcs.dirty_start "prompt" is invalid; allowed: allow, block`),
+		generatedWorkflowCase(t, "invalid no vcs policy", func(workflow Workflow) Workflow {
+			workflow.VCS.NoVCS = "warn"
+			return workflow
+		}, `vcs.no_vcs "warn" is invalid; allowed: allow, block`),
 		generatedWorkflowCase(t, "missing timeout", func(workflow Workflow) Workflow {
 			workflow.Defaults.Timeout = Duration{}
 			return workflow

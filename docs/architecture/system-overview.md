@@ -49,10 +49,10 @@ Config loading follows this shape:
 4. Reject absolute paths, path traversal, and symlink escapes outside `.orc`.
 5. Parse and validate workflows, deterministic transitions, retries, task-context policy, and agent descriptors.
 
-Run start loads validated project config, enforces task-context policy, and
-persists explicit task context through the Run Store. See
-[../features/run-start.md](../features/run-start.md) for source-specific
-behavior.
+Run start loads validated project config, enforces task-context and VCS policy,
+rejects dirty or no-VCS starts when the workflow requires that, and persists
+explicit task context plus the pre-run VCS snapshot through the Run Store. See
+[../features/run-start.md](../features/run-start.md) for run-start behavior.
 
 ## Runtime Packages
 
@@ -61,6 +61,8 @@ These packages define or reserve ownership for orchestration behavior outside th
 - `internal/runstore`: inspectable persistent run state under `.orc/runs/<run-id>`.
 - `internal/runstart`: explicit task-context resolution and run creation for
   `orc run start`.
+- `internal/vcs`: read-only jj/git/no-VCS inspection and VCS summary snapshot
+  rendering.
 - `internal/runinspect`: read-only run status and next-action inspection.
 - `internal/promptrender`: role-specific worker prompt rendering for selected
   workflow steps.

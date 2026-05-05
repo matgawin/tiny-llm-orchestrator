@@ -132,7 +132,7 @@ These features are useful, but should not be required for the first useful versi
 - multiple built-in workflows such as planning and documentation
 - localhost HTTP report server
 - report delivery fallback from HTTP to direct file persistence
-- expected-path enforcement beyond reporting unexpected changed paths
+- expected-path enforcement beyond recording observed changed paths
 - richer manual inspection commands
 - web or TUI dashboard
 
@@ -479,7 +479,7 @@ and Markdown-backed runs.
 - After the VCS/dirty-start slice, dirty working copy at start stops the run by default unless the workflow explicitly allows it.
 - VCS inspection belongs to the VCS/dirty-start slice and prefers jj, then git, then no VCS.
 - The VCS/dirty-start slice records pre-run and post-run VCS summaries.
-- The VCS/dirty-start slice flags unexpected changed paths without reverting them.
+- The VCS/dirty-start slice records observed changed paths for summary context without reverting them or enforcing expected-path policy.
 - Beads remains external.
 - Beads are optional in v1.
 - The CLI may import read-only bead context when a bead id is provided.

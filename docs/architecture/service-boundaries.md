@@ -27,6 +27,8 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `internal/config` owns `.orc` config loading, path safety, YAML parsing, workflow validation, and agent descriptor validation.
 - `internal/runstart` owns explicit task-context resolution for `orc run start`.
   Feature semantics live in [../features/run-start.md](../features/run-start.md).
+- `internal/vcs` owns read-only jj/git/no-VCS inspection and VCS summary
+  snapshot rendering. It never mutates repository state.
 - `internal/runinspect` owns read-only run inspection for `orc run status` and
   `orc run next`. Feature semantics live in
   [../features/run-inspection.md](../features/run-inspection.md).

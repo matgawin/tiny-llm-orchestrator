@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/vcs"
 )
 
 func TestStartTaskFilePersistsContextAndSnapshot(t *testing.T) {
@@ -40,7 +41,105 @@ func TestStartTaskFilePersistsContextAndSnapshot(t *testing.T) {
 	if snapshot.BeadLookup.Attempted {
 		t.Fatalf("bead lookup attempted = true, want false")
 	}
+	vcsSnapshot := readPreRunVCSSnapshot(t, result.Path)
+	if vcsSnapshot.Kind != vcs.KindNone || vcsSnapshot.Dirty {
+		t.Fatalf("vcs snapshot kind/dirty = %s/%t, want none/false", vcsSnapshot.Kind, vcsSnapshot.Dirty)
+	}
 	assertLoadedRunHasTaskArtifacts(t, root, result.RunID)
+}
+
+func TestStartRecordsCleanJJPreRunSnapshot(t *testing.T) {
+	root := writeRunStartProject(t, workflowTaskContext("optional", true))
+	taskPath := filepath.Join(root, "task.md")
+	writeRunStartFile(t, taskPath, "# Task\n")
+	path := fakeJJPath(t, "The working copy has no changes.\nWorking copy  (@) : abc\nParent commit (@-): def\n", 0)
+	t.Setenv("PATH", path)
+
+	result, err := Start(context.Background(), Options{
+		Root:     root,
+		Workflow: "implementation",
+		TaskFile: taskPath,
+		Env:      []string{"PATH=" + path},
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	snapshot := readPreRunVCSSnapshot(t, result.Path)
+	if snapshot.Kind != vcs.KindJJ || snapshot.Dirty {
+		t.Fatalf("vcs snapshot kind/dirty = %s/%t, want jj/false", snapshot.Kind, snapshot.Dirty)
+	}
+	if !strings.Contains(snapshot.Summary, "The working copy has no changes.") {
+		t.Fatalf("vcs snapshot summary = %q, want clean jj status output", snapshot.Summary)
+	}
+}
+
+func TestStartRejectsDirtyStartBeforeRunDirectory(t *testing.T) {
+	root := writeRunStartProject(t, workflowTaskContext("optional", true))
+	taskPath := filepath.Join(root, "task.md")
+	writeRunStartFile(t, taskPath, "# Task\n")
+	path := fakeJJPath(t, "Working copy changes:\nM task.md\n", 0)
+	t.Setenv("PATH", path)
+
+	_, err := Start(context.Background(), Options{
+		Root:     root,
+		Workflow: "implementation",
+		TaskFile: taskPath,
+		Env:      []string{"PATH=" + path},
+	})
+	if err == nil {
+		t.Fatal("Start returned nil error, want dirty-start rejection")
+	}
+	if !strings.Contains(err.Error(), "blocks dirty starts") {
+		t.Fatalf("error = %q, want dirty-start rejection", err)
+	}
+	assertNoRunDirectories(t, root)
+}
+
+func TestStartAllowsDirtyStartWhenWorkflowAllowsIt(t *testing.T) {
+	root := writeRunStartProject(t, workflowTaskContextWithVCS("optional", true, "allow", ""))
+	taskPath := filepath.Join(root, "task.md")
+	writeRunStartFile(t, taskPath, "# Task\n")
+	path := fakeJJPath(t, "Working copy changes:\nM task.md\n", 0)
+	t.Setenv("PATH", path)
+
+	result, err := Start(context.Background(), Options{
+		Root:     root,
+		Workflow: "implementation",
+		TaskFile: taskPath,
+		Env:      []string{"PATH=" + path},
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	snapshot := readPreRunVCSSnapshot(t, result.Path)
+	if !snapshot.Dirty {
+		t.Fatalf("vcs snapshot dirty = false, want true")
+	}
+	if got := snapshot.ChangedPaths; len(got) != 1 || got[0] != "task.md" {
+		t.Fatalf("changed paths = %+v, want task.md", got)
+	}
+}
+
+func TestStartRejectsNoVCSWhenWorkflowBlocksIt(t *testing.T) {
+	root := writeRunStartProject(t, workflowTaskContextWithVCS("optional", true, "", "block"))
+	taskPath := filepath.Join(root, "task.md")
+	writeRunStartFile(t, taskPath, "# Task\n")
+	path := fakeJJAndGitFailPath(t)
+	t.Setenv("PATH", path)
+
+	_, err := Start(context.Background(), Options{
+		Root:     root,
+		Workflow: "implementation",
+		TaskFile: taskPath,
+		Env:      []string{"PATH=" + path},
+	})
+	if err == nil {
+		t.Fatal("Start returned nil error, want no-VCS rejection")
+	}
+	if !strings.Contains(err.Error(), "requires supported VCS") {
+		t.Fatalf("error = %q, want no-VCS rejection", err)
+	}
 }
 
 func TestStartRejectsExplicitBeadFailureWithoutFallbackBeforeRunDirectory(t *testing.T) {
@@ -58,6 +157,11 @@ func TestStartRejectsExplicitBeadFailureWithoutFallbackBeforeRunDirectory(t *tes
 	if !strings.Contains(err.Error(), `read bead "missing-bead"`) {
 		t.Fatalf("error = %q, want bead lookup context", err)
 	}
+	assertNoRunDirectories(t, root)
+}
+
+func assertNoRunDirectories(t *testing.T, root string) {
+	t.Helper()
 	runsDir := filepath.Join(root, ".orc", "runs")
 	entries, readErr := os.ReadDir(runsDir)
 	if readErr != nil && !os.IsNotExist(readErr) {
@@ -265,27 +369,28 @@ func assertLoadedRunHasTaskArtifacts(t *testing.T, root, runID string) {
 	if run.Status.State != "running" {
 		t.Fatalf("loaded state = %q, want running", run.Status.State)
 	}
-	if run.Status.LastSequence != 3 {
-		t.Fatalf("last sequence = %d, want 3", run.Status.LastSequence)
+	if run.Status.LastSequence != 4 {
+		t.Fatalf("last sequence = %d, want 4", run.Status.LastSequence)
 	}
-	if got := len(run.Status.Artifacts); got != 2 {
-		t.Fatalf("artifact refs = %d, want 2", got)
+	if got := len(run.Status.Artifacts); got != 3 {
+		t.Fatalf("artifact refs = %d, want 3", got)
 	}
 	want := map[runstore.ArtifactKind]string{
 		runstore.KindTaskContext:  "task/context.md",
 		runstore.KindTaskSnapshot: "task/snapshot.json",
+		runstore.KindSnapshot:     "snapshots/000004-vcs-pre-run.json",
 	}
 	for _, ref := range run.Status.Artifacts {
 		if wantPath, ok := want[ref.Kind]; !ok || ref.Path != wantPath {
-			t.Fatalf("unexpected artifact ref = %+v, want task context and snapshot refs", ref)
+			t.Fatalf("unexpected artifact ref = %+v, want task context, task snapshot, and VCS snapshot refs", ref)
 		}
 		delete(want, ref.Kind)
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing artifact refs: %+v", want)
 	}
-	if got := len(run.Events); got != 3 {
-		t.Fatalf("event count = %d, want run.created plus two artifact writes", got)
+	if got := len(run.Events); got != 4 {
+		t.Fatalf("event count = %d, want run.created plus three artifact writes", got)
 	}
 }
 
@@ -306,6 +411,22 @@ func writeRunStartProject(t *testing.T, workflow string) string {
 }
 
 func workflowTaskContext(beads string, markdownFallback bool) string {
+	return workflowTaskContextWithVCS(beads, markdownFallback, "", "")
+}
+
+func workflowTaskContextWithVCS(beads string, markdownFallback bool, dirtyStart, noVCS string) string {
+	vcsBlock := ""
+	if dirtyStart != "" || noVCS != "" {
+		var b strings.Builder
+		b.WriteString("vcs:\n")
+		if dirtyStart != "" {
+			fmt.Fprintf(&b, "  dirty_start: %s\n", dirtyStart)
+		}
+		if noVCS != "" {
+			fmt.Fprintf(&b, "  no_vcs: %s\n", noVCS)
+		}
+		vcsBlock = b.String()
+	}
 	return fmt.Sprintf(`name: implementation
 start: plan
 execution:
@@ -313,7 +434,7 @@ execution:
 task_context:
   beads: %s
   markdown_fallback: %t
-defaults:
+%sdefaults:
   timeout: 30m
   report_exit_grace: 30s
   retries: {}
@@ -324,7 +445,7 @@ steps:
       done: [ready]
     on:
       done/ready: ready_for_human
-`, beads, markdownFallback)
+`, beads, markdownFallback, vcsBlock)
 }
 
 func fakeBDPath(t *testing.T, beadID, beadsDir string) string {
@@ -347,6 +468,65 @@ exit 2
 		t.Fatalf("write fake bd: %v", err)
 	}
 	return dir
+}
+
+func fakeJJPath(t *testing.T, statusOutput string, rootExit int) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jj")
+	script := fmt.Sprintf(`#!/bin/sh
+case "$1" in
+  root) if [ %d -ne 0 ]; then exit %d; fi; printf '%%s\n' "$PWD";;
+  status) printf '%%b' %q;;
+  *) exit 2;;
+esac
+`, rootExit, rootExit, statusOutput)
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake jj: %v", err)
+	}
+	return dir
+}
+
+func fakeJJAndGitFailPath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	scripts := map[string]string{
+		"jj":  "#!/bin/sh\nprintf 'No jj repo found\\n' >&2\nexit 1\n",
+		"git": "#!/bin/sh\nprintf 'fatal: not a git repository\\n' >&2\nexit 1\n",
+	}
+	for name, script := range scripts {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+			t.Fatalf("write fake %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+func readPreRunVCSSnapshot(t *testing.T, runPath string) vcs.Snapshot {
+	t.Helper()
+	content := readRunStartFile(t, filepath.Join(runPath, filepath.FromSlash(preRunVCSSnapshotRef(t, runPath).Path)))
+	var snapshot vcs.Snapshot
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		t.Fatalf("unmarshal VCS snapshot: %v\n%s", err, string(content))
+	}
+	return snapshot
+}
+
+func preRunVCSSnapshotRef(t *testing.T, runPath string) runstore.ArtifactRef {
+	t.Helper()
+	content := readRunStartFile(t, filepath.Join(runPath, "status.json"))
+	var status runstore.Status
+	if err := json.Unmarshal(content, &status); err != nil {
+		t.Fatalf("unmarshal status: %v\n%s", err, string(content))
+	}
+	for _, ref := range status.Artifacts {
+		if ref.Kind == runstore.KindSnapshot && ref.Name == "vcs-pre-run" {
+			return ref
+		}
+	}
+	t.Fatalf("vcs-pre-run snapshot ref not found in status artifacts: %+v", status.Artifacts)
+	return runstore.ArtifactRef{}
 }
 
 func readRunStartFile(t *testing.T, path string) []byte {

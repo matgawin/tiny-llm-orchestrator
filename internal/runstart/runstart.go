@@ -16,6 +16,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/vcs"
 )
 
 const (
@@ -112,15 +113,19 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	vcsSnapshot, err := inspectPreRunVCS(ctx, workflow, opts)
+	if err != nil {
+		return Result{}, err
+	}
 
 	store, err := runstore.Open(project.Root)
 	if err != nil {
 		return Result{}, err
 	}
-	return createRun(opts, store, task)
+	return createRun(opts, store, task, vcsSnapshot)
 }
 
-func createRun(opts Options, store *runstore.Store, task resolvedTask) (Result, error) {
+func createRun(opts Options, store *runstore.Store, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    opts.RunID,
 		Workflow: opts.Workflow,
@@ -141,7 +146,28 @@ func createRun(opts Options, store *runstore.Store, task resolvedTask) (Result, 
 	if err := writeTaskArtifact(store, run.ID, runstore.KindTaskSnapshot, snapshot, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
+	if _, err := vcs.WriteSnapshot(store, run.ID, "vcs-pre-run", vcsSnapshot, opts.Time); err != nil {
+		return Result{}, cleanupStartedRun(run.Path, err)
+	}
 	return Result{RunID: run.ID, Path: run.Path}, nil
+}
+
+func inspectPreRunVCS(ctx context.Context, workflow config.Workflow, opts Options) (vcs.Snapshot, error) {
+	snapshot, err := vcs.InspectPreRun(ctx, vcs.Options{
+		Root: opts.Root,
+		Env:  opts.Env,
+		Time: opts.Time,
+	})
+	if err != nil {
+		return vcs.Snapshot{}, fmt.Errorf("inspect VCS before run start: %w", err)
+	}
+	if snapshot.Kind == vcs.KindNone && workflow.VCS.EffectiveNoVCS() == config.VCSNoVCSBlock {
+		return vcs.Snapshot{}, errors.New("workflow requires supported VCS but no supported VCS was detected")
+	}
+	if snapshot.Dirty && workflow.VCS.EffectiveDirtyStart() == config.VCSDirtyStartBlock {
+		return vcs.Snapshot{}, fmt.Errorf("working copy is dirty; workflow %q blocks dirty starts", workflow.Name)
+	}
+	return snapshot, nil
 }
 
 func writeTaskArtifact(store *runstore.Store, runID string, kind runstore.ArtifactKind, content []byte, at time.Time) error {

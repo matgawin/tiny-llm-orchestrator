@@ -50,6 +50,9 @@ func validateWorkflowShape(workflow Workflow) error {
 	if err := validateTaskContext(workflow.TaskContext); err != nil {
 		return err
 	}
+	if err := validateVCSPolicy(workflow.VCS); err != nil {
+		return err
+	}
 	if err := validateDefaults(workflow.Defaults); err != nil {
 		return err
 	}
@@ -144,6 +147,20 @@ func validateTaskContext(taskContext TaskContext) error {
 	}
 	if !taskContext.MarkdownFallback.Set {
 		return errors.New("task_context.markdown_fallback is required")
+	}
+	return nil
+}
+
+func validateVCSPolicy(policy VCSPolicy) error {
+	if value := policy.DirtyStart; value != "" {
+		if _, ok := allowedDirtyStartPolicies[value]; !ok {
+			return fmt.Errorf("vcs.dirty_start %q is invalid; allowed: %s", value, formatStringSet(allowedDirtyStartPolicies))
+		}
+	}
+	if value := policy.NoVCS; value != "" {
+		if _, ok := allowedNoVCSPolicies[value]; !ok {
+			return fmt.Errorf("vcs.no_vcs %q is invalid; allowed: %s", value, formatStringSet(allowedNoVCSPolicies))
+		}
 	}
 	return nil
 }

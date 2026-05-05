@@ -21,7 +21,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 
 ## Current Feature Areas
 
-- Run start and task context capture: [run-start.md](run-start.md)
+- Run start, task context capture, and dirty-start VCS policy: [run-start.md](run-start.md)
 - Run inspection commands: [run-inspection.md](run-inspection.md)
 - Follow-up recording: [follow-up-recording.md](follow-up-recording.md)
 - Worker report command and report persistence: [../PRD.md](../PRD.md#report-model)

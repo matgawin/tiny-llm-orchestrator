@@ -16,6 +16,11 @@ const (
 	taskContextBeadsDisabled = "disabled"
 	taskContextBeadsOptional = "optional"
 	taskContextBeadsRequired = "required"
+
+	VCSDirtyStartBlock = "block"
+	VCSDirtyStartAllow = "allow"
+	VCSNoVCSAllow      = "allow"
+	VCSNoVCSBlock      = "block"
 )
 
 var (
@@ -33,6 +38,14 @@ var (
 		taskContextBeadsDisabled: {},
 		taskContextBeadsOptional: {},
 		taskContextBeadsRequired: {},
+	}
+	allowedDirtyStartPolicies = map[string]struct{}{
+		VCSDirtyStartBlock: {},
+		VCSDirtyStartAllow: {},
+	}
+	allowedNoVCSPolicies = map[string]struct{}{
+		VCSNoVCSAllow: {},
+		VCSNoVCSBlock: {},
 	}
 )
 
@@ -61,6 +74,7 @@ type Workflow struct {
 	Start            string              `yaml:"start"`
 	Execution        Execution           `yaml:"execution"`
 	TaskContext      TaskContext         `yaml:"task_context"`
+	VCS              VCSPolicy           `yaml:"vcs"`
 	Defaults         Defaults            `yaml:"defaults"`
 	Steps            map[string]Step     `yaml:"steps"`
 	SourcePath       string              `yaml:"-"`
@@ -76,6 +90,28 @@ type Execution struct {
 type TaskContext struct {
 	Beads            string       `yaml:"beads"`
 	MarkdownFallback RequiredBool `yaml:"markdown_fallback"`
+}
+
+// VCSPolicy declares workflow-level repository cleanliness policy.
+type VCSPolicy struct {
+	DirtyStart string `yaml:"dirty_start"`
+	NoVCS      string `yaml:"no_vcs"`
+}
+
+// EffectiveDirtyStart returns the configured dirty-start policy, defaulting to block.
+func (p VCSPolicy) EffectiveDirtyStart() string {
+	if p.DirtyStart == "" {
+		return VCSDirtyStartBlock
+	}
+	return p.DirtyStart
+}
+
+// EffectiveNoVCS returns the configured no-VCS policy, defaulting to allow.
+func (p VCSPolicy) EffectiveNoVCS() string {
+	if p.NoVCS == "" {
+		return VCSNoVCSAllow
+	}
+	return p.NoVCS
 }
 
 // Defaults contains workflow-wide policy defaults.

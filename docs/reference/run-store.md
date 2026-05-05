@@ -446,6 +446,13 @@ their paths, singleton behavior, and event references. See
 [../features/run-start.md](../features/run-start.md#task-snapshot-schema) for
 the task snapshot schema.
 
+VCS pre-run and post-run summaries are ordinary `snapshot` artifacts named
+`vcs-pre-run` and `vcs-post-run`, for example
+`snapshots/000004-vcs-pre-run.json`. The VCS inspector owns their JSON schema;
+the Run Store owns only artifact path allocation and event references. See
+[../features/run-start.md](../features/run-start.md#vcs-snapshot-schema) for
+the snapshot fields.
+
 `report` artifacts are usually written by `attempt.reported` when `orc report`
 copies Markdown details, so the report attempt event owns both the terminal
 attempt state and the report artifact reference.

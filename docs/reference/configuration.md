@@ -72,6 +72,8 @@ Workflow files define:
 - `execution.mode`, currently `sequential`
 - `task_context.beads`, one of `disabled`, `optional`, or `required`
 - `task_context.markdown_fallback`
+- `vcs.dirty_start`, optional, one of `block` or `allow`
+- `vcs.no_vcs`, optional, one of `allow` or `block`
 - `defaults.timeout`
 - `defaults.report_exit_grace`
 - `defaults.retries`
@@ -83,10 +85,18 @@ Validation rules:
 - `execution.mode` must be `sequential`.
 - `steps` must contain at least one step.
 - `start` must name a declared step.
+- Omitted `vcs.dirty_start` defaults to `block`.
+- Omitted `vcs.no_vcs` defaults to `allow`.
 - `defaults.timeout` and `defaults.report_exit_grace` are required Go duration strings and must be greater than zero.
 - `defaults.retries` is required.
 - Retry counts must be zero or greater.
 - Retry keys must match `status/result` pairs declared by the workflow's steps.
+
+`vcs` is workflow-level policy, separate from task context and step defaults.
+`dirty_start: block` rejects dirty working copies before a run directory is
+created. `dirty_start: allow` records the dirty pre-run snapshot and lets the
+run start. `no_vcs: allow` permits project contexts where neither `jj` nor
+`git` is detected; `no_vcs: block` rejects them.
 
 Workflow-declared outcome statuses are:
 
