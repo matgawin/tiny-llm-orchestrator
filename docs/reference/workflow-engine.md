@@ -60,6 +60,12 @@ selected step's `allowed_results`. Synthesized failures such as
 `failed/process_error`, and `failed/error` follow the same rule: they are valid
 only when declared by the workflow step.
 
+`allowed_results` is broader than worker-authored report input. `orc report`
+rejects reserved synthesized/system-owned outcomes such as `failed/timeout`,
+`failed/missing_report`, `failed/invalid_report`, `failed/process_error`, and
+`failed/error`; those outcomes enter the workflow engine only from the launcher,
+report validation, or other store-owned system paths.
+
 ## Decisions
 
 The engine returns one of these decision kinds:

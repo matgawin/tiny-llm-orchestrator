@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,8 @@ type ProjectOptions struct {
 	ReportExitGrace  string
 	FailedResults    []string
 	BlockedResults   []string
+	TwoStep          bool
+	Retries          map[string]int
 }
 
 // WriteProject writes a minimal .orc project with one planner-backed plan step.
@@ -37,26 +40,48 @@ func WriteProject(t *testing.T, root string, opts ProjectOptions) {
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
-	writeFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n")
+	configYAML := "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n"
+	if opts.TwoStep {
+		configYAML += "  coder: agents/coder.md\n"
+	}
+	writeFile(t, filepath.Join(orcDir, "config.yaml"), configYAML)
 	writeFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
+	if opts.TwoStep {
+		writeFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
+	}
 	writeFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), workflowYAML(opts))
 }
 
 func workflowYAML(opts ProjectOptions) string {
-	allowed := "      done: [ready]\n"
-	var on strings.Builder
-	on.WriteString("      done/ready: ready_for_human\n")
-	if len(opts.FailedResults) > 0 {
-		allowed += "      failed: [" + joinYAMLList(opts.FailedResults) + "]\n"
-		for _, result := range opts.FailedResults {
-			on.WriteString("      failed/" + result + ": blocked_for_human\n")
-		}
-	}
-	if len(opts.BlockedResults) > 0 {
-		allowed += "      blocked: [" + joinYAMLList(opts.BlockedResults) + "]\n"
-		for _, result := range opts.BlockedResults {
-			on.WriteString("      blocked/" + result + ": blocked_for_human\n")
-		}
+	allowed := allowedResultsYAML(opts)
+	planReadyTarget := "ready_for_human"
+	if opts.TwoStep {
+		planReadyTarget = "code"
+		return fmt.Sprintf(`name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: %s
+  markdown_fallback: %t
+defaults:
+  timeout: %s
+  report_exit_grace: %s
+  retries:
+%s
+steps:
+  plan:
+    agent: planner
+    allowed_results:
+%s    on:
+%s
+  code:
+    agent: coder
+    allowed_results:
+      done: [ready]
+    on:
+      done/ready: ready_for_human
+`, opts.Beads, opts.MarkdownFallback, opts.Timeout, opts.ReportExitGrace, retriesYAML(opts.Retries), allowed, outcomeTransitionsYAML(opts, planReadyTarget))
 	}
 	return fmt.Sprintf(`name: implementation
 start: plan
@@ -68,13 +93,54 @@ task_context:
 defaults:
   timeout: %s
   report_exit_grace: %s
-  retries: {}
+  retries:
+%s
 steps:
   plan:
     agent: planner
     allowed_results:
 %s    on:
-%s`, opts.Beads, opts.MarkdownFallback, opts.Timeout, opts.ReportExitGrace, allowed, on.String())
+%s`, opts.Beads, opts.MarkdownFallback, opts.Timeout, opts.ReportExitGrace, retriesYAML(opts.Retries), allowed, outcomeTransitionsYAML(opts, planReadyTarget))
+}
+
+func allowedResultsYAML(opts ProjectOptions) string {
+	var allowed strings.Builder
+	allowed.WriteString("      done: [ready]\n")
+	if len(opts.FailedResults) > 0 {
+		allowed.WriteString("      failed: [" + joinYAMLList(opts.FailedResults) + "]\n")
+	}
+	if len(opts.BlockedResults) > 0 {
+		allowed.WriteString("      blocked: [" + joinYAMLList(opts.BlockedResults) + "]\n")
+	}
+	return allowed.String()
+}
+
+func retriesYAML(retries map[string]int) string {
+	if len(retries) == 0 {
+		return "    {}\n"
+	}
+	var keys []string
+	for key := range retries {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	var out strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&out, "    %s: %d\n", key, retries[key])
+	}
+	return out.String()
+}
+
+func outcomeTransitionsYAML(opts ProjectOptions, readyTarget string) string {
+	var on strings.Builder
+	on.WriteString("      done/ready: " + readyTarget + "\n")
+	for _, result := range opts.FailedResults {
+		on.WriteString("      failed/" + result + ": blocked_for_human\n")
+	}
+	for _, result := range opts.BlockedResults {
+		on.WriteString("      blocked/" + result + ": blocked_for_human\n")
+	}
+	return on.String()
 }
 
 func joinYAMLList(values []string) string {

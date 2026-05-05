@@ -63,9 +63,13 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"# Prior Plan\n\nUse existing run-store artifacts.",
 		"`done/ready`",
 		"`blocked/blocked`",
-		"`failed/error`",
 		"orc report --run prompt-run --step plan --agent planner --attempt attempt-001 --status <status> --result <result> --summary \"<summary>\"",
 	})
+	for _, reserved := range []string{"failed/error", "failed/invalid_report", "failed/missing_report", "failed/timeout", "failed/process_error"} {
+		if strings.Contains(prompt, "`"+reserved+"`") {
+			t.Fatalf("prompt includes system-owned report outcome %s:\n%s", reserved, prompt)
+		}
+	}
 
 	loaded, err := store.Load(runID)
 	if err != nil {
@@ -370,11 +374,15 @@ steps:
     allowed_results:
       done: [ready]
       blocked: [blocked]
-      failed: [error]
+      failed: [error, invalid_report, missing_report, timeout, process_error]
     on:
       done/ready: test
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
   test:
     agent: tester
     allowed_results:

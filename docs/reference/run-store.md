@@ -119,8 +119,8 @@ Latest-state changes are recorded as `status.updated` events and then materializ
 Callers may append custom events with non-reserved event types. Reserved event
 types are `run.created`, `status.updated`, `artifact.written`,
 `attempt.started`, `attempt.prompted`, `attempt.logged`, `attempt.process_started`,
-`attempt.finished`, and `attempt.recovered`; those are written only through the
-dedicated store APIs.
+`attempt.finished`, `attempt.recovered`, `attempt.reported`, and
+`report.ignored`; those are written only through the dedicated store APIs.
 
 For caller events, callers provide:
 
@@ -160,7 +160,10 @@ exists, including an empty directory.
 }
 ```
 
-`artifact.written` is written when the store persists an artifact.
+`artifact.written` is written when the store persists a standalone artifact.
+Markdown report details accepted with `orc report` are the exception: their
+artifact reference is embedded in the `attempt.reported` payload instead of a
+separate `artifact.written` event.
 
 ```json
 {
@@ -246,6 +249,63 @@ launcher restart, or an expired active attempt whose process identity is still
 live. V1 records unverifiable attempts as `failed/process_error` with
 `exit_state=unknown`. Expired live attempts are recorded as `failed/timeout`
 with `state=timed_out` and `exit_state=timeout`.
+
+`attempt.reported` terminalizes the run's current `active_attempt` with a
+structured worker report accepted through `orc report`. The attempt must already
+be in attempt state `active`; `starting` attempts are not reportable.
+
+```json
+{
+  "attempt_id": "20260504T120000Z-plan-a1b2c3",
+  "state": "reported",
+  "report": {
+    "run_id": "20260502T143022Z-implementation-main-997-a1b2c3",
+    "step_id": "plan",
+    "agent_id": "planner",
+    "attempt_id": "20260504T120000Z-plan-a1b2c3",
+    "status": "done",
+    "result": "ready",
+    "summary": "Plan is ready.",
+    "changed_paths": ["README.md"],
+    "commands": ["go test ./internal/cli"],
+    "tests": ["go test ./internal/cli"],
+    "risks": ["none"],
+    "followups": [
+      {
+        "title": "Document report summaries"
+      }
+    ],
+    "report_ref": "<artifact reference>"
+  }
+}
+```
+
+Valid reports use `state=reported` and preserve the workflow `status/result`
+pair. Current-attempt reports that fail schema or allowed-pair validation use
+`state=invalid_report`, `status=failed`, and `result=invalid_report`.
+For CLI JSON input, `--json-file` is mutually exclusive with report field flags;
+when the JSON payload identifies the current active attempt, that mix is
+schema-invalid report input. Unknown JSON fields, nested unknown JSON fields,
+and trailing JSON values are schema-invalid. Markdown report files must be
+readable, regular, non-symlink files; failures for the current active attempt are
+recorded as invalid reports instead of leaving the attempt active.
+
+`report.ignored` records malformed, stale, wrong-step, wrong-agent, or
+wrong-attempt reports that provide enough identity to locate a run but do not
+prove they target the current active attempt. Reports without `run_id` cannot be
+recorded as run-local events because the store cannot identify the owning run.
+Ignored reports do not change active attempt state or consume retry policy.
+
+```json
+{
+  "run_id": "20260502T143022Z-implementation-main-997-a1b2c3",
+  "step_id": "plan",
+  "agent_id": "planner",
+  "attempt_id": "old-attempt",
+  "reason": "report does not target current active attempt",
+  "errors": ["report attempt_id does not match active attempt"]
+}
+```
 
 ## Latest Status
 
@@ -333,7 +393,12 @@ Attempt states currently materialized by the launcher are:
 - `process_error`
 - `timed_out`
 
-Later report and retry slices may add valid-report and superseded states.
+Report persistence also materializes:
+
+- `reported`
+- `invalid_report`
+
+Later retry slices may add superseded states.
 
 ## Artifacts
 
@@ -380,6 +445,19 @@ For runs created through `orc run start`, the run-start layer owns
 their paths, singleton behavior, and event references. See
 [../features/run-start.md](../features/run-start.md#task-snapshot-schema) for
 the task snapshot schema.
+
+`report` artifacts are usually written by `attempt.reported` when `orc report`
+copies Markdown details, so the report attempt event owns both the terminal
+attempt state and the report artifact reference.
+
+The file is committed before the event append. Definite append failures roll the
+file back, but a process or host crash between file commit and event append can
+leave an unreferenced artifact file for later cleanup tooling. Retrying the same
+report detail is tolerated when the expected report artifact path already exists
+with identical content; different existing content remains an error.
+
+`RecordAttemptReport` rejects caller-supplied `report_ref` values, so report refs
+are added only when the store stages report content for that event.
 
 `followup` appends new content by rewriting `followups.md` before the
 `artifact.written` event is appended.
@@ -446,14 +524,18 @@ unless the caller adds its own idempotency key in a future event contract.
 Attempt lifecycle APIs follow the same status-backed write failure contract:
 ambiguous append and status refresh failures return the candidate attempt/event
 when the event may have committed, and callers should reload before retrying.
+`RecordAttemptReport` with report content is the exception to pure
+append-then-status ordering: it commits the report artifact before appending
+`attempt.reported`, as described in the artifact section above.
 
 ### API Families
 
 - `AppendEvent`, `UpdateStatus`, `WriteArtifact`, `StartAttempt`,
   `StartAttemptContext`, `RecordAttemptPrompt`, `RecordAttemptLog`,
-  `RecordAttemptProcess`, `RecordAttemptProcessContext`, `FinishAttempt`, and
-  `RecoverAttempt` take a run-level lock, append their event, then refresh
-  `status.json`.
+  `RecordAttemptProcess`, `RecordAttemptProcessContext`, `FinishAttempt`,
+  `RecoverAttempt`, `RecordAttemptReport`, and `RecordIgnoredReport` take a
+  run-level lock, append their event, then refresh `status.json`, except for the
+  report-content commit-order case described above.
 - `Load`, `ReadArtifact`, and `OpenArtifactAppend` also take the run-level lock.
   For legacy runs that predate `.lock`, these APIs create the missing lock file
   as metadata-only backfill before replaying state, reading artifact content, or
@@ -472,6 +554,10 @@ when the event may have committed, and callers should reload before retrying.
   `missing_report`, `process_error`, or `timed_out`.
 - Terminal attempts must use the v1 launcher outcome tuple for their state:
   `failed/missing_report`, `failed/process_error`, or `failed/timeout`.
+- `RecordAttemptReport` accepts report terminal states `reported` and
+  `invalid_report` for the current `active` attempt. `invalid_report` must use
+  `failed/invalid_report`. Callers cannot supply `report_ref`; report refs are
+  assigned only when `RecordAttemptReport` stages report content.
 - `missing_report` and `timed_out` terminal states require prior
   `attempt.process_started`; pre-process terminalization is limited to
   `process_error`.

@@ -88,11 +88,15 @@ Validation rules:
 - Retry counts must be zero or greater.
 - Retry keys must match `status/result` pairs declared by the workflow's steps.
 
-Allowed worker report statuses are:
+Workflow-declared outcome statuses are:
 
 - `done`
 - `blocked`
 - `failed`
+
+`allowed_results` defines every outcome pair the workflow engine may route,
+including system-owned synthesized outcomes. It is broader than the set of
+outcomes a worker may author with `orc report`.
 
 Each step must declare:
 
@@ -101,6 +105,12 @@ Each step must declare:
 - `on`: a deterministic transition map keyed by `status/result`
 
 Allowed result values must be non-empty strings. Every `on` key must be declared in `allowed_results`, and every declared `status/result` pair must have a deterministic transition to another step or a supported terminal state.
+
+Worker-authored reports may use workflow-declared outcome pairs except reserved
+system-owned failure results. `orc report` rejects `failed/error`,
+`failed/invalid_report`, `failed/missing_report`, `failed/timeout`, and
+`failed/process_error`; those are written only by report validation, run-store,
+or launcher paths.
 
 Supported terminal states:
 

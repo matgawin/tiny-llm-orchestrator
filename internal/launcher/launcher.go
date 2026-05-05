@@ -19,6 +19,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
+	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -100,12 +101,13 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	if attempt, ok := runstore.PendingLauncherOutcome(loaded.Run.Status); ok {
 		return Result{RunID: opts.RunID, Attempt: attempt}, fmt.Errorf("run %q has pending worker outcome %s/%s for attempt %q; no launchable worker until report routing handles it", opts.RunID, attempt.Status, attempt.Result, attempt.AttemptID)
 	}
-	decision, err := workflow.Evaluate(loaded.Workflow, workflow.RunState{
-		Status:        loaded.Run.Status.State,
-		ActiveAttempt: loaded.Run.Status.ActiveAttempt != nil,
-	})
+	state := runstate.WorkflowState(loaded.Run.Status)
+	decision, err := workflow.Evaluate(loaded.Workflow, state)
 	if err != nil {
 		return Result{}, fmt.Errorf("evaluate run %q: %w", opts.RunID, err)
+	}
+	if decision.Kind == workflow.DecisionRetryStep {
+		return Result{}, fmt.Errorf("run %q has pending worker outcome %s/%s for reported attempt; retry routing has not handled it yet", opts.RunID, state.Outcome.Status, state.Outcome.Result)
 	}
 	if decision.Kind == workflow.DecisionWaitActiveAttempt {
 		result, err := recoverOrRefuseActiveAttempt(loaded.Store, loaded.Run)
@@ -367,12 +369,31 @@ func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
 		_, _ = r.logFile.WriteString(promptWriteErr.Error() + "\n")
 	}
 	logErr := r.logFile.Sync()
+	if terminal, ok, err := r.reportTerminalAttemptAfterWait(); err != nil {
+		return terminal, errors.Join(logErr, err)
+	} else if ok {
+		return terminal, logErr
+	}
 	finished, finishErr := r.finishWaitOutcome(waitResult)
 	var ctxErr error
 	if waitResult.ctxErr != nil && !waitResult.workflowTimeout {
 		ctxErr = waitResult.ctxErr
 	}
 	return finished, errors.Join(logErr, finishErr, ctxErr)
+}
+
+func (r *workerRunner) reportTerminalAttemptAfterWait() (runstore.Attempt, bool, error) {
+	run, err := r.loaded.Store.Load(r.loaded.Run.ID)
+	if err != nil {
+		return runstore.Attempt{}, false, err
+	}
+	for i := len(run.Status.Attempts) - 1; i >= 0; i-- {
+		attempt := run.Status.Attempts[i]
+		if attempt.AttemptID == r.attempt.AttemptID && (attempt.State == runstore.AttemptStateReported || attempt.State == runstore.AttemptStateInvalidReport) {
+			return attempt, true, nil
+		}
+	}
+	return runstore.Attempt{}, false, nil
 }
 
 func (r *workerRunner) finishWaitOutcome(waitResult waitResult) (runstore.Attempt, error) {

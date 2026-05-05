@@ -21,6 +21,8 @@ const (
 	eventAttemptProcess   = "attempt.process_started"
 	eventAttemptFinished  = "attempt.finished"
 	eventAttemptRecovered = "attempt.recovered"
+	eventAttemptReported  = "attempt.reported"
+	eventReportIgnored    = "report.ignored"
 
 	KindTaskContext  ArtifactKind = "task_context"
 	KindTaskSnapshot ArtifactKind = "task_snapshot"
@@ -36,6 +38,28 @@ const (
 type Store struct {
 	orcDir  string
 	runsDir string
+}
+
+// ReportTargetError describes a report that no longer targets the active
+// attempt observed under the run lock.
+type ReportTargetError struct {
+	RunID  string
+	Reason string
+	Err    error
+}
+
+func (err *ReportTargetError) Error() string {
+	if err == nil || err.Err == nil {
+		return "report does not target current active attempt"
+	}
+	return err.Err.Error()
+}
+
+func (err *ReportTargetError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.Err
 }
 
 // CreateRunRequest describes the durable run identity to create.
@@ -120,6 +144,8 @@ type Attempt struct {
 	ReportExitGrace  string       `json:"report_exit_grace"`
 	PromptRef        *ArtifactRef `json:"prompt_ref,omitempty"`
 	LogRef           *ArtifactRef `json:"log_ref,omitempty"`
+	ReportRef        *ArtifactRef `json:"report_ref,omitempty"`
+	Report           *Report      `json:"report,omitempty"`
 	StartedAt        time.Time    `json:"started_at"`
 	FinishedAt       *time.Time   `json:"finished_at,omitempty"`
 	Recovered        bool         `json:"recovered,omitempty"`
@@ -131,11 +157,39 @@ const (
 	AttemptStateMissingReport = "missing_report"
 	AttemptStateProcessError  = "process_error"
 	AttemptStateTimedOut      = "timed_out"
+	AttemptStateReported      = "reported"
+	AttemptStateInvalidReport = "invalid_report"
 
 	AttemptResultMissingReport = "missing_report"
 	AttemptResultProcessError  = "process_error"
 	AttemptResultTimeout       = "timeout"
+	AttemptResultInvalidReport = "invalid_report"
 )
+
+// Report is the structured worker report persisted on a terminal attempt.
+type Report struct {
+	RunID        string       `json:"run_id"`
+	StepID       string       `json:"step_id"`
+	AgentID      string       `json:"agent_id"`
+	AttemptID    string       `json:"attempt_id"`
+	Status       string       `json:"status"`
+	Result       string       `json:"result"`
+	Summary      string       `json:"summary"`
+	ChangedPaths []string     `json:"changed_paths,omitempty"`
+	Commands     []string     `json:"commands,omitempty"`
+	Tests        []string     `json:"tests,omitempty"`
+	Risks        []string     `json:"risks,omitempty"`
+	Followups    []Followup   `json:"followups,omitempty"`
+	ReportFile   string       `json:"report_file,omitempty"`
+	ReportRef    *ArtifactRef `json:"report_ref,omitempty"`
+}
+
+// Followup is a report-proposed follow-up item. The follow-up artifact is owned
+// by a later workflow slice; v1 report persistence only preserves suggestions.
+type Followup struct {
+	Title   string `json:"title"`
+	Details string `json:"details,omitempty"`
+}
 
 type createRunPayload struct {
 	Workflow string `json:"workflow"`
@@ -194,6 +248,27 @@ type FinishAttemptRequest struct {
 	Time      time.Time
 }
 
+// RecordReportRequest terminalizes the active attempt with a structured report.
+type RecordReportRequest struct {
+	Report           Report
+	State            string
+	ReportContent    []byte
+	ReportContentSet bool
+	ReportName       string
+	Time             time.Time
+}
+
+// IgnoreReportRequest records a report that did not target the active attempt.
+type IgnoreReportRequest struct {
+	RunID     string
+	StepID    string
+	AgentID   string
+	AttemptID string
+	Reason    string
+	Errors    []string
+	Time      time.Time
+}
+
 type attemptStartedPayload struct {
 	Attempt Attempt `json:"attempt"`
 }
@@ -222,6 +297,21 @@ type attemptFinishedPayload struct {
 	ExitCode  *int         `json:"exit_code,omitempty"`
 	ExitState string       `json:"exit_state,omitempty"`
 	LogRef    *ArtifactRef `json:"log_ref,omitempty"`
+}
+
+type attemptReportedPayload struct {
+	AttemptID string `json:"attempt_id"`
+	State     string `json:"state"`
+	Report    Report `json:"report"`
+}
+
+type reportIgnoredPayload struct {
+	RunID     string   `json:"run_id,omitempty"`
+	StepID    string   `json:"step_id,omitempty"`
+	AgentID   string   `json:"agent_id,omitempty"`
+	AttemptID string   `json:"attempt_id,omitempty"`
+	Reason    string   `json:"reason"`
+	Errors    []string `json:"errors,omitempty"`
 }
 
 // StatusMaterializationError means durable event/artifact state committed, but status.json was not refreshed.

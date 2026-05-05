@@ -54,9 +54,10 @@ caller-provided step metadata; it does not treat that newly starting attempt as
 a reason to refuse rendering. The attempt transitions to active only after
 process metadata is recorded.
 
-Richer selected-step state based on persisted outcomes and retry lineage belongs
-to later report and retry-routing slices. Active-attempt state is persisted by
-the worker launcher.
+Prompt rendering evaluates valid reported outcomes when choosing the selected
+step, so a worker launched after a routed report receives the prompt for the
+next workflow-selected step. Retry lineage still belongs to the later retry
+routing slice. Active-attempt state is persisted by the worker launcher.
 
 An internal unselected-step option may render a declared non-selected step in a
 running run for tests or a future debug caller. It does not override terminal
@@ -72,30 +73,35 @@ Rendered prompts include:
 - captured task context from `task/context.md`
 - prior report artifact paths with bounded Markdown excerpts when report
   artifacts exist
-- the allowed `status/result` pairs for the selected step
-- the exact provisional `orc report` command shape
+- the worker-reportable `status/result` pairs for the selected step
+- the exact required `orc report` command shape
 
-Until structured report persistence exists, prior report context is bounded
-Markdown excerpting from recorded report artifacts. If a recorded report
-artifact cannot be read through the Run Store, rendering fails instead of
-silently omitting recorded context. Later report persistence can replace those
-excerpts with structured summaries without changing the renderer boundary.
+Prior report context is currently bounded Markdown excerpting from recorded
+report artifacts. If a recorded report artifact cannot be read through the Run
+Store, rendering fails instead of silently omitting recorded context. Later
+summary-context work can prefer structured report fields without changing the
+renderer boundary.
 
 ## Report Contract
 
 Worker prompts must tell workers to report through `orc report` and not write
 directly into `.orc/runs`.
 
-The current provisional report command shape is:
+The required report command shape is:
 
 ```bash
 orc report --run <run-id> --step <step-id> --agent <agent-id> --attempt <attempt-id> --status <status> --result <result> --summary "<summary>"
 ```
 
-`<status>` and `<result>` must be one of the selected step's allowed
-`status/result` pairs from workflow config. The future report command will own
-final validation and persistence for additional fields such as changed paths,
-commands, tests, risks, follow-ups, and Markdown report details.
+`<status>` and `<result>` must be one of the selected step's worker-reportable
+`status/result` pairs from workflow config. Reserved system-owned outcomes such
+as `failed/invalid_report`, `failed/missing_report`, `failed/timeout`,
+`failed/process_error`, and `failed/error` are not shown in the prompt because
+workers cannot submit them through `orc report`. Workers may also provide
+repeatable `--changed-path`, `--command`, `--test`, `--risk`, and `--follow-up`
+flags, or `--report-file <path>` for Markdown details. The command validates
+required identity fields against the current `active_attempt` in attempt state
+`active` before persisting the structured report through the Run Store.
 
 ## Persistence
 

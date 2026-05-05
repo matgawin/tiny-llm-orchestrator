@@ -84,9 +84,9 @@ the process runs:
 
 ## No-Report Outcomes
 
-This slice does not implement valid report authority. Until `orc report`
-exists, worker process completion is interpreted as a synthesized failed
-outcome:
+Worker process completion before report-routing and post-report process handling
+is interpreted as a synthesized failed outcome when no valid report has already
+terminalized the attempt:
 
 - exit code `0`: `failed/missing_report`
 - nonzero exit: `failed/process_error`
@@ -96,7 +96,10 @@ The launcher records these outcomes on the attempt. It does not apply workflow
 retry policy or launch a retry attempt in this slice; synthesized failure
 routing belongs to the follow-on workflow retry integration. Until that routing
 exists, `launch-next` refuses to relaunch after a synthesized terminal outcome
-so retry accounting cannot be bypassed manually.
+or invalid current-attempt report so retry accounting cannot be bypassed
+manually. Valid reported outcomes are evaluated through the workflow engine, so
+`launch-next` can launch the selected next step when the reported pair routes to
+one.
 
 ## Supervision
 

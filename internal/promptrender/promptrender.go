@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	reportpkg "tiny-llm-orchestrator/orc/internal/report"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
+	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -125,7 +127,7 @@ func loadRenderContext(opts Options) (renderContext, error) {
 	if err != nil {
 		return renderContext{}, err
 	}
-	decision, err := workflow.Evaluate(loaded.Workflow, workflow.RunState{Status: loaded.Run.Status.State})
+	decision, err := renderSelectionDecision(loaded.Workflow, loaded.Run)
 	if err != nil {
 		return renderContext{}, fmt.Errorf("evaluate run %q: %w", loaded.Run.ID, err)
 	}
@@ -153,6 +155,13 @@ func loadRenderContext(opts Options) (renderContext, error) {
 		step:     step,
 		agent:    agent,
 	}, nil
+}
+
+func renderSelectionDecision(workflowConfig config.Workflow, run *runstore.Run) (workflow.Decision, error) {
+	if active := run.Status.ActiveAttempt; active != nil {
+		return workflow.Decision{Kind: workflow.DecisionSelectStep, Step: active.StepID, RunStatus: run.Status.State}, nil
+	}
+	return workflow.Evaluate(workflowConfig, runstate.WorkflowState(run.Status))
 }
 
 func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([]byte, error) {
@@ -282,6 +291,9 @@ func allowedPairs(step config.Step) []string {
 	var pairs []string
 	for status, results := range step.AllowedResults {
 		for _, result := range results {
+			if !reportpkg.WorkerReportableOutcome(status, result) {
+				continue
+			}
 			pairs = append(pairs, status+"/"+result)
 		}
 	}

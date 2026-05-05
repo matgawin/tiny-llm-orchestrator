@@ -84,8 +84,8 @@ The design therefore treats each worker as an external process that must produce
 
 Target V1 should implement the smallest useful orchestrator loop. The current
 implementation is landing this surface incrementally; for example, the current
-worker-launching slice records synthesized no-report outcomes, while `orc
-report` and report/retry routing remain follow-on target V1 work.
+worker-launching slice records synthesized no-report outcomes, while retry
+routing remains follow-on target V1 work after `orc report`.
 
 - `orc init`
 - `orc run start --workflow implementation --bead <id>`
@@ -298,14 +298,17 @@ shape lives in [run-store.md](reference/run-store.md).
 
 ## Report Model
 
-`orc report` is the target report-authority model for the follow-on
-report-routing slice. It is not exposed by the current public CLI. In the target
-model, only the current active attempt can receive a valid report. Future retry
-routing creates replacement attempts and records retry lineage without allowing
-workers to choose the next step directly.
+`orc report` is the report-authority model for worker-to-orchestrator
+communication. Only the current `active_attempt` in attempt state `active` can
+receive a valid report.
+Future retry routing creates replacement attempts and records retry lineage
+without allowing workers to choose the next step directly.
 
-When implemented, `orc report` accepts structured fields and validates them
-before updating run state.
+`orc report` accepts structured fields from flags or `--json-file` and
+validates them before updating run state. `--json-file` cannot be combined with
+report field flags; when the JSON payload identifies the current active attempt,
+that mix is schema-invalid report input. JSON input is strict: unknown fields,
+including nested unknown fields, and trailing JSON values are schema-invalid.
 
 Target required fields:
 
@@ -326,18 +329,19 @@ Target optional fields:
 - follow-up suggestions
 - Markdown report file
 
-Example target report payload:
+Example JSON report payload:
 
 ```json
 {
   "run_id": "20260501T120000Z-implementation-main-997-a1b2c3",
-  "step": "test",
-  "agent": "tester",
-  "attempt": 2,
+  "step_id": "test",
+  "agent_id": "tester",
+  "attempt_id": "20260501T120005Z-test-a1b2c3",
   "status": "done",
   "result": "failed",
   "summary": "Unit tests fail because punctuation is not stripped before palindrome comparison.",
   "changed_paths": [],
+  "commands": ["go test ./..."],
   "tests": ["pytest"],
   "followups": [
     {
@@ -345,24 +349,30 @@ Example target report payload:
       "details": "Current work only covers unit-level recovery behavior."
     }
   ],
-  "report_path": "reports/000004-tester.md"
+  "report_file": "worker-report.md"
 }
 ```
 
-Target report artifact paths are assigned by the run store and use
-sequence-prefixed filenames. Reports are one-way: a worker report never directly
-chooses the next worker. The workflow engine chooses the next step from the
-validated `(step, status, result)` tuple.
+Report artifact paths are assigned by the run store and use sequence-prefixed
+filenames. Reports are one-way: a worker report never directly chooses the next
+worker. The workflow engine chooses the next step from the validated `(step,
+status, result)` tuple after routing consumes the persisted outcome.
 
 Target validation rules:
 
-- Reports are accepted only for the current active worker attempt.
+- Reports are accepted only for the current worker attempt when it is both the
+  run's `active_attempt` and in attempt state `active`.
 - The report must match the active run id, expected step id, expected agent id,
   and expected attempt id.
-- Malformed or schema-invalid reports for the current active attempt terminalize
-  that attempt as `failed/invalid_report`.
+- Malformed or schema-invalid reports for the current active attempt in attempt
+  state `active` terminalize that attempt as `failed/invalid_report`; this
+  includes unreadable, missing, symlinked, or non-regular Markdown report files.
+- Workers cannot submit reserved system-owned failure outcomes such as
+  `failed/invalid_report`, `failed/missing_report`, `failed/timeout`,
+  `failed/process_error`, or `failed/error` as valid reports; those outcomes
+  are written only by the report/store or launcher paths that own them.
 - Reports for stale attempts, wrong steps, wrong agents, or future steps are
-  recorded as ignored invalid report events.
+  recorded as `report.ignored` events.
 - Ignored invalid report events do not change the active attempt state, consume
   retries, or advance the workflow.
 
@@ -381,12 +391,14 @@ state `blocked_for_human`.
 Target report authority:
 
 - Workers never write directly into `.orc/runs`; they call `orc report`.
-- A valid report is terminal for the worker attempt.
-- If a valid report exists, the report controls workflow routing even when the
-  worker later exits nonzero.
-- If a valid report exists but the worker keeps running past
-  `report_exit_grace`, the launcher terminates the process and the valid report
-  still controls routing.
+- A valid report is terminal for the worker attempt with attempt state
+  `reported` as soon as `orc report` persists it.
+- The persisted valid report is authoritative for workflow routing immediately;
+  launchers and inspection consume it from run state.
+- Post-report nonzero-exit warnings and `report_exit_grace` termination are
+  owned by the later synthesized-failure/post-report process slice; that slice
+  preserves the valid report as the routing outcome while recording process
+  warnings separately.
 - No-report outcomes, invalid reports, timeouts, and process errors feed retry
   policy in the report-routing slice.
 
@@ -414,13 +426,22 @@ Workflows may declare whether task context is required and whether beads are req
 
 ## Follow-Up Task Model
 
-Substantial new findings should not silently expand a run. When the orchestrator or a worker identifies follow-up work that is outside the current task, it records the proposed work in `.orc/runs/<run-id>/followups.md`.
+Substantial new findings should not silently expand a run. When the
+orchestrator or a worker identifies follow-up work that is outside the current
+task, v1 preserves that proposed work as structured follow-up data until the
+follow-up recording slice writes `.orc/runs/<run-id>/followups.md`.
 
-If a valid worker report includes follow-up suggestions, `orc report` appends them to `followups.md`. The orchestrator can also record follow-ups directly with `orc run add-followup <run-id> --title "..." --details "..."`.
+If a valid worker report includes follow-up suggestions, `orc report` preserves
+them in structured report data. The follow-up recording slice appends those
+suggestions to `followups.md`; the orchestrator can also record follow-ups
+directly with `orc run add-followup <run-id> --title "..." --details "..."`.
 
 Each follow-up requires a `title`; `details` is optional.
 
-If the run is bead-backed, the ready-for-review summary may suggest creating beads from those follow-ups, but v1 does not create or close beads automatically. If the run is Markdown-backed, `followups.md` is the local follow-up artifact.
+If the run is bead-backed, the ready-for-review summary may suggest creating
+beads from those follow-ups, but v1 does not create or close beads
+automatically. If the run is Markdown-backed, `followups.md` is the local
+follow-up artifact once the follow-up recording slice is implemented.
 
 ## Implementation Decisions
 
@@ -444,7 +465,7 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 - V1 runs are sequential. Exactly one worker may be active for a run at a time.
 - Workers are launched with `orc worker launch-next <run-id>` so the CLI, not the orchestrator, selects the runnable step.
 - Each worker launch creates an attempt id that reports must include; the attempt is `starting` until process metadata is recorded.
-- A valid worker report is terminal for the active attempt; after a short grace period, any still-running worker process is terminated.
+- A valid worker report terminalizes the active attempt immediately when `orc report` persists it; post-report process grace handling is deferred.
 - If a worker exits without a valid report, the launcher records a synthesized failed outcome; retry application is deferred to report-routing work.
 - If a worker exceeds its configured timeout without a valid report, the launcher terminates it and records a synthesized failed timeout outcome; retry application is deferred to report-routing work.
 - Retry counters are keyed by `status/result`, scoped to a step execution lineage, and reset whenever the workflow applies an `on:` transition, even when that transition targets the same step.
@@ -469,8 +490,7 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 - Worker agents may read bead context but may not update or close beads.
 - The human closes beads directly after manual review.
 - The orchestrator stops for destructive commands, invalid config, missing required task context, expensive architecture ambiguity, repeated worker failure, and scope expansion that should become separate task work.
-- Follow-up work outside the current task is recorded in `.orc/runs/<run-id>/followups.md`.
-- Valid worker reports with follow-up suggestions append to `followups.md`; the orchestrator may also use `orc run add-followup`.
+- Follow-up handling follows the Follow-Up Task Model above.
 - Workflow and agent config are user-owned. The orchestrator may propose changes but must not edit them during normal task execution.
 - `orc init` supports `--yes` and `--dry-run`.
 - `orc init` asks before creating or updating existing project instruction files.
@@ -497,10 +517,10 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 - **Interface**: Current v1 public surface is `orc worker launch-next <run-id>`. It launches only the workflow-selected next step, creates an attempt id, renders the prompt, records prompt/log/process metadata, supervises the worker process group, and records launcher-synthesized terminal outcomes. Sandbox flags, additional readable-directory flags, and retry outcome routing are future report/routing surfaces rather than current launcher inputs.
 - **Tested**: targeted integration coverage if practical
 
-- **Name**: Report Command (future)
-- **Responsibility**: Validate and persist structured worker reports in the follow-on report-routing slice.
-- **Interface**: Not exposed by the current public CLI. The target surface accepts report fields from CLI flags or a JSON file, validates required fields, active attempt identity, and allowed status/result values, writes through the Run Store, and updates latest state.
-- **Tested**: no; current tests cover launcher-synthesized no-report outcomes only.
+- **Name**: Report Command
+- **Responsibility**: Validate and persist structured worker reports.
+- **Interface**: Public surface is `orc report`. It accepts report fields from CLI flags or a JSON file, validates required fields, active attempt identity, and allowed status/result values, writes through the Run Store, and updates latest state.
+- **Tested**: yes
 
 - **Name**: Beads Context Reader
 - **Responsibility**: Import optional read-only bead context for a run.
@@ -529,8 +549,8 @@ If the run is bead-backed, the ready-for-review summary may suggest creating bea
 
 - **Name**: Follow-Up Task Recorder
 - **Responsibility**: Persist substantial out-of-scope findings without expanding the active run.
-- **Interface**: Appends structured Markdown entries from valid reports or `orc run add-followup` to `.orc/runs/<run-id>/followups.md` and exposes them in summary context.
-- **Tested**: yes
+- **Interface**: Later slice. Appends structured Markdown entries from preserved report follow-up suggestions or `orc run add-followup` to `.orc/runs/<run-id>/followups.md` and exposes them in summary context.
+- **Tested**: deferred to the follow-up recording slice
 
 ## Testing Decisions
 

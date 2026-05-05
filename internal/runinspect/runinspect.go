@@ -14,6 +14,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
+	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -100,19 +101,18 @@ func evaluate(workflowConfig config.Workflow, run *runstore.Run) (workflow.Decis
 	if _, ok := runstore.PendingLauncherOutcome(run.Status); ok {
 		return workflow.Decision{Kind: workflow.DecisionTerminal, RunStatus: pendingWorkerOutcome}, nil
 	}
-	state := workflow.RunState{
-		Status:        run.Status.State,
-		ActiveAttempt: run.Status.ActiveAttempt != nil,
-	}
-	decision, err := workflow.Evaluate(workflowConfig, state)
+	decision, err := workflow.Evaluate(workflowConfig, runstate.WorkflowState(run.Status))
 	if err != nil {
 		return workflow.Decision{}, fmt.Errorf("evaluate run %q: %w", run.ID, err)
+	}
+	if _, ok := runstore.LatestReportedOutcome(run.Status); ok && decision.Kind == workflow.DecisionRetryStep {
+		return workflow.Decision{Kind: workflow.DecisionTerminal, RunStatus: pendingWorkerOutcome}, nil
 	}
 	return decision, nil
 }
 
 func renderStatus(w io.Writer, run *runstore.Run, decision workflow.Decision) {
-	printRunHeader(w, run)
+	printRunHeader(w, run, decision)
 	_, _ = fmt.Fprintf(w, "workflow: %s\n", run.Status.Workflow)
 	_, _ = fmt.Fprintf(w, "created_at: %s\n", formatTime(run.Status.CreatedAt))
 	_, _ = fmt.Fprintf(w, "updated_at: %s\n", formatTime(run.Status.UpdatedAt))
@@ -123,11 +123,11 @@ func renderStatus(w io.Writer, run *runstore.Run, decision workflow.Decision) {
 	reports := reportPaths(run.Status.Artifacts)
 	printReportPaths(w, reports)
 	printArtifacts(w, run.Status.Artifacts)
-	printTerminalHumanState(w, run, reports)
+	printTerminalHumanState(w, run, decision, reports)
 }
 
 func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
-	printRunHeader(w, run)
+	printRunHeader(w, run, decision)
 	_, _ = fmt.Fprintf(w, "decision: %s\n", decision.Kind)
 	switch decision.Kind {
 	case workflow.DecisionSelectStep:
@@ -147,7 +147,7 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 		_, _ = fmt.Fprintln(w, "launch: no worker should launch")
 		reports := reportPaths(run.Status.Artifacts)
 		printReportPaths(w, reports)
-		printTerminalHumanState(w, run, reports)
+		printTerminalHumanState(w, run, decision, reports)
 	}
 }
 
@@ -158,9 +158,16 @@ func activeAttemptValue(attempt *runstore.Attempt) string {
 	return attempt.AttemptID
 }
 
-func printRunHeader(w io.Writer, run *runstore.Run) {
+func printRunHeader(w io.Writer, run *runstore.Run, decision workflow.Decision) {
 	_, _ = fmt.Fprintf(w, "run: %s\n", run.ID)
-	_, _ = fmt.Fprintf(w, "state: %s\n", run.Status.State)
+	_, _ = fmt.Fprintf(w, "state: %s\n", effectiveRunState(run, decision))
+}
+
+func effectiveRunState(run *runstore.Run, decision workflow.Decision) string {
+	if decision.Kind == workflow.DecisionTerminal && isTerminalHumanState(decision.RunStatus) {
+		return decision.RunStatus
+	}
+	return run.Status.State
 }
 
 func selectedStep(decision workflow.Decision) string {
@@ -226,11 +233,12 @@ func printHumanReviewPaths(w io.Writer, run *runstore.Run) {
 	_, _ = fmt.Fprintf(w, "final_summaries: %s\n", filepath.ToSlash(filepath.Join(run.Path, "summaries")))
 }
 
-func printTerminalHumanState(w io.Writer, run *runstore.Run, reports []string) {
-	if !isTerminalHumanState(run.Status.State) {
+func printTerminalHumanState(w io.Writer, run *runstore.Run, decision workflow.Decision, reports []string) {
+	state := effectiveRunState(run, decision)
+	if !isTerminalHumanState(state) {
 		return
 	}
-	printHumanStateDetail(w, run.Status.State, len(reports) > 0)
+	printHumanStateDetail(w, state, len(reports) > 0)
 	printHumanReviewPaths(w, run)
 }
 

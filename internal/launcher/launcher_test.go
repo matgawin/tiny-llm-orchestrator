@@ -115,6 +115,112 @@ func TestLaunchNextRecordsProcessErrorForNonzeroExit(t *testing.T) {
 	}
 }
 
+func TestWorkerRunnerUsesTerminalReportInsteadOfSynthesizedFinish(t *testing.T) {
+	root, runID := createLauncherRun(t, "200ms")
+	loaded, attempt := prepareRunProcessAttempt(t, root, runID, "reported-attempt")
+	linkLauncherPromptAndLogNamed(t, loaded.Store, runID, attempt.AttemptID, "plan")
+	recordProcessForLauncherTest(t, loaded.Store, runID, attempt.AttemptID)
+	reported, _, err := loaded.Store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: attempt.AttemptID,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
+		},
+		Time: fixedLauncherTime().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	runner := workerRunner{loaded: loaded, attempt: attempt}
+	got, ok, err := runner.reportTerminalAttemptAfterWait()
+	if err != nil {
+		t.Fatalf("reportTerminalAttemptAfterWait returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false, want terminal report detected")
+	}
+	if got.AttemptID != reported.AttemptID || got.State != runstore.AttemptStateReported {
+		t.Fatalf("terminal attempt = %+v, want reported attempt %+v", got, reported)
+	}
+}
+
+func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
+	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{TaskContext: true, TwoStep: true})
+	store := openLauncherStore(t, root)
+	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-plan", "plan", "planner")
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    attempt.StepID,
+			AgentID:   attempt.AgentID,
+			AttemptID: attempt.AttemptID,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
+		},
+		Time: fixedLauncherTime().Add(time.Second),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if !result.Launched {
+		t.Fatal("Launched = false, want true")
+	}
+	if result.Attempt.StepID != "code" || result.Attempt.AgentID != "coder" {
+		t.Fatalf("attempt = %+v, want launched code/coder", result.Attempt)
+	}
+	if result.Attempt.State != runstore.AttemptStateMissingReport {
+		t.Fatalf("attempt state = %q, want synthesized missing_report after code worker exits", result.Attempt.State)
+	}
+}
+
+func TestLaunchNextParksReportedRetryStepOutcome(t *testing.T) {
+	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{TaskContext: true, Retries: map[string]int{"done/ready": 1}})
+	store := openLauncherStore(t, root)
+	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-retry", "plan", "planner")
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    attempt.StepID,
+			AgentID:   attempt.AgentID,
+			AttemptID: attempt.AttemptID,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
+		},
+		Time: fixedLauncherTime().Add(time.Second),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	_, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(2 * time.Second),
+	})
+	if err == nil || !strings.Contains(err.Error(), "pending worker outcome done/ready") {
+		t.Fatalf("LaunchNext error = %v, want pending reported retry outcome", err)
+	}
+}
+
 func TestRunProcessZeroExitNonReaderWithLargePromptRecordsMissingReport(t *testing.T) {
 	root, runID := createLauncherRun(t, "5s")
 	loaded, attempt := prepareRunProcessAttempt(t, root, runID, "large-prompt-non-reader")
@@ -718,6 +824,31 @@ func seedLauncherAttempt(t *testing.T, store *runstore.Store, runID, attemptID s
 	return attempt
 }
 
+func seedProcessedLauncherAttempt(t *testing.T, store *runstore.Store, runID, attemptID, stepID, agentID string) runstore.Attempt {
+	t.Helper()
+	attempt, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:          stepID,
+		AgentID:         agentID,
+		AttemptID:       attemptID,
+		Timeout:         200 * time.Millisecond,
+		ReportExitGrace: 30 * time.Millisecond,
+		Time:            fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	linkLauncherPromptAndLog(t, store, runID, attempt.AttemptID)
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        attempt.AttemptID,
+		PID:              os.Getpid(),
+		ProcessStartTime: currentProcessStartTime(t),
+		Time:             fixedLauncherTime(),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess returned error: %v", err)
+	}
+	return attempt
+}
+
 func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 	root, runID := createLauncherRun(t, "20ms")
 	store := openLauncherStore(t, root)
@@ -905,12 +1036,14 @@ func createLauncherRunWithoutTask(t *testing.T, timeout string) (string, string)
 
 type launcherRunOptions struct {
 	TaskContext bool
+	TwoStep     bool
+	Retries     map[string]int
 }
 
 func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRunOptions) (string, string) {
 	t.Helper()
 	root := t.TempDir()
-	writeLauncherProject(t, root, timeout)
+	writeLauncherProject(t, root, timeout, opts)
 	store := openLauncherStore(t, root)
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "launcher-run",
@@ -933,13 +1066,15 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	return root, run.ID
 }
 
-func writeLauncherProject(t *testing.T, root, timeout string) {
+func writeLauncherProject(t *testing.T, root, timeout string, opts launcherRunOptions) {
 	t.Helper()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
 		MarkdownFallback: true,
 		Timeout:          timeout,
 		ReportExitGrace:  "30ms",
 		FailedResults:    []string{"missing_report", "process_error", "timeout"},
+		TwoStep:          opts.TwoStep,
+		Retries:          opts.Retries,
 	})
 }
 
@@ -954,9 +1089,14 @@ func openLauncherStore(t *testing.T, root string) *runstore.Store {
 
 func linkLauncherPromptAndLog(t *testing.T, store *runstore.Store, runID, attemptID string) {
 	t.Helper()
+	linkLauncherPromptAndLogNamed(t, store, runID, attemptID, "plan-"+attemptID)
+}
+
+func linkLauncherPromptAndLogNamed(t *testing.T, store *runstore.Store, runID, attemptID, name string) {
+	t.Helper()
 	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
-		Name:    "plan-" + attemptID,
+		Name:    name,
 		Content: []byte("prompt\n"),
 		Time:    fixedLauncherTime(),
 	})
@@ -972,7 +1112,7 @@ func linkLauncherPromptAndLog(t *testing.T, store *runstore.Store, runID, attemp
 	}
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
-		Name:    "plan-" + attemptID,
+		Name:    name,
 		Content: []byte("log\n"),
 		Time:    fixedLauncherTime(),
 	})
@@ -1010,6 +1150,22 @@ func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runc
 		t.Fatalf("Load returned error: %v", err)
 	}
 	return loaded, attempt
+}
+
+func recordProcessForLauncherTest(t *testing.T, store *runstore.Store, runID, attemptID string) {
+	t.Helper()
+	startIdentity, err := processStartIdentity(os.Getpid())
+	if err != nil {
+		t.Fatalf("processStartIdentity returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
+		AttemptID:        attemptID,
+		PID:              os.Getpid(),
+		ProcessStartTime: startIdentity,
+		Time:             fixedLauncherTime(),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcessContext returned error: %v", err)
+	}
 }
 
 func holdLauncherRunLock(t *testing.T, store *runstore.Store, runID string) (<-chan struct{}, chan<- struct{}, <-chan error) {

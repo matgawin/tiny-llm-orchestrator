@@ -131,6 +131,167 @@ func TestNextRefusesPendingLauncherOutcome(t *testing.T) {
 	})
 }
 
+func TestNextRoutesValidReportedOutcome(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	recordLaunchedAttempt(t, store, runID, "attempt-reported")
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-reported",
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
+		},
+		Time: fixedTime().Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	status, next := inspectStatusAndNext(t, root, runID)
+	assertContainsAll(t, "status", status, []string{
+		"state: ready_for_human\n",
+		"selected_step: none\n",
+		"terminal_reason: ready_for_human\n",
+		"review_state: ready_for_human; no more workers should launch\n",
+	})
+	assertContainsAll(t, "next", next, []string{
+		"state: ready_for_human\n",
+		"decision: terminal\n",
+		"terminal_reason: ready_for_human\n",
+		"launch: no worker should launch\n",
+		"review_state: ready_for_human; no more workers should launch\n",
+	})
+	if strings.Contains(next, pendingWorkerOutcome) {
+		t.Fatalf("next output contains pending worker outcome for valid report:\n%s", next)
+	}
+}
+
+func TestStatusRoutesValidReportedOutcomeToBlockedForHuman(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	recordLaunchedAttempt(t, store, runID, "attempt-reported")
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-reported",
+			Status:    "blocked",
+			Result:    "blocked",
+			Summary:   "Blocked for human input.",
+		},
+		Time: fixedTime().Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	status, next := inspectStatusAndNext(t, root, runID)
+	assertContainsAll(t, "status", status, []string{
+		"state: blocked_for_human\n",
+		"terminal_reason: blocked_for_human\n",
+		"human_attention: blocked_for_human; report details not available\n",
+	})
+	assertContainsAll(t, "next", next, []string{
+		"state: blocked_for_human\n",
+		"decision: terminal\n",
+		"terminal_reason: blocked_for_human\n",
+		"human_attention: blocked_for_human; report details not available\n",
+	})
+}
+
+func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteProject(t, root, testutil.ProjectOptions{
+		MarkdownFallback: true,
+		BlockedResults:   []string{"blocked"},
+		TwoStep:          true,
+	})
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	recordLaunchedAttempt(t, store, runID, "attempt-reported")
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-reported",
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
+		},
+		Time: fixedTime().Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	_, next := inspectStatusAndNext(t, root, runID)
+	assertContainsAll(t, "next", next, []string{
+		"decision: select_step\n",
+		"selected_step: code\n",
+		"agent: coder\n",
+		"launch: not launched\n",
+	})
+	if strings.Contains(next, pendingWorkerOutcome) {
+		t.Fatalf("next output contains pending worker outcome for valid report:\n%s", next)
+	}
+}
+
+func TestNextParksReportedRetryStepOutcome(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteProject(t, root, testutil.ProjectOptions{
+		MarkdownFallback: true,
+		BlockedResults:   []string{"blocked"},
+		Retries:          map[string]int{"done/ready": 1},
+	})
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	recordLaunchedAttempt(t, store, runID, "attempt-retry")
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-retry",
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
+		},
+		Time: fixedTime().Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	_, next := inspectStatusAndNext(t, root, runID)
+	assertContainsAll(t, "next", next, []string{
+		"decision: terminal\n",
+		"terminal_reason: pending_worker_outcome\n",
+		"launch: no worker should launch\n",
+	})
+}
+
 func recordMissingReportAttempt(t *testing.T, store *runstore.Store, runID, attemptID string) {
 	t.Helper()
 	recordLaunchedAttempt(t, store, runID, attemptID)

@@ -15,8 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
+
+const reportIgnoredEvent = "report.ignored"
 
 func TestMain(m *testing.M) {
 	if os.Getenv("ORC_CLI_CODEX_SHIM") == "1" && filepath.Base(os.Args[0]) == "codex" {
@@ -40,6 +43,8 @@ func cliCodexShimMain() {
 		cliCodexShimCounter(os.Getenv("ORC_CLI_CODEX_COUNTER"))
 	case "record-prompt":
 		cliCodexShimRecordPrompt(os.Getenv("ORC_CLI_CODEX_ARGS"), os.Getenv("ORC_CLI_CODEX_STDIN"))
+	case "worker-report":
+		cliCodexShimWorkerReport()
 	default:
 		os.Exit(2)
 	}
@@ -90,6 +95,37 @@ func cliCodexShimRecordPrompt(argsPath, stdinPath string) {
 		os.Exit(5)
 	}
 	time.Sleep(50 * time.Millisecond)
+}
+
+func cliCodexShimWorkerReport() {
+	content, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		os.Exit(4)
+	}
+	prompt := string(content)
+	args := []string{
+		"report",
+		"--run", promptValue(prompt, "run_id"),
+		"--step", promptValue(prompt, "step_id"),
+		"--agent", promptValue(prompt, "agent_id"),
+		"--attempt", promptValue(prompt, "attempt_id"),
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Worker report is ready.",
+	}
+	if err := Execute(args, os.Stdout, os.Stderr); err != nil {
+		os.Exit(1)
+	}
+}
+
+func promptValue(prompt, name string) string {
+	prefix := "- " + name + ": `"
+	for line := range strings.SplitSeq(prompt, "\n") {
+		if strings.HasPrefix(line, prefix) && strings.HasSuffix(line, "`") {
+			return strings.TrimSuffix(strings.TrimPrefix(line, prefix), "`")
+		}
+	}
+	return ""
 }
 
 type cliCodexShim struct {
@@ -276,6 +312,735 @@ func TestExecuteWorkerLaunchNextRequiresRunID(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "orc worker launch-next: requires <run-id>") {
 		t.Fatalf("stderr = %q, want missing run id", got)
+	}
+}
+
+func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	reportPath := filepath.Join(root, "detail.md")
+	writeCLIFile(t, reportPath, "## Detail\n")
+
+	output := executeCLICommand(t, []string{
+		"report",
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "attempt-001",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Plan is ready.",
+		"--changed-path", "README.md",
+		"--command", "go test ./internal/cli",
+		"--test", "go test ./internal/cli",
+		"--risk", "none",
+		"--follow-up", "Document report summaries",
+		"--report-file", reportPath,
+	})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
+	store := openCLIStore(t, root)
+	loaded, err := store.Load(result.runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if attempt.State != runstore.AttemptStateReported || attempt.Report == nil {
+		t.Fatalf("attempt = %+v, want reported attempt with report", attempt)
+	}
+	if attempt.Report.ChangedPaths[0] != "README.md" || attempt.Report.Commands[0] != "go test ./internal/cli" {
+		t.Fatalf("report = %+v, want preserved optional fields", attempt.Report)
+	}
+	if attempt.Report.Tests[0] != "go test ./internal/cli" || attempt.Report.Risks[0] != "none" || attempt.Report.Followups[0].Title != "Document report summaries" {
+		t.Fatalf("report = %+v, want preserved tests, risks, and followups", attempt.Report)
+	}
+	if attempt.ReportRef == nil || attempt.ReportRef.Kind != runstore.KindReport {
+		t.Fatalf("report ref = %+v, want report artifact ref", attempt.ReportRef)
+	}
+	if attempt.Report.ReportRef == nil || *attempt.Report.ReportRef != *attempt.ReportRef {
+		t.Fatalf("embedded report ref = %+v, want %+v", attempt.Report.ReportRef, attempt.ReportRef)
+	}
+	if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path)))); got != "## Detail\n" {
+		t.Fatalf("report detail = %q, want copied markdown", got)
+	}
+}
+
+func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		makePath  func(t *testing.T, root string) string
+		wantError string
+	}{
+		{
+			name: "missing",
+			makePath: func(t *testing.T, root string) string {
+				t.Helper()
+				return filepath.Join(root, "missing.md")
+			},
+			wantError: "report_file",
+		},
+		{
+			name: "directory",
+			makePath: func(t *testing.T, root string) string {
+				t.Helper()
+				path := filepath.Join(root, "report-dir")
+				if err := os.Mkdir(path, 0o750); err != nil {
+					t.Fatalf("Mkdir returned error: %v", err)
+				}
+				return path
+			},
+			wantError: "not a regular file",
+		},
+		{
+			name: "unreadable",
+			makePath: func(t *testing.T, root string) string {
+				t.Helper()
+				path := filepath.Join(root, "unreadable.md")
+				writeCLIFile(t, path, "## Detail\n")
+				if err := os.Chmod(path, 0); err != nil {
+					t.Fatalf("Chmod returned error: %v", err)
+				}
+				t.Cleanup(func() {
+					_ = os.Chmod(path, 0o600)
+				})
+				file, err := os.Open(path)
+				if err == nil {
+					_ = file.Close()
+					t.Skip("current user can read mode 000 files")
+				}
+				return path
+			},
+			wantError: "report_file",
+		},
+		{
+			name: "symlink",
+			makePath: func(t *testing.T, root string) string {
+				t.Helper()
+				target := filepath.Join(root, "target.md")
+				link := filepath.Join(root, "link.md")
+				writeCLIFile(t, target, "## Detail\n")
+				if err := os.Symlink(target, link); err != nil {
+					t.Fatalf("Symlink returned error: %v", err)
+				}
+				return link
+			},
+			wantError: "report_file",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+			reportPath := tc.makePath(t, root)
+
+			var stdout, stderr bytes.Buffer
+			err := Execute([]string{
+				"report",
+				"--run", result.runID,
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--status", "done",
+				"--result", "ready",
+				"--summary", "Plan is ready.",
+				"--report-file", reportPath,
+			}, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want report_file error")
+			}
+			if !strings.Contains(stderr.String(), tc.wantError) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantError)
+			}
+			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			if loadErr != nil {
+				t.Fatalf("Load returned error: %v", loadErr)
+			}
+			attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+			if attempt.State != runstore.AttemptStateInvalidReport || attempt.Report == nil {
+				t.Fatalf("attempt = %+v, want invalid_report with report", attempt)
+			}
+			if attempt.ReportRef != nil || attempt.Report.ReportRef != nil {
+				t.Fatalf("report refs = %+v/%+v, want none for invalid report_file", attempt.ReportRef, attempt.Report.ReportRef)
+			}
+		})
+	}
+}
+
+func TestWorkerLaunchNextRoutesValidReportWithoutPendingOutcome(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	executeCLICommand(t, []string{
+		"report",
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "attempt-001",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Plan is ready.",
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"worker", "launch-next", result.runID}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want terminal no-launch error")
+	}
+	if strings.Contains(stderr.String(), "pending worker outcome") {
+		t.Fatalf("stderr = %q, want routed terminal decision not pending outcome", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "decision is terminal") {
+		t.Fatalf("stderr = %q, want terminal decision", stderr.String())
+	}
+}
+
+func TestWorkerLaunchNextAcceptsWorkerReportBeforeExit(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	t.Setenv("PATH", shim.binDir)
+	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
+	t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	assertCLIOutputContainsAll(t, output, []string{"result: done/ready"})
+	loaded, err := openCLIStore(t, root).Load(result.runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if attempt.State != runstore.AttemptStateReported || attempt.Report == nil {
+		t.Fatalf("attempt = %+v, want worker reported attempt", attempt)
+	}
+	if loaded.Status.ActiveAttempt != nil {
+		t.Fatalf("active attempt = %+v, want cleared by report", loaded.Status.ActiveAttempt)
+	}
+}
+
+func TestExecuteReportRejectsReservedSystemOutcomes(t *testing.T) {
+	for _, reserved := range []string{"invalid_report", "missing_report", "timeout", "process_error", "error"} {
+		t.Run(reserved, func(t *testing.T) {
+			root := withTempCwd(t)
+			testutil.WriteProject(t, root, testutil.ProjectOptions{
+				Beads:            "optional",
+				MarkdownFallback: true,
+				FailedResults:    []string{"invalid_report", "missing_report", "timeout", "process_error", "error"},
+			})
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+
+			var stdout, stderr bytes.Buffer
+			err := Execute([]string{
+				"report",
+				"--run", result.runID,
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--status", "failed",
+				"--result", reserved,
+				"--summary", "Trying to claim a system outcome.",
+			}, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want reserved outcome rejection")
+			}
+			if !strings.Contains(stderr.String(), "reserved system outcome failed/"+reserved) {
+				t.Fatalf("stderr = %q, want reserved system outcome error", stderr.String())
+			}
+			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			if loadErr != nil {
+				t.Fatalf("Load returned error: %v", loadErr)
+			}
+			attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+			if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != "failed" || attempt.Result != runstore.AttemptResultInvalidReport {
+				t.Fatalf("attempt = %+v, want failed/invalid_report", attempt)
+			}
+		})
+	}
+}
+
+func TestExecuteReportInvalidCurrentAttemptTerminalizesInvalidReport(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{
+		"report",
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "attempt-001",
+		"--status", "done",
+		"--result", "not-allowed",
+		"--summary", "Bad result.",
+	}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want invalid report error")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "does not allow done/not-allowed") {
+		t.Fatalf("stderr = %q, want disallowed result", stderr.String())
+	}
+	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != "failed" || attempt.Result != runstore.AttemptResultInvalidReport {
+		t.Fatalf("attempt = %+v, want failed/invalid_report", attempt)
+	}
+}
+
+func TestExecuteReportWrongAttemptRecordsIgnoredBeforeConfigLoad(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	writeCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{
+		"report",
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "old-attempt",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Stale report.",
+	}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want wrong attempt error")
+	}
+	if strings.Contains(stderr.String(), "load project config") {
+		t.Fatalf("stderr = %q, want ignored report before config load", stderr.String())
+	}
+	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+		t.Fatalf("last event type = %q, want report.ignored", got)
+	}
+}
+
+func TestExecuteReportShapeInvalidCurrentAttemptDoesNotLoadConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "missing-status",
+			args: []string{
+				"report",
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--result", "ready",
+				"--summary", "Missing status.",
+			},
+			want: "status is required",
+		},
+		{
+			name: "reserved-outcome",
+			args: []string{
+				"report",
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--status", "failed",
+				"--result", "timeout",
+				"--summary", "Reserved outcome.",
+			},
+			want: "reserved system outcome failed/timeout",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+			writeCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
+
+			args := append([]string{"report", "--run", result.runID}, tc.args[1:]...)
+			var stdout, stderr bytes.Buffer
+			err := Execute(args, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want shape validation error")
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.want)
+			}
+			if strings.Contains(stderr.String(), "load project config") {
+				t.Fatalf("stderr = %q, want no config load failure", stderr.String())
+			}
+			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			if loadErr != nil {
+				t.Fatalf("Load returned error: %v", loadErr)
+			}
+			attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+			if attempt.State != runstore.AttemptStateInvalidReport {
+				t.Fatalf("attempt state = %q, want invalid_report", attempt.State)
+			}
+		})
+	}
+}
+
+func TestExecuteReportMissingRequiredFieldTerminalizesInvalidReport(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args func(runID string) []string
+		want string
+	}{
+		{
+			name: "missing-status",
+			args: func(runID string) []string {
+				return []string{
+					"report",
+					"--run", runID,
+					"--step", "plan",
+					"--agent", "planner",
+					"--attempt", "attempt-001",
+					"--result", "ready",
+					"--summary", "Missing status.",
+				}
+			},
+			want: "status is required",
+		},
+		{
+			name: "missing-result",
+			args: func(runID string) []string {
+				return []string{
+					"report",
+					"--run", runID,
+					"--step", "plan",
+					"--agent", "planner",
+					"--attempt", "attempt-001",
+					"--status", "done",
+					"--summary", "Missing result.",
+				}
+			},
+			want: "result is required",
+		},
+		{
+			name: "blank-summary",
+			args: func(runID string) []string {
+				return []string{
+					"report",
+					"--run", runID,
+					"--step", "plan",
+					"--agent", "planner",
+					"--attempt", "attempt-001",
+					"--status", "done",
+					"--result", "ready",
+					"--summary", " \t",
+				}
+			},
+			want: "summary is required",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+
+			var stdout, stderr bytes.Buffer
+			err := Execute(tc.args(result.runID), &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want missing field error")
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.want)
+			}
+			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			if loadErr != nil {
+				t.Fatalf("Load returned error: %v", loadErr)
+			}
+			attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+			if attempt.State != runstore.AttemptStateInvalidReport {
+				t.Fatalf("attempt state = %q, want invalid_report", attempt.State)
+			}
+		})
+	}
+}
+
+func TestExecuteReportJSONTrailingObjectTerminalizesInvalidReport(t *testing.T) {
+	root, runID, jsonPath := writeCurrentAttemptJSONReport(t, "")
+	writeCLIFile(t, jsonPath, currentAttemptJSONReport(runID, "")+"\n"+`{"extra": true}`)
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"report", "--json-file", jsonPath}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want trailing JSON schema error")
+	}
+	if !strings.Contains(stderr.String(), "multiple JSON values are not allowed") {
+		t.Fatalf("stderr = %q, want multiple JSON values error", stderr.String())
+	}
+	assertCLILatestAttemptState(t, root, runID, runstore.AttemptStateInvalidReport)
+}
+
+func TestExecuteReportJSONSchemaInvalidCurrentAttemptDoesNotLoadConfig(t *testing.T) {
+	root, runID, jsonPath := writeCurrentAttemptJSONReport(t, `"unexpected": true`)
+	writeCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"report", "--json-file", jsonPath}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want schema validation error")
+	}
+	if !strings.Contains(stderr.String(), `unknown field "unexpected"`) {
+		t.Fatalf("stderr = %q, want unknown field", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "load project config") {
+		t.Fatalf("stderr = %q, want no config load failure", stderr.String())
+	}
+	assertCLILatestAttemptState(t, root, runID, runstore.AttemptStateInvalidReport)
+}
+
+func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	jsonPath := filepath.Join(root, "report.json")
+	writeCLIFile(t, jsonPath, fmt.Sprintf(`{
+  "run_id": %q,
+  "step_id": "plan",
+  "agent_id": "planner",
+  "attempt_id": "attempt-001",
+  "status": "done",
+  "result": "ready",
+  "summary": "Plan is ready.",
+  "changed_paths": ["README.md"],
+  "commands": ["go test ./..."],
+  "tests": ["task tests"],
+  "risks": ["none"],
+  "followups": [
+    {"title": "Later", "details": "Capture summary context."}
+  ]
+}`, result.runID))
+
+	output := executeCLICommand(t, []string{"report", "--json-file", jsonPath})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
+	loaded, err := openCLIStore(t, root).Load(result.runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	report := loaded.Status.Attempts[len(loaded.Status.Attempts)-1].Report
+	if report == nil || report.Commands[0] != "go test ./..." {
+		t.Fatalf("report = %+v, want JSON command", report)
+	}
+	if report.ChangedPaths[0] != "README.md" || report.Tests[0] != "task tests" || report.Risks[0] != "none" {
+		t.Fatalf("report = %+v, want JSON optional slices", report)
+	}
+	if report.Followups[0].Title != "Later" || report.Followups[0].Details != "Capture summary context." {
+		t.Fatalf("followups = %+v, want JSON followup details", report.Followups)
+	}
+}
+
+func TestExecuteReportJSONFileCopiesMarkdownDetail(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	reportPath := filepath.Join(root, "detail.md")
+	writeCLIFile(t, reportPath, "")
+	jsonPath := filepath.Join(root, "report.json")
+	writeCLIFile(t, jsonPath, fmt.Sprintf(`{
+  "run_id": %q,
+  "step_id": "plan",
+  "agent_id": "planner",
+  "attempt_id": "attempt-001",
+  "status": "done",
+  "result": "ready",
+  "summary": "Plan is ready.",
+  "report_file": %q
+}`, result.runID, reportPath))
+
+	output := executeCLICommand(t, []string{"report", "--json-file", jsonPath})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
+	loaded, err := openCLIStore(t, root).Load(result.runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if attempt.ReportRef == nil {
+		t.Fatal("report ref = nil, want report artifact for empty report_file")
+	}
+	if attempt.Report == nil || attempt.Report.ReportRef == nil || *attempt.Report.ReportRef != *attempt.ReportRef {
+		t.Fatalf("embedded report ref = %+v, want %+v", attempt.Report, attempt.ReportRef)
+	}
+	if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path)))); got != "" {
+		t.Fatalf("report detail = %q, want empty copied file", got)
+	}
+}
+
+func TestExecuteReportRejectsJSONMixedWithFlags(t *testing.T) {
+	root, runID, jsonPath := writeCurrentAttemptJSONReport(t, "")
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"report", "--json-file", jsonPath, "--summary", "mixed"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want mixed input rejection")
+	}
+	if !strings.Contains(stderr.String(), "--json-file cannot be combined") {
+		t.Fatalf("stderr = %q, want JSON mixed rejection", stderr.String())
+	}
+	assertCLILatestAttemptState(t, root, runID, runstore.AttemptStateInvalidReport)
+}
+
+func TestExecuteReportJSONUnknownTopLevelFieldTerminalizesInvalidReport(t *testing.T) {
+	root, runID, jsonPath := writeCurrentAttemptJSONReport(t, `"surprise": true`)
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"report", "--json-file", jsonPath}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want unknown field error")
+	}
+	if !strings.Contains(stderr.String(), `unknown field "surprise"`) {
+		t.Fatalf("stderr = %q, want unknown field", stderr.String())
+	}
+	assertCLILatestAttemptState(t, root, runID, runstore.AttemptStateInvalidReport)
+}
+
+func TestExecuteReportJSONReportRefTerminalizesInvalidReport(t *testing.T) {
+	root, runID, jsonPath := writeCurrentAttemptJSONReport(t, `"report_ref": {
+    "kind": "report",
+    "path": "reports/000001-plan.md",
+    "event_sequence": 1
+  }`)
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"report", "--json-file", jsonPath}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want report_ref schema error")
+	}
+	if !strings.Contains(stderr.String(), `unknown field "report_ref"`) {
+		t.Fatalf("stderr = %q, want report_ref unknown field", stderr.String())
+	}
+	attempt := assertCLILatestAttemptState(t, root, runID, runstore.AttemptStateInvalidReport)
+	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Report == nil {
+		t.Fatalf("attempt = %+v, want invalid_report with preserved identity", attempt)
+	}
+	if attempt.Report.ReportRef != nil {
+		t.Fatalf("report_ref = %+v, want caller-supplied ref cleared", attempt.Report.ReportRef)
+	}
+}
+
+func TestExecuteReportJSONUnknownNestedFieldTerminalizesInvalidReport(t *testing.T) {
+	root, runID, jsonPath := writeCurrentAttemptJSONReport(t, `"followups": [
+    {"title": "Later", "unexpected": true}
+  ]`)
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"report", "--json-file", jsonPath}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want nested unknown field error")
+	}
+	if !strings.Contains(stderr.String(), `unknown field "unexpected"`) {
+		t.Fatalf("stderr = %q, want nested unknown field", stderr.String())
+	}
+	assertCLILatestAttemptState(t, root, runID, runstore.AttemptStateInvalidReport)
+}
+
+func TestExecuteReportWrongAttemptRecordsIgnoredEvent(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	reportPath := filepath.Join(root, "ignored-detail.md")
+	writeCLIFile(t, reportPath, "## Ignored\n")
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{
+		"report",
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "old-attempt",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Stale report.",
+		"--report-file", reportPath,
+	}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want wrong attempt error")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != "attempt-001" {
+		t.Fatalf("active attempt = %+v, want unchanged attempt-001", loaded.Status.ActiveAttempt)
+	}
+	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+		t.Fatalf("last event type = %q, want report.ignored", got)
+	}
+	for _, artifact := range loaded.Status.Artifacts {
+		if artifact.Kind == runstore.KindReport {
+			t.Fatalf("artifact = %+v, want no report artifact for ignored report", artifact)
+		}
+	}
+	if active := loaded.Status.ActiveAttempt; active == nil || active.ReportRef != nil || active.Report != nil {
+		t.Fatalf("active attempt = %+v, want unchanged active attempt without report refs", active)
+	}
+}
+
+func TestExecuteReportWrongStepAgentAndStartingAttemptRecordIgnoredEvent(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		step       string
+		agent      string
+		start      func(t *testing.T, root, runID, attemptID string)
+		wantActive string
+	}{
+		{name: "wrong-step", step: "future", agent: "planner", start: startCLIActiveAttempt, wantActive: runstore.AttemptStateActive},
+		{name: "wrong-agent", step: "plan", agent: "other", start: startCLIActiveAttempt, wantActive: runstore.AttemptStateActive},
+		{name: "starting", step: "plan", agent: "planner", start: startCLIStartingAttempt, wantActive: runstore.AttemptStateStarting},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			tc.start(t, root, result.runID, "attempt-001")
+
+			var stdout, stderr bytes.Buffer
+			err := Execute([]string{
+				"report",
+				"--run", result.runID,
+				"--step", tc.step,
+				"--agent", tc.agent,
+				"--attempt", "attempt-001",
+				"--status", "done",
+				"--result", "ready",
+				"--summary", "Ignored.",
+			}, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want ignored report error")
+			}
+			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			if loadErr != nil {
+				t.Fatalf("Load returned error: %v", loadErr)
+			}
+			if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.State != tc.wantActive {
+				t.Fatalf("active attempt = %+v, want unchanged %s", loaded.Status.ActiveAttempt, tc.wantActive)
+			}
+			if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+				t.Fatalf("last event type = %q, want report.ignored", got)
+			}
+		})
 	}
 }
 
@@ -594,6 +1359,125 @@ func writeCLIProject(t *testing.T, root, beads string, markdownFallback bool) {
 		Beads:            beads,
 		MarkdownFallback: markdownFallback,
 	})
+}
+
+func openCLIStore(t *testing.T, root string) *runstore.Store {
+	t.Helper()
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	return store
+}
+
+func writeCurrentAttemptJSONReport(t *testing.T, extraFields string) (string, string, string) {
+	t.Helper()
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	jsonPath := filepath.Join(root, "report.json")
+	writeCLIFile(t, jsonPath, currentAttemptJSONReport(result.runID, extraFields))
+	return root, result.runID, jsonPath
+}
+
+func currentAttemptJSONReport(runID, extraFields string) string {
+	extra := ""
+	if strings.TrimSpace(extraFields) != "" {
+		extra = ",\n  " + extraFields
+	}
+	return fmt.Sprintf(`{
+  "run_id": %q,
+  "step_id": "plan",
+  "agent_id": "planner",
+  "attempt_id": "attempt-001",
+  "status": "done",
+  "result": "ready",
+  "summary": "Plan is ready."%s
+}`, runID, extra)
+}
+
+func assertCLILatestAttemptState(t *testing.T, root, runID, state string) runstore.Attempt {
+	t.Helper()
+	loaded, loadErr := openCLIStore(t, root).Load(runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if attempt.State != state {
+		t.Fatalf("attempt state = %q, want %s", attempt.State, state)
+	}
+	return attempt
+}
+
+func startCLIActiveAttempt(t *testing.T, root, runID, attemptID string) {
+	t.Helper()
+	store := openCLIStore(t, root)
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       attemptID,
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+		Time:            time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindPrompt,
+		Name:    "plan-" + attemptID,
+		Content: []byte("prompt\n"),
+		Time:    time.Date(2026, 5, 4, 12, 0, 1, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact prompt returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+		AttemptID: attemptID,
+		PromptRef: promptRef,
+		Time:      time.Date(2026, 5, 4, 12, 0, 2, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
+	}
+	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindLog,
+		Name:    "plan-" + attemptID,
+		Content: []byte("log\n"),
+		Time:    time.Date(2026, 5, 4, 12, 0, 3, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact log returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+		AttemptID: attemptID,
+		LogRef:    logRef,
+		Time:      time.Date(2026, 5, 4, 12, 0, 4, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordAttemptLog returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        attemptID,
+		PID:              12345,
+		ProcessStartTime: "123456789",
+		Time:             time.Date(2026, 5, 4, 12, 0, 5, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess returned error: %v", err)
+	}
+}
+
+func startCLIStartingAttempt(t *testing.T, root, runID, attemptID string) {
+	t.Helper()
+	store := openCLIStore(t, root)
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       attemptID,
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+		Time:            time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
 }
 
 func writeCLIFile(t *testing.T, path, content string) {

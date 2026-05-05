@@ -10,8 +10,10 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
 	"tiny-llm-orchestrator/orc/internal/launcher"
+	"tiny-llm-orchestrator/orc/internal/report"
 	"tiny-llm-orchestrator/orc/internal/runinspect"
 	"tiny-llm-orchestrator/orc/internal/runstart"
+	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
 const (
@@ -49,6 +51,8 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return executeRun(args[1:], stdin, stdout, stderr)
 	case "worker":
 		return executeWorker(args[1:], stdout, stderr)
+	case "report":
+		return executeReport(args[1:], stdout, stderr)
 	default:
 		if _, err := fmt.Fprintf(stderr, "%s: unknown command %q\n\n", appName, args[0]); err != nil {
 			return err
@@ -58,6 +62,81 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		}
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
+}
+
+func executeReport(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return printReportHelp(stdout)
+	}
+	opts := report.Options{}
+	stringFlags := map[string]*string{
+		"--json-file":   &opts.JSONFile,
+		"--run":         &opts.Report.RunID,
+		"--step":        &opts.Report.StepID,
+		"--agent":       &opts.Report.AgentID,
+		"--attempt":     &opts.Report.AttemptID,
+		"--status":      &opts.Report.Status,
+		"--result":      &opts.Report.Result,
+		"--summary":     &opts.Report.Summary,
+		"--report-file": &opts.ReportFile,
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if target, ok := stringFlags[arg]; ok {
+			if !assignFlagValue(args, &i, target) {
+				return reportFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+			continue
+		}
+		switch arg {
+		case "-h", helpFlag, helpCommand:
+			return printReportHelp(stdout)
+		case "--changed-path":
+			if !appendFlagValue(args, &i, &opts.Report.ChangedPaths) {
+				return reportFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+		case "--command":
+			if !appendFlagValue(args, &i, &opts.Report.Commands) {
+				return reportFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+		case "--test":
+			if !appendFlagValue(args, &i, &opts.Report.Tests) {
+				return reportFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+		case "--risk":
+			if !appendFlagValue(args, &i, &opts.Report.Risks) {
+				return reportFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+		case "--follow-up":
+			var title string
+			if !assignFlagValue(args, &i, &title) {
+				return reportFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+			opts.Report.Followups = append(opts.Report.Followups, runstore.Followup{Title: title})
+		default:
+			return reportFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
+		}
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	opts.Root = root
+	result, err := report.Submit(context.Background(), opts)
+	if err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s report: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	if result.Ignored {
+		_, err = fmt.Fprintf(stdout, "ignored report for run %s\n", result.RunID)
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "recorded report for run %s attempt %s\n", result.RunID, result.Attempt.AttemptID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func executeWorker(args []string, stdout, stderr io.Writer) error {
@@ -251,6 +330,25 @@ func assignFlagValue(args []string, index *int, target *string) bool {
 	return true
 }
 
+func appendFlagValue(args []string, index *int, target *[]string) bool {
+	var value string
+	if !assignFlagValue(args, index, &value) {
+		return false
+	}
+	*target = append(*target, value)
+	return true
+}
+
+func reportFlagError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s report: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	if helpErr := printReportHelp(stderr); helpErr != nil {
+		return helpErr
+	}
+	return err
+}
+
 func runStartFlagError(stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s run start: %v\n\n", appName, err); writeErr != nil {
 		return writeErr
@@ -270,6 +368,7 @@ Usage:
 Available Commands:
   help        Show command help
   init        Scaffold project-local Tiny Orc config
+  report      Validate and persist a worker report
   run         Manage orchestration runs
   worker      Launch and supervise worker attempts
   version     Print version information
@@ -330,6 +429,34 @@ Flags:
       --task-stdin                 Read Markdown task context from stdin
   -h, --help                       Show command help
 `, appName, appName)
+
+	return err
+}
+
+func printReportHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s report validates and persists a worker report.
+
+Usage:
+  %s report --run <run-id> --step <step-id> --agent <agent-id> --attempt <attempt-id> --status <status> --result <result> --summary <summary> [flags]
+  %s report --json-file <path>
+
+Flags:
+      --json-file <path>     Read report fields from a JSON file
+      --run <run-id>         Run id
+      --step <step-id>       Workflow step id
+      --agent <agent-id>     Agent id
+      --attempt <attempt-id> Attempt id
+      --status <status>      Report status
+      --result <result>      Report result
+      --summary <summary>    Compact report summary
+      --changed-path <path>  Changed path; repeatable
+      --command <command>    Command run; repeatable
+      --test <test>          Test run; repeatable
+      --risk <risk>          Risk or caveat; repeatable
+      --follow-up <title>    Follow-up suggestion title; repeatable
+      --report-file <path>   Markdown detail file to copy into the run store
+  -h, --help                 Show command help
+`, appName, appName, appName)
 
 	return err
 }

@@ -33,6 +33,8 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `internal/promptrender` owns role-specific worker prompt rendering and prompt
   artifact persistence. Feature semantics live in
   [../features/worker-prompt-rendering.md](../features/worker-prompt-rendering.md).
+- `internal/report` owns worker report validation and report persistence
+  orchestration for `orc report`.
 - `internal/runstore` owns persistent run state under `.orc/runs/<run-id>` and
   the narrow per-run locking needed to keep store-owned event/status writes
   consistent.

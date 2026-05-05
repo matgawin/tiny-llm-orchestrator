@@ -2,6 +2,7 @@ package runstore
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -668,6 +669,192 @@ func (s *Store) RecoverAttempt(runID string, req FinishAttemptRequest) (Attempt,
 	return s.terminalizeAttempt(context.Background(), runID, req, eventAttemptRecovered, true)
 }
 
+// RecordAttemptReport terminalizes the current active attempt with a structured worker report.
+func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Attempt, Event, error) {
+	report := req.Report
+	state := req.State
+	if state == "" {
+		state = AttemptStateReported
+	}
+	if err := validateReportTerminalization(state, report); err != nil {
+		return Attempt{}, Event{}, err
+	}
+
+	var out Attempt
+	var event Event
+	err := s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		if run.Status.ActiveAttempt == nil {
+			return &ReportTargetError{
+				RunID:  runID,
+				Reason: "report does not target current active attempt",
+				Err:    fmt.Errorf("run %q has no active attempt", runID),
+			}
+		}
+		if run.Status.ActiveAttempt.AttemptID != report.AttemptID {
+			return &ReportTargetError{
+				RunID:  runID,
+				Reason: "report does not target current active attempt",
+				Err:    fmt.Errorf("run %q active attempt is %q, not %q", runID, run.Status.ActiveAttempt.AttemptID, report.AttemptID),
+			}
+		}
+		attempt := *run.Status.ActiveAttempt
+		if !req.ReportContentSet && report.ReportRef != nil {
+			return errors.New("report_ref cannot be supplied by callers; provide report content for the run store to stage")
+		}
+		var staged *stagedArtifact
+		if req.ReportContentSet {
+			ref, stagedReport, err := s.stageReportArtifactForEvent(run, req.ReportName, req.ReportContent, nextEventSequence(run))
+			if err != nil {
+				return err
+			}
+			staged = &stagedReport
+			defer staged.cleanup()
+			report.ReportRef = &ref
+		}
+		if err := applyAttemptReport(&attempt, state, report); err != nil {
+			return err
+		}
+		payload, err := marshalPayload(attemptReportedPayload{
+			AttemptID: report.AttemptID,
+			State:     state,
+			Report:    *attempt.Report,
+		})
+		if err != nil {
+			return err
+		}
+		event = Event{Time: req.Time, Type: eventAttemptReported, Payload: payload}
+		if staged != nil {
+			if err := staged.commit(); err != nil {
+				return err
+			}
+		}
+		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			finishedAt := event.Time
+			attempt.FinishedAt = &finishedAt
+			for i := len(status.Attempts) - 1; i >= 0; i-- {
+				if status.Attempts[i].AttemptID == report.AttemptID {
+					status.Attempts[i] = attempt
+					break
+				}
+			}
+			status.ActiveAttempt = nil
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+			if attempt.ReportRef != nil {
+				status.Artifacts = append(status.Artifacts, *attempt.ReportRef)
+			}
+		})
+		event = committedEvent
+		if err != nil {
+			if statusBackedEventPossiblyCommitted(err) {
+				out = currentOrLatestAttempt(status, report.AttemptID)
+				return err
+			}
+			if staged != nil {
+				if rollbackErr := staged.rollback(); rollbackErr != nil {
+					return errors.Join(err, fmt.Errorf("rollback report artifact %s: %w", attempt.ReportRef.Path, rollbackErr))
+				}
+			}
+			return err
+		}
+		out = currentOrLatestAttempt(status, report.AttemptID)
+		return nil
+	})
+	if err != nil {
+		if out.AttemptID != "" {
+			return out, event, err
+		}
+		return Attempt{}, Event{}, err
+	}
+	return out, event, nil
+}
+
+func (s *Store) stageReportArtifactForEvent(run *Run, name string, content []byte, sequence int) (ArtifactRef, stagedArtifact, error) {
+	relPath, err := artifactPath(KindReport, name, sequence)
+	if err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	if err := validateRelativeArtifactPath(relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	if err := validateArtifactWriteAllowed(run.Status.Artifacts, KindReport, relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	ref := ArtifactRef{
+		Kind:          KindReport,
+		Path:          relPath,
+		Name:          name,
+		EventSequence: sequence,
+	}
+	path := filepath.Join(run.Path, filepath.FromSlash(relPath))
+	if err := ensureArtifactParentDir(run.Path, relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s: %w", run.ID, relPath, err)
+	}
+	if err := validateArtifactFile(path); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	if existing, err := os.ReadFile(path); err == nil { // #nosec G304 -- path is a validated report artifact path scoped to the run directory.
+		if !bytes.Equal(existing, content) {
+			return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s already exists with different content", run.ID, relPath)
+		}
+		noop := func() error { return nil }
+		return ref, stagedArtifact{commit: noop, rollback: noop, cleanup: func() {}}, nil
+	} else if !os.IsNotExist(err) {
+		return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s: %w", run.ID, relPath, err)
+	}
+	staged, err := stageArtifact(path, Artifact{Kind: KindReport, Name: name, Content: content})
+	if err != nil {
+		return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s: %w", run.ID, relPath, err)
+	}
+	return ref, staged, nil
+}
+
+// RecordIgnoredReport records a report that did not target the active attempt.
+func (s *Store) RecordIgnoredReport(runID string, req IgnoreReportRequest) (Event, error) {
+	if req.Reason == "" {
+		return Event{}, errors.New("reason is required")
+	}
+	if req.RunID != "" && req.RunID != runID {
+		return Event{}, fmt.Errorf("report ignored run_id %q does not match run %q", req.RunID, runID)
+	}
+	payload, err := marshalPayload(reportIgnoredPayload{
+		RunID:     req.RunID,
+		StepID:    req.StepID,
+		AgentID:   req.AgentID,
+		AttemptID: req.AttemptID,
+		Reason:    req.Reason,
+		Errors:    req.Errors,
+	})
+	if err != nil {
+		return Event{}, err
+	}
+	event := Event{Time: req.Time, Type: eventReportIgnored, Payload: payload}
+	var committed Event
+	err = s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		_, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+		})
+		committed = committedEvent
+		return err
+	})
+	if err != nil {
+		if statusBackedEventPossiblyCommitted(err) {
+			return committed, err
+		}
+		return Event{}, err
+	}
+	return committed, nil
+}
+
 func (s *Store) terminalizeAttempt(ctx context.Context, runID string, req FinishAttemptRequest, eventType string, recovered bool) (Attempt, Event, error) {
 	if ctx == nil {
 		return Attempt{}, Event{}, errors.New("context is required")
@@ -814,6 +1001,41 @@ func applyTerminalAttemptOutcome(status Status, attempt *Attempt, outcome termin
 	return logRef, nil
 }
 
+func applyAttemptReport(attempt *Attempt, state string, report Report) error {
+	switch {
+	case attempt.State != AttemptStateActive:
+		return fmt.Errorf("attempt %q state %q, want active", attempt.AttemptID, attempt.State)
+	case report.RunID != attempt.RunID:
+		return fmt.Errorf("report run_id %q does not match active attempt run_id %q", report.RunID, attempt.RunID)
+	case report.StepID != attempt.StepID:
+		return fmt.Errorf("report step_id %q does not match active attempt step_id %q", report.StepID, attempt.StepID)
+	case report.AgentID != attempt.AgentID:
+		return fmt.Errorf("report agent_id %q does not match active attempt agent_id %q", report.AgentID, attempt.AgentID)
+	case report.AttemptID != attempt.AttemptID:
+		return fmt.Errorf("report attempt_id %q does not match active attempt attempt_id %q", report.AttemptID, attempt.AttemptID)
+	}
+	if report.ReportRef != nil {
+		if err := validateArtifactRef(*report.ReportRef, 0); err != nil {
+			return err
+		}
+		if report.ReportRef.Kind != KindReport {
+			return fmt.Errorf("artifact %s kind %q, want %q", report.ReportRef.Path, report.ReportRef.Kind, KindReport)
+		}
+		ref := *report.ReportRef
+		report.ReportRef = &ref
+	}
+	attempt.State = state
+	attempt.Status = report.Status
+	attempt.Result = report.Result
+	attempt.ReportRef = report.ReportRef
+	report.RunID = attempt.RunID
+	report.StepID = attempt.StepID
+	report.AgentID = attempt.AgentID
+	report.AttemptID = attempt.AttemptID
+	attempt.Report = &report
+	return nil
+}
+
 // ReadArtifact reads a persisted artifact through a validated run-store path.
 func (s *Store) ReadArtifact(runID string, ref ArtifactRef) ([]byte, error) {
 	if err := validateRunID(runID); err != nil {
@@ -949,7 +1171,7 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 		}
 		event = Event{Time: at, Type: eventType, Payload: content}
 		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
-			if event.Type == eventAttemptFinished || event.Type == eventAttemptRecovered {
+			if event.Type == eventAttemptFinished || event.Type == eventAttemptRecovered || event.Type == eventAttemptReported {
 				finishedAt := event.Time
 				attempt.FinishedAt = &finishedAt
 			}
@@ -1018,6 +1240,31 @@ func validateFinishedAttempt(req FinishAttemptRequest) error {
 	return validateTerminalAttemptOutcomeFields(req.State, req.Status, req.Result, "attempt")
 }
 
+func validateReportTerminalization(state string, report Report) error {
+	switch {
+	case report.RunID == "":
+		return errors.New("report run id is required")
+	case report.StepID == "":
+		return errors.New("report step id is required")
+	case report.AgentID == "":
+		return errors.New("report agent id is required")
+	case report.AttemptID == "":
+		return errors.New("report attempt id is required")
+	case report.Status == "":
+		return errors.New("report status is required")
+	case report.Result == "":
+		return errors.New("report result is required")
+	case report.Summary == "":
+		return errors.New("report summary is required")
+	case state != AttemptStateReported && state != AttemptStateInvalidReport:
+		return fmt.Errorf("report state %q is not terminal", state)
+	case state == AttemptStateInvalidReport && (report.Status != attemptStatusFailed || report.Result != AttemptResultInvalidReport):
+		return fmt.Errorf("report terminal outcome %s/%s with state %q is invalid", report.Status, report.Result, state)
+	default:
+		return nil
+	}
+}
+
 func validateTerminalAttemptOutcomeFields(state, status, result, subject string) error {
 	if state == "" || status == "" || result == "" {
 		return fmt.Errorf("%s state/status/result are required", subject)
@@ -1053,7 +1300,7 @@ func validateAttemptTerminalizationHasProcessContext(attempt Attempt, terminalSt
 
 func terminalAttemptState(state string) bool {
 	switch state {
-	case AttemptStateMissingReport, AttemptStateProcessError, AttemptStateTimedOut:
+	case AttemptStateMissingReport, AttemptStateProcessError, AttemptStateTimedOut, AttemptStateReported, AttemptStateInvalidReport:
 		return true
 	default:
 		return false
@@ -1083,10 +1330,33 @@ func PendingLauncherOutcome(status Status) (Attempt, bool) {
 		return Attempt{}, false
 	}
 	attempt := status.Attempts[len(status.Attempts)-1]
-	if !validTerminalAttemptOutcome(attempt.State, attempt.Status, attempt.Result) {
+	if !pendingLauncherAttemptOutcome(attempt) {
 		return Attempt{}, false
 	}
 	return attempt, true
+}
+
+// LatestReportedOutcome returns the latest valid worker-reported outcome that
+// report/routing callers can feed into the workflow engine.
+func LatestReportedOutcome(status Status) (Attempt, bool) {
+	if status.State != stateRunning || status.ActiveAttempt != nil || len(status.Attempts) == 0 {
+		return Attempt{}, false
+	}
+	attempt := status.Attempts[len(status.Attempts)-1]
+	if attempt.State != AttemptStateReported || attempt.Status == "" || attempt.Result == "" {
+		return Attempt{}, false
+	}
+	return attempt, true
+}
+
+func pendingLauncherAttemptOutcome(attempt Attempt) bool {
+	if validTerminalAttemptOutcome(attempt.State, attempt.Status, attempt.Result) {
+		return true
+	}
+	if attempt.State == AttemptStateInvalidReport {
+		return attempt.Status == attemptStatusFailed && attempt.Result == AttemptResultInvalidReport
+	}
+	return false
 }
 
 func (s *Store) withRunLock(runID string, fn func() error) error {
@@ -1215,7 +1485,7 @@ func statusBackedEventPossiblyCommitted(err error) bool {
 
 func reservedEventType(eventType string) bool {
 	switch eventType {
-	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered:
+	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventReportIgnored:
 		return true
 	default:
 		return false
@@ -1505,6 +1775,25 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			if err := finishReplayedActiveAttempt(&replayed, event, payload, event.Type == eventAttemptRecovered); err != nil {
 				return Status{}, err
 			}
+		case eventAttemptReported:
+			var payload attemptReportedPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d attempt.reported payload: %w", event.Sequence, err)
+			}
+			if err := reportReplayedActiveAttempt(&replayed, event, payload); err != nil {
+				return Status{}, err
+			}
+		case eventReportIgnored:
+			var payload reportIgnoredPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d report.ignored payload: %w", event.Sequence, err)
+			}
+			if payload.Reason == "" {
+				return Status{}, fmt.Errorf("event %d report ignored reason is required", event.Sequence)
+			}
+			if payload.RunID != "" && payload.RunID != event.RunID {
+				return Status{}, fmt.Errorf("event %d report ignored run_id %q does not match event run_id %q", event.Sequence, payload.RunID, event.RunID)
+			}
 		}
 	}
 	return replayed, nil
@@ -1538,6 +1827,10 @@ func validateStartedAttemptEvent(event Event, attempt Attempt, runID string) err
 		return fmt.Errorf("event %d attempt prompt_ref must be empty for starting attempt", event.Sequence)
 	case attempt.LogRef != nil:
 		return fmt.Errorf("event %d attempt log_ref must be empty for starting attempt", event.Sequence)
+	case attempt.ReportRef != nil:
+		return fmt.Errorf("event %d attempt report_ref must be empty for starting attempt", event.Sequence)
+	case attempt.Report != nil:
+		return fmt.Errorf("event %d attempt report must be empty for starting attempt", event.Sequence)
 	case attempt.FinishedAt != nil:
 		return fmt.Errorf("event %d attempt finished_at must be empty for starting attempt", event.Sequence)
 	case attempt.Recovered:
@@ -1625,6 +1918,33 @@ func finishReplayedActiveAttempt(status *Status, event Event, payload attemptFin
 		return err
 	}); err != nil {
 		return err
+	}
+	status.ActiveAttempt = nil
+	return nil
+}
+
+func reportReplayedActiveAttempt(status *Status, event Event, payload attemptReportedPayload) error {
+	if err := validateReportTerminalization(payload.State, payload.Report); err != nil {
+		return fmt.Errorf("event %d %w", event.Sequence, err)
+	}
+	if payload.AttemptID == "" {
+		return fmt.Errorf("event %d attempt_id is required", event.Sequence)
+	}
+	if payload.Report.AttemptID != payload.AttemptID {
+		return fmt.Errorf("event %d report attempt_id %q does not match", event.Sequence, payload.Report.AttemptID)
+	}
+	if err := updateReplayedActiveAttempt(status, event, payload.AttemptID, func(attempt *Attempt) error {
+		finishedAt := event.Time
+		if err := applyAttemptReport(attempt, payload.State, payload.Report); err != nil {
+			return err
+		}
+		attempt.FinishedAt = &finishedAt
+		return nil
+	}); err != nil {
+		return err
+	}
+	if payload.Report.ReportRef != nil {
+		status.Artifacts = append(status.Artifacts, *payload.Report.ReportRef)
 	}
 	status.ActiveAttempt = nil
 	return nil
