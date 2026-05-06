@@ -20,7 +20,7 @@ Contributors wiring runtime surfaces to workflow routing.
 - [configuration.md](configuration.md)
 - [run-store.md](run-store.md)
 - [../architecture/service-boundaries.md](../architecture/service-boundaries.md)
-- [../PRD.md](../PRD.md)
+- [../features/worker-launching.md](../features/worker-launching.md)
 
 ## Ownership
 

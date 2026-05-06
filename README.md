@@ -28,6 +28,14 @@ workflow transitions, records local follow-up work, exposes read-only run
 inspection, renders internal worker prompts, launches workflow-selected worker
 processes, and provides durable run-store primitives.
 
+In Tiny Orc docs and command output, "orchestrator" means the supervising
+caller that drives the `orc` CLI. In normal Codex use, that is the main Codex
+thread started by the user before any worker launch. When `orc` is run manually,
+the human operator is effectively filling the same orchestrator role. The
+default workflow does not launch an orchestrator worker; `orc worker
+launch-next` starts the workflow-selected role-specific worker, such as planner,
+coder, tester, or reviewer.
+
 Runtime entrypoint:
 
 - `cmd/orc`: builds the `orc` command.

@@ -561,7 +561,6 @@ func scaffoldPaths() []string {
 		".orc/agents/coder.md",
 		".orc/agents/tester.md",
 		".orc/agents/reviewer.md",
-		".orc/agents/orchestrator.md",
 	}
 }
 

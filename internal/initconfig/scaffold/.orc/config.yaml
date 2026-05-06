@@ -6,4 +6,3 @@ agents:
   coder: agents/coder.md
   tester: agents/tester.md
   reviewer: agents/reviewer.md
-  orchestrator: agents/orchestrator.md

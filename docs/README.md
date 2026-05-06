@@ -28,6 +28,13 @@ Maintainers and contributors looking for durable guidance about the repository.
 
 ## Categories
 
+### Future Work
+
+[future-work.md](future-work.md)
+
+Use this page for deferred features, post-v1 ideas, and open policy questions
+that should not be mixed into current behavior contracts.
+
 ### Getting Started
 
 [getting-started/README.md](getting-started/README.md)

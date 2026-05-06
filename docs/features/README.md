@@ -26,7 +26,8 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 - Summary context rendering: [summary-context.md](summary-context.md)
 - Final summary recording: [final-summary-recording.md](final-summary-recording.md)
 - Follow-up recording: [follow-up-recording.md](follow-up-recording.md)
-- Worker report command and report persistence: [../PRD.md](../PRD.md#report-model)
+- Worker report command and report persistence: report contract in [worker-prompt-rendering.md](worker-prompt-rendering.md#report-contract), persistence contract in
+  [../reference/run-store.md](../reference/run-store.md)
 - Worker prompt rendering: [worker-prompt-rendering.md](worker-prompt-rendering.md)
 - Worker launching: [worker-launching.md](worker-launching.md)
 - Run-store behavior: currently documented in [../reference/run-store.md](../reference/run-store.md)
