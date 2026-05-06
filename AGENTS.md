@@ -101,3 +101,10 @@ Important:
 - Generated artifacts were regenerated when source inputs changed.
 - Permanent docs were updated when durable behavior or contracts changed.
 - Verification was run at the narrowest sufficient scope, or any unrun validation and the reason for it were called out explicitly.
+
+## Tiny Orc
+
+- Project-local orchestration config lives under `.orc/`.
+- Persistent workflow and role descriptor files are user-owned and reviewable.
+- Runtime run state belongs under `.orc/runs/`, which should stay ignored by VCS.
+- Use `orc init --dry-run` before changing an existing scaffold.

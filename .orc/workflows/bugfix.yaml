@@ -1,0 +1,92 @@
+name: bugfix
+start: reproduce
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+vcs:
+  dirty_start: block
+  no_vcs: allow
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries:
+    failed/missing_report: 1
+    failed/timeout: 0
+    failed/invalid_report: 0
+    failed/process_error: 1
+    failed/error: 0
+steps:
+  reproduce:
+    agent: bug-reproducer
+    allowed_results:
+      done: [reproduced]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/reproduced: plan
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  plan:
+    agent: planner
+    allowed_results:
+      done: [ready]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/ready: code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  code:
+    agent: coder
+    allowed_results:
+      done: [ready]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/ready: test
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  test:
+    agent: tester
+    allowed_results:
+      done: [passed, failed]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/passed: review
+      done/failed: code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  review:
+    agent: reviewer
+    allowed_results:
+      done: [approved, changes_requested]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/approved: ready_for_human
+      done/changes_requested: code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
