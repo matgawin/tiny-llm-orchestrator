@@ -223,11 +223,11 @@ func renderPriorReports(reports []reportContext) string {
 	var out strings.Builder
 	out.WriteString("## Prior Report Context\n\n")
 	if len(reports) == 0 {
-		out.WriteString("No prior report artifacts are recorded for this run.\n\n")
+		out.WriteString("No prior reports are recorded for this run.\n\n")
 		return out.String()
 	}
 	for _, report := range reports {
-		fmt.Fprintf(&out, "### %s\n\n%s\n\n", report.path, report.excerpt)
+		fmt.Fprintf(&out, "### %s\n\n%s\n\n", report.heading, report.excerpt)
 	}
 	return out.String()
 }
@@ -250,12 +250,14 @@ func taskContextContent(ctx context.Context, renderCtx renderContext) (string, e
 }
 
 type reportContext struct {
-	path    string
+	heading string
 	excerpt string
 }
 
 func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]reportContext, error) {
 	var reports []reportContext
+	attemptReportDetailPaths := attemptReportDetailArtifactPaths(renderCtx.run.Status.Attempts)
+	attemptReportDetailByPath := make(map[string][]byte)
 	for _, ref := range renderCtx.run.Status.Artifacts {
 		if ref.Kind != runstore.KindReport {
 			continue
@@ -267,12 +269,73 @@ func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]report
 		if err != nil {
 			return nil, fmt.Errorf("read prior report %s: %w", ref.Path, err)
 		}
+		if _, ok := attemptReportDetailPaths[ref.Path]; ok {
+			attemptReportDetailByPath[ref.Path] = content
+			continue
+		}
 		reports = append(reports, reportContext{
-			path:    ref.Path,
+			heading: ref.Path,
 			excerpt: excerptMarkdown(content, priorReportExcerptLimit),
 		})
 	}
+	for _, attempt := range renderCtx.run.Status.Attempts {
+		if attempt.Report == nil {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var detail []byte
+		if attempt.Report.ReportRef != nil {
+			detail = attemptReportDetailByPath[attempt.Report.ReportRef.Path]
+		}
+		reports = append(reports, reportContext{
+			heading: fmt.Sprintf("attempt %s (%s %s/%s)", attempt.AttemptID, attempt.StepID, attempt.Report.Status, attempt.Report.Result),
+			excerpt: excerptMarkdown([]byte(reportSummaryMarkdown(*attempt.Report, detail)), priorReportExcerptLimit),
+		})
+	}
 	return reports, nil
+}
+
+func attemptReportDetailArtifactPaths(attempts []runstore.Attempt) map[string]struct{} {
+	paths := make(map[string]struct{})
+	for _, attempt := range attempts {
+		if attempt.Report == nil || attempt.Report.ReportRef == nil || attempt.Report.ReportRef.Path == "" {
+			continue
+		}
+		paths[attempt.Report.ReportRef.Path] = struct{}{}
+	}
+	return paths
+}
+
+func reportSummaryMarkdown(report runstore.Report, detail []byte) string {
+	var out strings.Builder
+	fmt.Fprintf(&out, "- step_id: `%s`\n", report.StepID)
+	fmt.Fprintf(&out, "- agent_id: `%s`\n", report.AgentID)
+	fmt.Fprintf(&out, "- status/result: `%s/%s`\n", report.Status, report.Result)
+	if report.Summary != "" {
+		fmt.Fprintf(&out, "- summary: %s\n", report.Summary)
+	}
+	writeReportList(&out, "command", report.Commands)
+	writeReportList(&out, "test", report.Tests)
+	writeReportList(&out, "risk", report.Risks)
+	writeReportList(&out, "changed_path", report.ChangedPaths)
+	for _, followup := range report.Followups {
+		fmt.Fprintf(&out, "- follow_up: %s\n", followup.Title)
+		if followup.Details != "" {
+			fmt.Fprintf(&out, "- follow_up_details: %s\n", followup.Details)
+		}
+	}
+	if strings.TrimSpace(string(detail)) != "" {
+		fmt.Fprintf(&out, "\nReport detail:\n\n%s\n", strings.TrimSpace(string(detail)))
+	}
+	return out.String()
+}
+
+func writeReportList(out *strings.Builder, label string, values []string) {
+	for _, value := range values {
+		fmt.Fprintf(out, "- %s: %s\n", label, value)
+	}
 }
 
 func excerptMarkdown(content []byte, limit int) string {

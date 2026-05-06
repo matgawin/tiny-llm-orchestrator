@@ -102,16 +102,33 @@ func cliCodexShimWorkerReport() {
 	if err != nil {
 		os.Exit(4)
 	}
+	if stdinPath := os.Getenv("ORC_CLI_CODEX_STDIN"); stdinPath != "" {
+		if err := os.WriteFile(stdinPath, content, 0o600); err != nil {
+			os.Exit(5)
+		}
+	}
 	prompt := string(content)
+	status := os.Getenv("ORC_CLI_CODEX_REPORT_STATUS")
+	if status == "" {
+		status = "done"
+	}
+	result := os.Getenv("ORC_CLI_CODEX_REPORT_RESULT")
+	if result == "" {
+		result = "ready"
+	}
+	summary := os.Getenv("ORC_CLI_CODEX_REPORT_SUMMARY")
+	if summary == "" {
+		summary = "Worker report is ready."
+	}
 	args := []string{
 		"report",
 		"--run", promptValue(prompt, "run_id"),
 		"--step", promptValue(prompt, "step_id"),
 		"--agent", promptValue(prompt, "agent_id"),
 		"--attempt", promptValue(prompt, "attempt_id"),
-		"--status", "done",
-		"--result", "ready",
-		"--summary", "Worker report is ready.",
+		"--status", status,
+		"--result", result,
+		"--summary", summary,
 	}
 	if err := Execute(args, os.Stdout, os.Stderr); err != nil {
 		os.Exit(1)
@@ -610,6 +627,78 @@ func TestWorkerLaunchNextAcceptsWorkerReportBeforeExit(t *testing.T) {
 	}
 	if loaded.Status.ActiveAttempt != nil {
 		t.Fatalf("active attempt = %+v, want cleared by report", loaded.Status.ActiveAttempt)
+	}
+}
+
+func TestWorkerLaunchNextRoutesImplementationWorkflowReportsEndToEnd(t *testing.T) {
+	run := startCLIImplementationReportRun(t)
+
+	launchCLIWorkerReport(t, run.runID, ready("Plan is ready."))
+	launchCLIWorkerReport(t, run.runID, ready("Code is ready for tests."))
+	launchCLIWorkerReport(t, run.runID, failed("Tests failed: go test ./..."))
+
+	codeAfterTestPrompt := filepath.Join(run.root, "code-after-test.md")
+	launchCLIWorkerReport(t, run.runID, withPromptPath(ready("Code fixed the test failure."), codeAfterTestPrompt))
+	assertCLIOutputContainsAll(t, string(readCLIFile(t, codeAfterTestPrompt)), []string{
+		"## Prior Report Context",
+		"Tests failed: go test ./...",
+		"- step_id: `code`",
+		"- agent_id: `coder`",
+	})
+
+	launchCLIWorkerReport(t, run.runID, passed("Tests passed."))
+	launchCLIWorkerReport(t, run.runID, changesRequested("Review found missing docs."))
+
+	codeAfterReviewPrompt := filepath.Join(run.root, "code-after-review.md")
+	launchCLIWorkerReport(t, run.runID, withPromptPath(ready("Code addressed review findings."), codeAfterReviewPrompt))
+	assertCLIOutputContainsAll(t, string(readCLIFile(t, codeAfterReviewPrompt)), []string{
+		"Review found missing docs.",
+		"- step_id: `code`",
+		"- agent_id: `coder`",
+	})
+
+	launchCLIWorkerReport(t, run.runID, passed("Tests passed after review fixes."))
+	attemptsBeforeApprovalTerminal := len(loadCLIRun(t, run.root, run.runID).Status.Attempts)
+	launchCLIWorkerReport(t, run.runID, approved("Review approved."))
+	terminalizeCLIWorkflow(t, run.root, run.runID, "ready_for_human", attemptsBeforeApprovalTerminal+1, "Review approved.")
+}
+
+func TestWorkerLaunchNextRoutesImplementationBlockedReportsToHuman(t *testing.T) {
+	tests := []struct {
+		name         string
+		prepare      []workerReport
+		blockSummary string
+	}{
+		{
+			name: "tester blocked",
+			prepare: []workerReport{
+				ready("Plan is ready."),
+				ready("Code is ready for tests."),
+			},
+			blockSummary: "Tests require network approval.",
+		},
+		{
+			name: "reviewer blocked",
+			prepare: []workerReport{
+				ready("Plan is ready."),
+				ready("Code is ready for tests."),
+				passed("Tests passed."),
+			},
+			blockSummary: "Review requires human product decision.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := startCLIImplementationReportRun(t)
+
+			for _, report := range tt.prepare {
+				launchCLIWorkerReport(t, run.runID, report)
+			}
+			attemptsBeforeBlockedTerminal := len(loadCLIRun(t, run.root, run.runID).Status.Attempts)
+			launchCLIWorkerReport(t, run.runID, blocked(tt.blockSummary))
+			terminalizeCLIWorkflow(t, run.root, run.runID, "blocked_for_human", attemptsBeforeBlockedTerminal+1, tt.blockSummary)
+		})
 	}
 }
 
@@ -1472,6 +1561,117 @@ func writeCLIProject(t *testing.T, root, beads string, markdownFallback bool) {
 	})
 }
 
+func writeCLIImplementationProject(t *testing.T, root string) {
+	t.Helper()
+	orcDir := filepath.Join(root, ".orc")
+	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
+		t.Fatalf("mkdir workflows: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+  coder: agents/coder.md
+  tester: agents/tester.md
+  reviewer: agents/reviewer.md
+`)
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "planner.md"), cliAgentDescriptor("planner", "Creates implementation plans."))
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "coder.md"), cliAgentDescriptor("coder", "Implements code changes."))
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "tester.md"), cliAgentDescriptor("tester", "Runs verification."))
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), cliAgentDescriptor("reviewer", "Reviews completed work."))
+	writeCLIFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries:
+    failed/missing_report: 1
+    failed/timeout: 0
+    failed/invalid_report: 0
+    failed/process_error: 1
+    failed/error: 0
+steps:
+  plan:
+    agent: planner
+    allowed_results:
+      done: [ready]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/ready: code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  code:
+    agent: coder
+    allowed_results:
+      done: [ready]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/ready: test
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  test:
+    agent: tester
+    allowed_results:
+      done: [passed, failed]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/passed: review
+      done/failed: code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  review:
+    agent: reviewer
+    allowed_results:
+      done: [approved, changes_requested]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/approved: ready_for_human
+      done/changes_requested: code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+`)
+}
+
+func cliAgentDescriptor(id, description string) string {
+	return fmt.Sprintf(`---
+id: %s
+role: %s
+description: %s
+---
+
+%s role instructions.
+`, id, id, description, id)
+}
+
 func openCLIStore(t *testing.T, root string) *runstore.Store {
 	t.Helper()
 	store, err := runstore.Open(root)
@@ -1479,6 +1679,108 @@ func openCLIStore(t *testing.T, root string) *runstore.Store {
 		t.Fatalf("Open returned error: %v", err)
 	}
 	return store
+}
+
+func loadCLIRun(t *testing.T, root, runID string) *runstore.Run {
+	t.Helper()
+	loaded, err := openCLIStore(t, root).Load(runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	return loaded
+}
+
+type cliImplementationRun struct {
+	root  string
+	runID string
+}
+
+func startCLIImplementationReportRun(t *testing.T) cliImplementationRun {
+	t.Helper()
+	root := withTempCwd(t)
+	writeCLIImplementationProject(t, root)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	t.Setenv("PATH", shim.binDir)
+	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
+	t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
+	return cliImplementationRun{root: root, runID: result.runID}
+}
+
+type workerReport struct {
+	status     string
+	result     string
+	summary    string
+	promptPath string
+}
+
+func ready(summary string) workerReport {
+	return done("ready", summary)
+}
+
+func failed(summary string) workerReport {
+	return done("failed", summary)
+}
+
+func passed(summary string) workerReport {
+	return done("passed", summary)
+}
+
+func changesRequested(summary string) workerReport {
+	return done("changes_requested", summary)
+}
+
+func approved(summary string) workerReport {
+	return done("approved", summary)
+}
+
+func blocked(summary string) workerReport {
+	return workerReport{status: "blocked", result: "blocked", summary: summary}
+}
+
+func done(result, summary string) workerReport {
+	return workerReport{status: "done", result: result, summary: summary}
+}
+
+func withPromptPath(report workerReport, path string) workerReport {
+	report.promptPath = path
+	return report
+}
+
+func launchCLIWorkerReport(t *testing.T, runID string, report workerReport) string {
+	t.Helper()
+	t.Setenv("ORC_CLI_CODEX_REPORT_STATUS", report.status)
+	t.Setenv("ORC_CLI_CODEX_REPORT_RESULT", report.result)
+	t.Setenv("ORC_CLI_CODEX_REPORT_SUMMARY", report.summary)
+	t.Setenv("ORC_CLI_CODEX_STDIN", report.promptPath)
+	output := executeCLICommand(t, []string{"worker", "launch-next", runID})
+	if !strings.Contains(output, "result: "+report.status+"/"+report.result) {
+		t.Fatalf("output = %q, want result %s/%s", output, report.status, report.result)
+	}
+	return output
+}
+
+func terminalizeCLIWorkflow(t *testing.T, root, runID, wantState string, wantAttempts int, wantSummary string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"worker", "launch-next", runID}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want terminal no-launch error")
+	}
+	if !strings.Contains(stderr.String(), "transitioned to "+wantState) {
+		t.Fatalf("stderr = %q, want terminal transition to %s", stderr.String(), wantState)
+	}
+	loaded := loadCLIRun(t, root, runID)
+	if loaded.Status.State != wantState {
+		t.Fatalf("run state = %q, want %s", loaded.Status.State, wantState)
+	}
+	if got := len(loaded.Status.Attempts); got != wantAttempts {
+		t.Fatalf("attempt history len = %d, want no relaunch beyond %d attempts", got, wantAttempts)
+	}
+	latest := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if latest.Report == nil || latest.Report.Summary != wantSummary {
+		t.Fatalf("latest report = %+v, want summary %q visible", latest.Report, wantSummary)
+	}
 }
 
 func writeCurrentAttemptJSONReport(t *testing.T, extraFields string) (string, string, string) {

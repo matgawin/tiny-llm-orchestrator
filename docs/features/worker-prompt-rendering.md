@@ -67,16 +67,16 @@ Rendered prompts include:
 - explicit attempt metadata
 - the project-local role descriptor frontmatter fields and Markdown body
 - captured task context from `task/context.md`
-- prior report artifact paths with bounded Markdown excerpts when report
-  artifacts exist
+- prior report context
 - the worker-reportable `status/result` pairs for the selected step
 - the exact required `orc report` command shape
 
-Prior report context is currently bounded Markdown excerpting from recorded
-report artifacts. If a recorded report artifact cannot be read through the Run
-Store, rendering fails instead of silently omitting recorded context. Later
-summary-context work can prefer structured report fields without changing the
-renderer boundary.
+Prior report context includes structured reports persisted on completed
+attempts, so loopback prompts for coder steps include tester failure summaries
+and reviewer requested-change summaries even when the worker did not attach a
+separate report file. When report artifacts exist, the renderer also includes
+bounded Markdown excerpts. If a recorded report artifact cannot be read through
+the Run Store, rendering fails instead of silently omitting recorded context.
 
 ## Report Contract
 

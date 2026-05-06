@@ -117,6 +117,99 @@ func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
 	}
 }
 
+func TestRenderIncludesStructuredPriorReportWithoutReportArtifact(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	recordReportedAttempt(t, store, runID, runstore.Report{
+		RunID:        runID,
+		StepID:       "plan",
+		AgentID:      "planner",
+		AttemptID:    "attempt-plan",
+		Status:       "done",
+		Result:       "ready",
+		Summary:      "Plan is ready for verification.",
+		Commands:     []string{"go test ./internal/promptrender"},
+		Tests:        []string{"prompt renderer package tests passed"},
+		Risks:        []string{"none"},
+		ChangedPaths: []string{"internal/promptrender/promptrender.go"},
+		Followups:    []runstore.Followup{{Title: "Document prompt report context", Details: "Keep docs aligned with renderer behavior."}},
+	}, nil)
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "test",
+		AgentID:   "tester",
+		AttemptID: "attempt-test",
+		Time:      fixedPromptTime().Add(4 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	prompt := string(result.Content)
+	assertPromptContainsAll(t, prompt, []string{
+		"## Prior Report Context",
+		"### attempt attempt-plan (plan done/ready)",
+		"- step_id: `plan`",
+		"- agent_id: `planner`",
+		"- status/result: `done/ready`",
+		"- summary: Plan is ready for verification.",
+		"- command: go test ./internal/promptrender",
+		"- test: prompt renderer package tests passed",
+		"- risk: none",
+		"- changed_path: internal/promptrender/promptrender.go",
+		"- follow_up: Document prompt report context",
+		"- follow_up_details: Keep docs aligned with renderer behavior.",
+	})
+	if strings.Contains(prompt, "### reports/") {
+		t.Fatalf("prompt includes report artifact context, want structured report only:\n%s", prompt)
+	}
+}
+
+func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	recordReportedAttempt(t, store, runID, runstore.Report{
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-plan",
+		Status:    "done",
+		Result:    "ready",
+		Summary:   "Plan is ready for verification.",
+	}, []byte("# Detail\n\nUse the focused test surface.\n"))
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "test",
+		AgentID:   "tester",
+		AttemptID: "attempt-test",
+		Time:      fixedPromptTime().Add(8 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	prompt := string(result.Content)
+	assertPromptContainsAll(t, prompt, []string{
+		"### attempt attempt-plan (plan done/ready)",
+		"- summary: Plan is ready for verification.",
+		"Report detail:",
+		"# Detail\n\nUse the focused test surface.",
+	})
+	if strings.Contains(prompt, "### reports/") {
+		t.Fatalf("prompt renders report artifact as a duplicate context entry:\n%s", prompt)
+	}
+}
+
 func TestRenderRefusesNonSelectedStepUnlessAllowed(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)
@@ -445,6 +538,75 @@ func writeTaskContextArtifact(t *testing.T, store *runstore.Store, runID, conten
 		Time:    at,
 	}); err != nil {
 		t.Fatalf("WriteArtifact task returned error: %v", err)
+	}
+}
+
+func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, report runstore.Report, reportContent []byte) {
+	t.Helper()
+	// The prompt, log, and process records are run-store lifecycle preconditions
+	// for a worker-authored report.
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:          report.StepID,
+		AgentID:         report.AgentID,
+		AttemptID:       report.AttemptID,
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+		Time:            fixedPromptTime().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindPrompt,
+		Name:    report.StepID,
+		Content: []byte("prior prompt\n"),
+		Time:    fixedPromptTime().Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact prompt returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+		AttemptID: report.AttemptID,
+		PromptRef: promptRef,
+		Time:      fixedPromptTime().Add(3 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
+	}
+	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindLog,
+		Name:    report.StepID,
+		Content: []byte("prior log\n"),
+		Time:    fixedPromptTime().Add(4 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact log returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+		AttemptID: report.AttemptID,
+		LogRef:    logRef,
+		Time:      fixedPromptTime().Add(5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptLog returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        report.AttemptID,
+		PID:              12345,
+		ProcessStartTime: "123456789",
+		Time:             fixedPromptTime().Add(6 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess returned error: %v", err)
+	}
+	req := runstore.RecordReportRequest{
+		State:  runstore.AttemptStateReported,
+		Report: report,
+		Time:   fixedPromptTime().Add(7 * time.Minute),
+	}
+	if reportContent != nil {
+		req.ReportName = report.StepID
+		req.ReportContent = reportContent
+		req.ReportContentSet = true
+	}
+	if _, _, err := store.RecordAttemptReport(runID, req); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 }
 
