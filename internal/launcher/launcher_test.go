@@ -291,6 +291,20 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	if result.Attempt.State != runstore.AttemptStateMissingReport {
 		t.Fatalf("attempt state = %q, want synthesized missing_report after code worker exits", result.Attempt.State)
 	}
+	loaded, err := store.Load(runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 1 {
+		t.Fatalf("plan count = %d, want initial count 1", got)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
+		t.Fatalf("code count = %d, want selected next-state count 1", got)
+	}
+	entries := loaded.Status.WorkflowLoop.Entries
+	if got := entries[len(entries)-1]; got.State != "code" || got.PreviousState != "plan" || got.TriggerStatus != "done" || got.TriggerResult != "ready" {
+		t.Fatalf("last workflow entry = %+v, want code after plan done/ready", got)
+	}
 }
 
 func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
@@ -323,6 +337,13 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
 	assertRetryLaunch(t, root, runID, attempt.AttemptID, result.Attempt, "done/ready", 1)
+	loaded, err := store.Load(runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 1 {
+		t.Fatalf("plan count = %d, want retry to preserve initial workflow count 1", got)
+	}
 }
 
 func TestRunProcessZeroExitNonReaderWithLargePromptRecordsMissingReport(t *testing.T) {
@@ -1151,9 +1172,10 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	writeLauncherProject(t, root, timeout, opts)
 	store := openLauncherStore(t, root)
 	run, err := store.Create(runstore.CreateRunRequest{
-		RunID:    "launcher-run",
-		Workflow: "implementation",
-		Time:     fixedLauncherTime(),
+		RunID:        "launcher-run",
+		Workflow:     "implementation",
+		InitialState: "plan",
+		Time:         fixedLauncherTime(),
 	})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)

@@ -142,7 +142,32 @@ func (s *Store) Create(req CreateRunRequest) (*Run, error) {
 		return nil, fmt.Errorf("create run %q lock: %w", runID, err)
 	}
 
-	payload, err := marshalPayload(createRunPayload{Workflow: req.Workflow, TaskSlug: req.TaskSlug})
+	status := Status{
+		SchemaVersion: schemaVersion,
+		RunID:         runID,
+		Workflow:      req.Workflow,
+		State:         stateRunning,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		LastSequence:  1,
+		Artifacts:     []ArtifactRef{},
+		Attempts:      []Attempt{},
+		Warnings:      []AttemptWarning{},
+	}
+	var workflowEntry *WorkflowStateEntry
+	if req.InitialState != "" {
+		entry, err := nextWorkflowStateEntry(status, WorkflowStateEntryRequest{State: req.InitialState})
+		if err != nil {
+			return nil, err
+		}
+		workflowEntry = &entry
+		applyWorkflowStateEntry(&status, entry)
+	}
+	payload, err := marshalPayload(createRunPayload{
+		Workflow:           req.Workflow,
+		TaskSlug:           req.TaskSlug,
+		WorkflowStateEntry: workflowEntry,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -157,18 +182,7 @@ func (s *Store) Create(req CreateRunRequest) (*Run, error) {
 	if err := writeInitialEventLog(filepath.Join(tempDir, eventsName), event); err != nil {
 		return nil, fmt.Errorf("run %q events: %w", runID, err)
 	}
-	status := Status{
-		SchemaVersion: schemaVersion,
-		RunID:         runID,
-		Workflow:      req.Workflow,
-		State:         stateRunning,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		LastSequence:  event.Sequence,
-		Artifacts:     []ArtifactRef{},
-		Attempts:      []Attempt{},
-		Warnings:      []AttemptWarning{},
-	}
+	status.LastSequence = event.Sequence
 	if err := writeStatus(filepath.Join(tempDir, statusName), status); err != nil {
 		return nil, fmt.Errorf("run %q status: %w", runID, err)
 	}
@@ -412,17 +426,12 @@ func (s *Store) UpdateStatus(runID string, update StatusUpdate) (Status, Event, 
 	if update.State == "" {
 		return Status{}, Event{}, errors.New("state is required")
 	}
-	payload, err := marshalPayload(statusUpdatedPayload{State: update.State})
-	if err != nil {
-		return Status{}, Event{}, err
-	}
 	event := Event{
-		Time:    update.Time,
-		Type:    eventStatusUpdated,
-		Payload: payload,
+		Time: update.Time,
+		Type: eventStatusUpdated,
 	}
 	var status Status
-	err = s.withRunLock(runID, func() error {
+	err := s.withRunLock(runID, func() error {
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -430,8 +439,24 @@ func (s *Store) UpdateStatus(runID string, update StatusUpdate) (Status, Event, 
 		if run.Status.ActiveAttempt != nil && update.State != stateRunning {
 			return fmt.Errorf("run %q has active attempt %q; state update to %q is not allowed", runID, run.Status.ActiveAttempt.AttemptID, update.State)
 		}
+		var workflowEntry *WorkflowStateEntry
+		if update.WorkflowStateEntry.State != "" {
+			entry, err := nextWorkflowStateEntry(run.Status, update.WorkflowStateEntry)
+			if err != nil {
+				return err
+			}
+			workflowEntry = &entry
+		}
+		payload, err := marshalPayload(statusUpdatedPayload{State: update.State, WorkflowStateEntry: workflowEntry})
+		if err != nil {
+			return err
+		}
+		event.Payload = payload
 		var committedEvent Event
 		status, committedEvent, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			if workflowEntry != nil {
+				applyWorkflowStateEntry(status, *workflowEntry)
+			}
 			status.State = update.State
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
@@ -608,11 +633,20 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		var workflowEntry *WorkflowStateEntry
+		if req.WorkflowStateEntry.State != "" {
+			entry, err := nextWorkflowStateEntry(run.Status, req.WorkflowStateEntry)
+			if err != nil {
+				return err
+			}
+			workflowEntry = &entry
+		}
 		payload, err := marshalPayload(attemptStartedPayload{
-			Attempt:          attempt,
-			ConsumeAttemptID: routing.ConsumeAttemptID,
-			RetryLineage:     cloneRetryLineagePtr(routing.RetryLineage),
-			SupersedeReason:  routing.SupersedeReason,
+			Attempt:            attempt,
+			ConsumeAttemptID:   routing.ConsumeAttemptID,
+			RetryLineage:       cloneRetryLineagePtr(routing.RetryLineage),
+			SupersedeReason:    routing.SupersedeReason,
+			WorkflowStateEntry: workflowEntry,
 		})
 		if err != nil {
 			return err
@@ -620,6 +654,9 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 		event = Event{Time: req.Time, Type: eventAttemptStarted, Payload: payload}
 		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			attempt.StartedAt = event.Time
+			if workflowEntry != nil {
+				applyWorkflowStateEntry(status, *workflowEntry)
+			}
 			applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
 			status.ActiveAttempt = &attempt
 			status.Attempts = append(status.Attempts, attempt)
@@ -1729,6 +1766,51 @@ func reservedEventType(eventType string) bool {
 	}
 }
 
+func nextWorkflowStateEntry(status Status, req WorkflowStateEntryRequest) (WorkflowStateEntry, error) {
+	if req.State == "" {
+		return WorkflowStateEntry{}, errors.New("workflow state entry state is required")
+	}
+	count := status.WorkflowLoop.Counts[req.State] + 1
+	return WorkflowStateEntry{
+		Workflow:      status.Workflow,
+		State:         req.State,
+		Count:         count,
+		Repeated:      count > 1,
+		PreviousState: req.PreviousState,
+		TriggerStatus: req.TriggerStatus,
+		TriggerResult: req.TriggerResult,
+	}, nil
+}
+
+func applyWorkflowStateEntry(status *Status, entry WorkflowStateEntry) {
+	if status.WorkflowLoop.Counts == nil {
+		status.WorkflowLoop.Counts = map[string]int{}
+	}
+	status.WorkflowLoop.Counts[entry.State] = entry.Count
+	status.WorkflowLoop.Entries = append(status.WorkflowLoop.Entries, entry)
+	if entry.Repeated && !slices.Contains(status.WorkflowLoop.RepeatedStates, entry.State) {
+		status.WorkflowLoop.RepeatedStates = append(status.WorkflowLoop.RepeatedStates, entry.State)
+	}
+}
+
+func applyReplayedWorkflowStateEntry(status *Status, event Event, entry *WorkflowStateEntry) error {
+	if entry == nil {
+		return nil
+	}
+	switch {
+	case entry.Workflow != status.Workflow:
+		return fmt.Errorf("event %d workflow state entry workflow %q does not match status workflow %q", event.Sequence, entry.Workflow, status.Workflow)
+	case entry.State == "":
+		return fmt.Errorf("event %d workflow state entry state is required", event.Sequence)
+	case entry.Count != status.WorkflowLoop.Counts[entry.State]+1:
+		return fmt.Errorf("event %d workflow state entry %q count = %d, want %d", event.Sequence, entry.State, entry.Count, status.WorkflowLoop.Counts[entry.State]+1)
+	case entry.Repeated != (entry.Count > 1):
+		return fmt.Errorf("event %d workflow state entry %q repeated = %t, want %t", event.Sequence, entry.State, entry.Repeated, entry.Count > 1)
+	}
+	applyWorkflowStateEntry(status, *entry)
+	return nil
+}
+
 func normalizeTime(value time.Time) time.Time {
 	if value.IsZero() {
 		return time.Now().UTC()
@@ -1963,7 +2045,8 @@ func validateArtifacts(runDir string, refs []ArtifactRef) error {
 }
 
 func replayStatus(events []Event, status Status) (Status, error) {
-	if err := validateRunCreated(events[0], status); err != nil {
+	createdPayload, err := validateRunCreated(events[0], status)
+	if err != nil {
 		return Status{}, err
 	}
 	replayed := Status{
@@ -1977,6 +2060,9 @@ func replayStatus(events []Event, status Status) (Status, error) {
 		Artifacts:     []ArtifactRef{},
 		Attempts:      []Attempt{},
 		Warnings:      []AttemptWarning{},
+	}
+	if err := applyReplayedWorkflowStateEntry(&replayed, events[0], createdPayload.WorkflowStateEntry); err != nil {
+		return Status{}, err
 	}
 	for _, event := range events[1:] {
 		replayed.UpdatedAt = event.Time
@@ -1993,6 +2079,9 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			}
 			if replayed.ActiveAttempt != nil && payload.State != stateRunning {
 				return Status{}, fmt.Errorf("event %d updates run state to %q while attempt %q is active", event.Sequence, payload.State, replayed.ActiveAttempt.AttemptID)
+			}
+			if err := applyReplayedWorkflowStateEntry(&replayed, event, payload.WorkflowStateEntry); err != nil {
+				return Status{}, err
 			}
 			replayed.State = payload.State
 		case eventArtifactWritten:
@@ -2018,6 +2107,9 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			routing := attemptStartRoutingFromFields(payload.ConsumeAttemptID, payload.RetryLineage, payload.SupersedeReason)
 			if err := validateAttemptStartRouting(replayed, routing); err != nil {
 				return Status{}, fmt.Errorf("event %d attempt routing: %w", event.Sequence, err)
+			}
+			if err := applyReplayedWorkflowStateEntry(&replayed, event, payload.WorkflowStateEntry); err != nil {
+				return Status{}, err
 			}
 			attempt := payload.Attempt
 			if err := validateStartedAttemptEvent(event, attempt, replayed.RunID); err != nil {
@@ -2287,18 +2379,18 @@ func validateAttemptWarning(status Status, warning AttemptWarning) error {
 	return nil
 }
 
-func validateRunCreated(event Event, status Status) error {
+func validateRunCreated(event Event, status Status) (createRunPayload, error) {
 	if event.Sequence != 1 || event.Type != eventRunCreated {
-		return fmt.Errorf("line 1: expected %s event", eventRunCreated)
+		return createRunPayload{}, fmt.Errorf("line 1: expected %s event", eventRunCreated)
 	}
 	var payload createRunPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		return fmt.Errorf("event 1 run.created payload: %w", err)
+		return createRunPayload{}, fmt.Errorf("event 1 run.created payload: %w", err)
 	}
 	if payload.Workflow != status.Workflow {
-		return fmt.Errorf("event 1 workflow %q does not match status.json workflow %q", payload.Workflow, status.Workflow)
+		return createRunPayload{}, fmt.Errorf("event 1 workflow %q does not match status.json workflow %q", payload.Workflow, status.Workflow)
 	}
-	return nil
+	return payload, nil
 }
 
 func validateArtifactEventRef(event Event, ref ArtifactRef) error {

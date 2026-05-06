@@ -119,6 +119,12 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		if _, _, err := loaded.Store.UpdateStatus(opts.RunID, runstore.StatusUpdate{
 			State: decision.RunStatus,
 			Time:  normalizeTime(opts.Time),
+			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+				State:         decision.RunStatus,
+				PreviousState: latestOutcome.StepID,
+				TriggerStatus: latestOutcome.Status,
+				TriggerResult: latestOutcome.Result,
+			},
 		}); err != nil {
 			return Result{}, err
 		}
@@ -137,16 +143,18 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
+	workflowEntry := workflowStateEntryForDecision(decision, latestOutcome, hasOutcome)
 	attempt, _, err := loaded.Store.StartAttemptContext(ctx, opts.RunID, runstore.StartAttemptRequest{
-		StepID:           decision.Step,
-		AgentID:          step.Agent,
-		AttemptID:        attemptID,
-		Timeout:          loaded.Workflow.Defaults.Timeout.Duration,
-		ReportExitGrace:  loaded.Workflow.Defaults.ReportExitGrace.Duration,
-		Time:             at,
-		ConsumeAttemptID: routing.consumeAttemptID,
-		RetryLineage:     routing.retryLineage,
-		SupersedeReason:  routing.supersedeReason,
+		StepID:             decision.Step,
+		AgentID:            step.Agent,
+		AttemptID:          attemptID,
+		Timeout:            loaded.Workflow.Defaults.Timeout.Duration,
+		ReportExitGrace:    loaded.Workflow.Defaults.ReportExitGrace.Duration,
+		Time:               at,
+		ConsumeAttemptID:   routing.consumeAttemptID,
+		RetryLineage:       routing.retryLineage,
+		SupersedeReason:    routing.supersedeReason,
+		WorkflowStateEntry: workflowEntry,
 	})
 	if err != nil {
 		return Result{}, err
@@ -249,6 +257,18 @@ func startRoutingForDecision(decision workflow.Decision, attempt runstore.Attemp
 	}
 	routing.supersedeReason = attempt.Status + "/" + attempt.Result
 	return routing
+}
+
+func workflowStateEntryForDecision(decision workflow.Decision, attempt runstore.Attempt, ok bool) runstore.WorkflowStateEntryRequest {
+	if decision.Kind != workflow.DecisionSelectStep || !ok {
+		return runstore.WorkflowStateEntryRequest{}
+	}
+	return runstore.WorkflowStateEntryRequest{
+		State:         decision.Step,
+		PreviousState: attempt.StepID,
+		TriggerStatus: attempt.Status,
+		TriggerResult: attempt.Result,
+	}
 }
 
 func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt []byte, at time.Time) (runstore.Attempt, runstore.ArtifactRef, bool, error) {

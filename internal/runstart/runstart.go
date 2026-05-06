@@ -122,15 +122,16 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return createRun(opts, store, task, vcsSnapshot)
+	return createRun(opts, store, workflow.Start, task, vcsSnapshot)
 }
 
-func createRun(opts Options, store *runstore.Store, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
+func createRun(opts Options, store *runstore.Store, initialState string, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
 	run, err := store.Create(runstore.CreateRunRequest{
-		RunID:    opts.RunID,
-		Workflow: opts.Workflow,
-		TaskSlug: task.taskSlug,
-		Time:     opts.Time,
+		RunID:        opts.RunID,
+		Workflow:     opts.Workflow,
+		TaskSlug:     task.taskSlug,
+		InitialState: initialState,
+		Time:         opts.Time,
 	})
 	if err != nil {
 		return Result{}, err

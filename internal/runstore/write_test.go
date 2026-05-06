@@ -76,6 +76,88 @@ func TestAppendEventRejectsReservedEventTypes(t *testing.T) {
 	}
 }
 
+func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
+	const (
+		workflowStateCode = "code"
+	)
+	workflowStatusDone := "done"   //nolint:goconst // Keep this trigger literal local to this narrow test.
+	workflowResultReady := "ready" //nolint:goconst // Keep this trigger literal local to this narrow test.
+
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{RunID: "loop-start", Workflow: "implementation", InitialState: workflowStateCode})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	_, event, err := store.StartAttempt(run.ID, StartAttemptRequest{
+		StepID:          workflowStateCode,
+		AgentID:         "coder",
+		AttemptID:       "attempt-001",
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+		WorkflowStateEntry: WorkflowStateEntryRequest{
+			State:         workflowStateCode,
+			PreviousState: "test",
+			TriggerStatus: workflowStatusDone,
+			TriggerResult: workflowResultReady,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts[workflowStateCode]; got != 2 {
+		t.Fatalf("code count = %d, want 2", got)
+	}
+	if got := loaded.Status.WorkflowLoop.RepeatedStates; len(got) != 1 || got[0] != workflowStateCode {
+		t.Fatalf("repeated states = %+v, want [code]", got)
+	}
+	entry := loaded.Status.WorkflowLoop.Entries[1]
+	if entry.State != workflowStateCode || entry.Count != 2 || !entry.Repeated || entry.PreviousState != "test" || entry.TriggerStatus != workflowStatusDone || entry.TriggerResult != workflowResultReady {
+		t.Fatalf("entry = %+v, want repeated code entry with trigger", entry)
+	}
+	var payload attemptStartedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal attempt.started payload: %v", err)
+	}
+	if payload.WorkflowStateEntry == nil || *payload.WorkflowStateEntry != entry {
+		t.Fatalf("payload entry = %+v, want %+v", payload.WorkflowStateEntry, entry)
+	}
+}
+
+func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{RunID: "retry-start", Workflow: "implementation", InitialState: "code"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	if _, _, err := store.StartAttempt(run.ID, StartAttemptRequest{
+		StepID:          "code",
+		AgentID:         "coder",
+		AttemptID:       "attempt-001",
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
+		t.Fatalf("code count = %d, want unchanged initial count 1", got)
+	}
+	if got := len(loaded.Status.WorkflowLoop.Entries); got != 1 {
+		t.Fatalf("entry count = %d, want unchanged initial entry", got)
+	}
+}
+
 func TestAttemptLifecyclePersistsAndReplaysActiveAttemptState(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-run")
@@ -1829,6 +1911,73 @@ func TestUpdateStatusAppendsEventAndMaterializesLatestState(t *testing.T) {
 	}
 	if loaded.Status.State != readyForHumanState {
 		t.Fatalf("loaded state = %q, want %s", loaded.Status.State, readyForHumanState)
+	}
+}
+
+func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{RunID: "terminal-loop", Workflow: "implementation", InitialState: "code"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	status, event, err := store.UpdateStatus(run.ID, StatusUpdate{
+		State: readyForHumanState,
+		WorkflowStateEntry: WorkflowStateEntryRequest{
+			State:         readyForHumanState,
+			PreviousState: "code",
+			TriggerStatus: "done",
+			TriggerResult: "ready",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateStatus returned error: %v", err)
+	}
+
+	if got := status.WorkflowLoop.Counts[readyForHumanState]; got != 1 {
+		t.Fatalf("terminal count = %d, want 1", got)
+	}
+	entry := status.WorkflowLoop.Entries[1]
+	if entry.State != readyForHumanState || entry.Count != 1 || entry.PreviousState != "code" || entry.TriggerStatus != "done" || entry.TriggerResult != "ready" {
+		t.Fatalf("entry = %+v, want terminal entry with trigger", entry)
+	}
+	var payload statusUpdatedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal status.updated payload: %v", err)
+	}
+	if payload.WorkflowStateEntry == nil || *payload.WorkflowStateEntry != entry {
+		t.Fatalf("payload entry = %+v, want %+v", payload.WorkflowStateEntry, entry)
+	}
+
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts[readyForHumanState]; got != 1 {
+		t.Fatalf("loaded terminal count = %d, want 1", got)
+	}
+}
+
+func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{RunID: "ignored-report-loop", Workflow: "implementation", InitialState: "code"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	if _, err := store.RecordIgnoredReport(run.ID, IgnoreReportRequest{Reason: "validation_failed"}); err != nil {
+		t.Fatalf("RecordIgnoredReport returned error: %v", err)
+	}
+
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
+		t.Fatalf("code count = %d, want unchanged initial count 1", got)
+	}
+	if got := len(loaded.Status.WorkflowLoop.Entries); got != 1 {
+		t.Fatalf("entry count = %d, want unchanged initial entry", got)
 	}
 }
 

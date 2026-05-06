@@ -102,6 +102,12 @@ lineage. Applying an `on` transition is normal routing and resets all retry
 counts for that lineage, even when the transition target is the same step. This
 keeps retry decisions distinct from configured workflow loops.
 
+Runtime loop counters are persisted by the run store when routing decisions are
+accepted into run state. The workflow engine only returns `select_step`,
+`retry_step`, or terminal decisions; callers decide which accepted decisions
+record workflow state entries. In v1, `retry_step` is an agent execution retry
+and does not increment workflow loop counters.
+
 ## Out Of Scope
 
 Adjacent packages and commands own persistence and runtime effects. The

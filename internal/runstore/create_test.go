@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,6 +46,49 @@ func TestCreateRunCreatesInitialArtifacts(t *testing.T) {
 	}
 	if events[0].Type != eventRunCreated || events[0].Sequence != 1 || events[0].RunID != run.ID {
 		t.Fatalf("event = %+v, want initial run.created event", events[0])
+	}
+}
+
+func TestCreateRunPersistsInitialWorkflowStateEntry(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	now := time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC)
+
+	run, err := store.Create(CreateRunRequest{
+		RunID:        "loop-run",
+		Workflow:     "implementation",
+		InitialState: "code",
+		Time:         now,
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	if got := run.Status.WorkflowLoop.Counts["code"]; got != 1 {
+		t.Fatalf("code count = %d, want 1", got)
+	}
+	if got := len(run.Status.WorkflowLoop.Entries); got != 1 {
+		t.Fatalf("entry count = %d, want 1", got)
+	}
+	entry := run.Status.WorkflowLoop.Entries[0]
+	if entry.Workflow != "implementation" || entry.State != "code" || entry.Count != 1 || entry.Repeated {
+		t.Fatalf("entry = %+v, want initial code count", entry)
+	}
+
+	events := readRunEvents(t, run)
+	var payload createRunPayload
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal run.created payload: %v", err)
+	}
+	if payload.WorkflowStateEntry == nil || *payload.WorkflowStateEntry != entry {
+		t.Fatalf("payload entry = %+v, want %+v", payload.WorkflowStateEntry, entry)
+	}
+
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
+		t.Fatalf("loaded code count = %d, want 1", got)
 	}
 }
 

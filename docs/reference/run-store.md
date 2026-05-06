@@ -105,7 +105,12 @@ Required event fields:
   "type": "run.created",
   "payload": {
     "workflow": "implementation",
-    "task_slug": "main-997"
+    "task_slug": "main-997",
+    "workflow_state_entry": {
+      "workflow": "implementation",
+      "state": "plan",
+      "count": 1
+    }
   }
 }
 ```
@@ -148,7 +153,12 @@ exists, including an empty directory.
 ```json
 {
   "workflow": "implementation",
-  "task_slug": "main-997"
+  "task_slug": "main-997",
+  "workflow_state_entry": {
+    "workflow": "implementation",
+    "state": "plan",
+    "count": 1
+  }
 }
 ```
 
@@ -156,9 +166,22 @@ exists, including an empty directory.
 
 ```json
 {
-  "state": "ready_for_human"
+  "state": "ready_for_human",
+  "workflow_state_entry": {
+    "workflow": "implementation",
+    "state": "ready_for_human",
+    "count": 1,
+    "previous_state": "code",
+    "trigger_status": "done",
+    "trigger_result": "ready"
+  }
 }
 ```
+
+The `workflow_state_entry` field is present when the status update is an
+accepted workflow transition into a terminal or human-handoff state. Terminal
+states are counted for auditability; loop cap enforcement is owned by later
+runtime policy.
 
 `artifact.written` is written when the store persists a standalone artifact.
 Markdown report details accepted with `orc report` are the exception: their
@@ -201,6 +224,9 @@ are added beside the `attempt` object:
   replacement attempt's step execution lineage.
 - `supersede_reason`: retry-only `status/result` text stored on the consumed
   attempt when retry lineage is present.
+- `workflow_state_entry`: next-step routing metadata when the accepted decision
+  enters a new worker-selecting workflow state. Agent execution retries omit
+  this field because retry counts are separate from workflow loop counts.
 
 ```json
 {
@@ -214,6 +240,12 @@ are added beside the `attempt` object:
   "supersede_reason": "failed/missing_report"
 }
 ```
+
+Workflow state entries are counted by state name. The initial workflow start
+state is recorded at run creation with count `1`. Later counts increment only
+when routing is accepted into durable run state: a selected worker state in
+`attempt.started`, or a terminal/human state in `status.updated`. Failed report
+validation and `report.ignored` events do not increment these counters.
 
 Retry starts derive supersession from `consume_attempt_id` plus `retry_lineage`.
 
@@ -373,7 +405,19 @@ Store-written status files contain:
   "last_sequence": 1,
   "artifacts": [],
   "attempts": [],
-  "warnings": []
+  "warnings": [],
+  "workflow_loop": {
+    "counts": {
+      "plan": 1
+    },
+    "entries": [
+      {
+        "workflow": "implementation",
+        "state": "plan",
+        "count": 1
+      }
+    ]
+  }
 }
 ```
 
@@ -389,6 +433,9 @@ workflow/report layers own the allowed-state policy.
 - Retry launches materialize the `attempt.started` routing metadata on latest
   status.
 - Process warnings are materialized in `warnings`.
+- Workflow loop state is materialized in `workflow_loop`. `counts` stores the
+  latest count per workflow state, `entries` preserves the accepted run path,
+  and `repeated_states` lists states whose count has reached at least `2`.
 
 The history entry below is abbreviated; entries use the same attempt object
 shape as `active_attempt`.

@@ -79,10 +79,11 @@ func (err *StateMismatchError) Error() string {
 
 // CreateRunRequest describes the durable run identity to create.
 type CreateRunRequest struct {
-	RunID    string
-	Workflow string
-	TaskSlug string
-	Time     time.Time
+	RunID        string
+	Workflow     string
+	TaskSlug     string
+	InitialState string
+	Time         time.Time
 }
 
 // Run is the structured state recovered from a run directory.
@@ -107,12 +108,14 @@ type Status struct {
 	Attempts      []Attempt        `json:"attempts"`
 	RetryLineage  *RetryLineage    `json:"retry_lineage,omitempty"`
 	Warnings      []AttemptWarning `json:"warnings"`
+	WorkflowLoop  WorkflowLoop     `json:"workflow_loop"`
 }
 
 // StatusUpdate describes latest-state fields to materialize with an event.
 type StatusUpdate struct {
-	State string
-	Time  time.Time
+	State              string
+	Time               time.Time
+	WorkflowStateEntry WorkflowStateEntryRequest
 }
 
 // Event is one append-only event log entry.
@@ -228,6 +231,33 @@ type AttemptWarning struct {
 	Time      time.Time `json:"time"`
 }
 
+// WorkflowLoop records workflow state entries accepted into durable run state.
+type WorkflowLoop struct {
+	Counts         map[string]int       `json:"counts,omitempty"`
+	Entries        []WorkflowStateEntry `json:"entries,omitempty"`
+	RepeatedStates []string             `json:"repeated_states,omitempty"`
+}
+
+// WorkflowStateEntry records one accepted workflow state entry.
+type WorkflowStateEntry struct {
+	Workflow      string `json:"workflow"`
+	State         string `json:"state"`
+	Count         int    `json:"count"`
+	Repeated      bool   `json:"repeated,omitempty"`
+	PreviousState string `json:"previous_state,omitempty"`
+	TriggerStatus string `json:"trigger_status,omitempty"`
+	TriggerResult string `json:"trigger_result,omitempty"`
+}
+
+// WorkflowStateEntryRequest describes workflow state entry metadata supplied by
+// routing callers. The run store computes Count and Repeated atomically.
+type WorkflowStateEntryRequest struct {
+	State         string
+	PreviousState string
+	TriggerStatus string
+	TriggerResult string
+}
+
 // FollowupSource identifies where a recorded follow-up was proposed.
 type FollowupSource string
 
@@ -247,12 +277,14 @@ type RecordFollowupRequest struct {
 }
 
 type createRunPayload struct {
-	Workflow string `json:"workflow"`
-	TaskSlug string `json:"task_slug,omitempty"`
+	Workflow           string              `json:"workflow"`
+	TaskSlug           string              `json:"task_slug,omitempty"`
+	WorkflowStateEntry *WorkflowStateEntry `json:"workflow_state_entry,omitempty"`
 }
 
 type statusUpdatedPayload struct {
-	State string `json:"state"`
+	State              string              `json:"state"`
+	WorkflowStateEntry *WorkflowStateEntry `json:"workflow_state_entry,omitempty"`
 }
 
 type artifactWrittenPayload struct {
@@ -273,6 +305,8 @@ type StartAttemptRequest struct {
 	RetryLineage *RetryLineage
 	// SupersedeReason records the consumed status/result pair that triggered the retry.
 	SupersedeReason string
+	// WorkflowStateEntry records an accepted workflow state entry for worker-selecting routing.
+	WorkflowStateEntry WorkflowStateEntryRequest
 }
 
 // AttemptPromptRequest links the rendered prompt artifact to the active attempt.
@@ -331,10 +365,11 @@ type IgnoreReportRequest struct {
 }
 
 type attemptStartedPayload struct {
-	Attempt          Attempt       `json:"attempt"`
-	ConsumeAttemptID string        `json:"consume_attempt_id,omitempty"`
-	RetryLineage     *RetryLineage `json:"retry_lineage,omitempty"`
-	SupersedeReason  string        `json:"supersede_reason,omitempty"`
+	Attempt            Attempt             `json:"attempt"`
+	ConsumeAttemptID   string              `json:"consume_attempt_id,omitempty"`
+	RetryLineage       *RetryLineage       `json:"retry_lineage,omitempty"`
+	SupersedeReason    string              `json:"supersede_reason,omitempty"`
+	WorkflowStateEntry *WorkflowStateEntry `json:"workflow_state_entry,omitempty"`
 }
 
 type attemptPromptedPayload struct {

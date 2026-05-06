@@ -56,8 +56,8 @@ The scaffold includes these workflows:
 
 - `implementation`: plan, code, test, and review a general change.
 - `bugfix`: reproduce the bug before planning, coding, testing, and review.
-- `mechanical-change`: plan and apply low-judgment mechanical edits before
-  focused verification and mechanical review.
+- `mechanical-change`: plan, apply low-judgment mechanical edits, run focused
+  verification, and complete mechanical review.
 - `test-only`: plan, design tests, edit tests, run tests, and review without
   intentional production behavior changes.
 - `review-mechanical`: review a change for stale references, generated drift,

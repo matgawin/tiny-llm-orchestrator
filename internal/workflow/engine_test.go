@@ -47,6 +47,56 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 			outcome:  Outcome{Step: "review", Status: ReportStatusDone, Result: "changes_requested"},
 			wantStep: "code",
 		},
+		{
+			name:     "review approved",
+			outcome:  Outcome{Step: "review", Status: ReportStatusDone, Result: "approved"},
+			wantStep: "redundancy-review",
+		},
+		{
+			name:     "redundancy review changes requested",
+			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "changes_requested"},
+			wantStep: "code_fixer",
+		},
+		{
+			name:     "code fixer ready",
+			outcome:  Outcome{Step: "code_fixer", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "test-redundancy",
+		},
+		{
+			name:     "redundancy test failed",
+			outcome:  Outcome{Step: "test-redundancy", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_fixer",
+		},
+		{
+			name:     "redundancy test passed",
+			outcome:  Outcome{Step: "test-redundancy", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "redundancy-review",
+		},
+		{
+			name:     "redundancy review approved",
+			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "approved"},
+			wantStep: "readability-review",
+		},
+		{
+			name:     "readability review changes requested",
+			outcome:  Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "changes_requested"},
+			wantStep: "code_cleaner",
+		},
+		{
+			name:     "code cleaner ready",
+			outcome:  Outcome{Step: "code_cleaner", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "test-readability",
+		},
+		{
+			name:     "readability test failed",
+			outcome:  Outcome{Step: "test-readability", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_cleaner",
+		},
+		{
+			name:     "readability test passed",
+			outcome:  Outcome{Step: "test-readability", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "readability-review",
+		},
 	}
 
 	workflow := implementationWorkflow(t)
@@ -60,7 +110,7 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 
 func TestEvaluateImplementationWorkflowRoutesTerminalOutcomes(t *testing.T) {
 	workflow := implementationWorkflow(t)
-	outcome := Outcome{Step: "review", Status: ReportStatusDone, Result: "approved"}
+	outcome := Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "approved"}
 
 	decision := evaluateRunningOutcome(t, workflow, outcome, RetryLineage{})
 	assertTerminalDecision(t, decision, RunStatusReadyForHuman)
@@ -68,7 +118,7 @@ func TestEvaluateImplementationWorkflowRoutesTerminalOutcomes(t *testing.T) {
 
 func TestEvaluateImplementationWorkflowBlocksForHumanOnAnyStep(t *testing.T) {
 	workflow := implementationWorkflow(t)
-	for _, step := range []string{stepPlan, "code", "test", "review"} {
+	for _, step := range []string{stepPlan, "code", "test", "review", "redundancy-review", "code_fixer", "test-redundancy", "readability-review", "code_cleaner", "test-readability"} {
 		t.Run(step, func(t *testing.T) {
 			outcome := Outcome{Step: step, Status: ReportStatusBlocked, Result: "blocked"}
 
