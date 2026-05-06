@@ -169,10 +169,81 @@ func renderStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run
 	_, _ = fmt.Fprintf(w, "active_attempt: %s\n", activeAttemptValue(run.Status.ActiveAttempt))
 	_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", terminalReason(decision))
 	printDecisionOutcomeDetails(w, workflowConfig, run, decision)
+	printWorkflowLoopStatus(w, workflowConfig, run)
 	reports := reportPaths(run.Status.Artifacts)
 	printReportPaths(w, reports)
 	printArtifacts(w, run.Status.Artifacts)
 	printTerminalHumanState(w, run, decision, reports)
+}
+
+func printWorkflowLoopStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run) {
+	_, _ = fmt.Fprintln(w, "workflow_loop:")
+	states := workflowLoopStates(workflowConfig, run.Status.WorkflowLoop)
+	if len(states) == 0 {
+		_, _ = fmt.Fprintln(w, "  states: none")
+		return
+	}
+	_, _ = fmt.Fprintln(w, "  states:")
+	for _, state := range states {
+		count := run.Status.WorkflowLoop.Counts[state]
+		softReached := workflowLoopSoftReached(run.Status.WorkflowLoop, state, workflowConfig.LoopCaps.Soft)
+		hardBlocking := false
+		blockedProspective := 0
+		if block := run.Status.WorkflowLoop.HardCapBlock; block != nil && block.BlockedState == state {
+			hardBlocking = true
+			blockedProspective = block.ProspectiveCount
+		}
+		_, _ = fmt.Fprintf(w, "    %s:\n", state)
+		_, _ = fmt.Fprintf(w, "      current_count: %d\n", count)
+		_, _ = fmt.Fprintf(w, "      soft_threshold: %d\n", workflowConfig.LoopCaps.Soft)
+		_, _ = fmt.Fprintf(w, "      hard_threshold: %d\n", workflowConfig.LoopCaps.Hard)
+		_, _ = fmt.Fprintf(w, "      soft_reached: %t\n", softReached)
+		_, _ = fmt.Fprintf(w, "      hard_blocking: %t\n", hardBlocking)
+		if hardBlocking {
+			_, _ = fmt.Fprintf(w, "      blocked_target_state: %s\n", state)
+			_, _ = fmt.Fprintf(w, "      blocked_prospective_count: %d\n", blockedProspective)
+		}
+		if override := run.Status.WorkflowLoop.PendingHardCapOverride; override != nil && override.TargetState == state {
+			_, _ = fmt.Fprintf(w, "      pending_override: %s\n", override.HumanAction)
+			_, _ = fmt.Fprintf(w, "      pending_override_count_after: %d\n", override.CountAfterOverride)
+		}
+	}
+}
+
+func workflowLoopStates(workflowConfig config.Workflow, loop runstore.WorkflowLoop) []string {
+	seen := map[string]bool{}
+	var states []string
+	for state := range workflowConfig.Steps {
+		seen[state] = true
+		states = append(states, state)
+	}
+	for state := range loop.Counts {
+		if !seen[state] {
+			seen[state] = true
+			states = append(states, state)
+		}
+	}
+	if block := loop.HardCapBlock; block != nil && !seen[block.BlockedState] {
+		seen[block.BlockedState] = true
+		states = append(states, block.BlockedState)
+	}
+	if override := loop.PendingHardCapOverride; override != nil && !seen[override.TargetState] {
+		states = append(states, override.TargetState)
+	}
+	slices.Sort(states)
+	return states
+}
+
+func workflowLoopSoftReached(loop runstore.WorkflowLoop, state string, soft int) bool {
+	if soft <= 0 {
+		return false
+	}
+	if loop.Counts[state] > soft {
+		return true
+	}
+	return slices.ContainsFunc(loop.SoftCapWarnings, func(warning runstore.WorkflowLoopSoftCap) bool {
+		return warning.State == state
+	})
 }
 
 func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {

@@ -54,9 +54,11 @@ func Evaluate(workflowName string, caps config.EffectiveLoopCaps, status runstor
 		decision.TriggerStatus = latest.Status
 		decision.TriggerResult = latest.Result
 	}
-	switch prospective {
-	case caps.Hard + 1:
+	if prospective >= caps.Hard+1 {
 		decision.Kind = DecisionHard
+		return decision
+	}
+	switch prospective {
 	case caps.Soft + 1:
 		decision.Kind = DecisionSoft
 	default:

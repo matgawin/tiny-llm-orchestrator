@@ -417,6 +417,49 @@ func TestLaunchNextBlocksBeforeWorkflowLoopHardCapIncrement(t *testing.T) {
 	}
 }
 
+func TestLaunchNextConsumesWorkflowLoopHardCapOverride(t *testing.T) {
+	root, runID := createLoopCapLauncherRun(t, "enabled: true\nsoft: 1\nhard: 2\n", "")
+	store := openLauncherStore(t, root)
+	seedReportedLoopAttempt(t, store, runID, "attempt-1", "")
+	seedReportedLoopAttempt(t, store, runID, "attempt-2", "attempt-1")
+	if _, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(3 * time.Second),
+	}); err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {
+		t.Fatalf("initial LaunchNext error = %v, want hard-cap block", err)
+	}
+	status, _, err := store.AllowWorkflowLoopHardCap(runID, "allow_loop_cap", fixedLauncherTime().Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("AllowWorkflowLoopHardCap returned error: %v", err)
+	}
+	override := status.WorkflowLoop.PendingHardCapOverride
+	if override == nil {
+		t.Fatal("pending override is nil")
+	}
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(5 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext with override returned error: %v", err)
+	}
+	if !result.Launched {
+		t.Fatalf("result = %+v, want launched through one-shot override", result)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != override.CountAfterOverride {
+		t.Fatalf("plan count = %d, want override count %d", got, override.CountAfterOverride)
+	}
+	if loaded.Status.WorkflowLoop.PendingHardCapOverride != nil {
+		t.Fatalf("pending override = %+v, want consumed", loaded.Status.WorkflowLoop.PendingHardCapOverride)
+	}
+}
+
 func TestLaunchNextBypassesDisabledWorkflowLoopCaps(t *testing.T) {
 	root, runID := createLoopCapLauncherRun(t, "enabled: false\nsoft: 1\nhard: 2\n", "")
 	store := openLauncherStore(t, root)

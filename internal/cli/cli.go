@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
 	"tiny-llm-orchestrator/orc/internal/launcher"
@@ -236,8 +237,12 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return printRunHelp(stdout)
 	case "add-followup":
 		return executeRunAddFollowup(args[1:], stdout, stderr)
+	case "continue":
+		return executeRunContinue(args[1:], stdout, stderr)
 	case "start":
 		return executeRunStart(args[1:], stdin, stdout, stderr)
+	case "show":
+		return executeRunInspect("show", args[1:], stdout, stderr, runinspect.Status)
 	case "status":
 		return executeRunInspect("status", args[1:], stdout, stderr, runinspect.Status)
 	case "next":
@@ -255,6 +260,55 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		}
 		return fmt.Errorf("unknown run command: %s", args[0])
 	}
+}
+
+func executeRunContinue(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return runContinueFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	if args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand {
+		return printRunContinueHelp(stdout)
+	}
+	runID := args[0]
+	if runID == "" {
+		return runContinueFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	allowLoopCap := false
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--allow-loop-cap":
+			allowLoopCap = true
+		case "-h", helpFlag, helpCommand:
+			return printRunContinueHelp(stdout)
+		default:
+			return runContinueFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
+		}
+	}
+	if !allowLoopCap {
+		return runContinueFlagError(stderr, fmt.Errorf("--allow-loop-cap is required for human-reviewed continuation after a hard workflow loop stop"))
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	store, err := runstore.Open(root)
+	if err != nil {
+		return err
+	}
+	status, _, err := store.AllowWorkflowLoopHardCap(runID, "allow_loop_cap", time.Time{})
+	if err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s run continue: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	override := status.WorkflowLoop.PendingHardCapOverride
+	if override == nil {
+		return fmt.Errorf("run %q loop-cap override was not persisted", runID)
+	}
+	_, err = fmt.Fprintf(stdout, "continued run %s after workflow loop hard cap; allowed one entry into %s at count %d\n", runID, override.TargetState, override.CountAfterOverride)
+	return err
 }
 
 func executeRunRecordSummary(args []string, stdout, stderr io.Writer) error {
@@ -486,6 +540,16 @@ func runAddFollowupFlagError(stderr io.Writer, err error) error {
 	return err
 }
 
+func runContinueFlagError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s run continue: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	if helpErr := printRunContinueHelp(stderr); helpErr != nil {
+		return helpErr
+	}
+	return err
+}
+
 func runRecordSummaryFlagError(stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s run record-summary: %v\n\n", appName, err); writeErr != nil {
 		return writeErr
@@ -541,14 +605,32 @@ Usage:
 
 Available Commands:
   add-followup     Record out-of-scope follow-up work
+  continue         Continue after an explicit human-reviewed stop
   next             Inspect the next workflow action without launching it
   record-summary   Record a final ready-for-review summary
+  show             Show persisted run state
   start            Start a run from explicit task context
   status           Show persisted run state
   summary-context  Render persisted review context
 
 Flags:
   -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printRunContinueHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run continue resumes a human-reviewed stopped run.
+
+Usage:
+  %s run continue <run-id> --allow-loop-cap
+
+Flags:
+      --allow-loop-cap  Explicitly allow one continuation after a hard workflow loop stop
+  -h, --help            Show command help
+
+The loop-cap override is for human-reviewed continuation after a hard workflow loop stop. It allows exactly one additional routing decision into the currently blocked workflow state.
 `, appName, appName)
 
 	return err

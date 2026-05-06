@@ -47,6 +47,12 @@ count `hard + 1` records a hard-cap event, leaves the target state's persisted
 count at `hard`, and moves the run to `blocked_for_human` with reason
 `loop_hard_cap_reached` instead of starting another worker. Retry decisions and
 terminal or human-handoff states do not trigger loop-cap enforcement.
+After human review, `orc run continue <run-id> --allow-loop-cap` records a
+one-shot override for the currently blocked target state and returns the run to
+`running`. The next matching launch consumes that override, starts the selected
+worker, and increments the target state's count to the previously blocked
+prospective count. The override does not raise configured caps or reset loop
+counters; a later hard-cap hit requires another explicit continue command.
 
 Each launch creates a `starting` attempt before rendering the worker prompt.
 The attempt becomes `active` only after process metadata is recorded. The

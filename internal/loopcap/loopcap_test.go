@@ -60,4 +60,10 @@ func TestEvaluateSoftAndHardThresholds(t *testing.T) {
 	if hard.Kind != DecisionHard || hard.CurrentCount != 4 || hard.ProspectiveCount != 5 {
 		t.Fatalf("hard decision = %+v, want hard threshold before count increment", hard)
 	}
+	hardAgain := Evaluate("implementation", caps, runstore.Status{
+		WorkflowLoop: runstore.WorkflowLoop{Counts: map[string]int{"code": 5}},
+	}, workflow.Decision{Kind: workflow.DecisionSelectStep, Step: "code"}, latest, true)
+	if hardAgain.Kind != DecisionHard || hardAgain.CurrentCount != 5 || hardAgain.ProspectiveCount != 6 {
+		t.Fatalf("hardAgain decision = %+v, want repeated hard threshold after override", hardAgain)
+	}
 }

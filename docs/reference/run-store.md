@@ -289,6 +289,29 @@ state is materialized as `blocked_for_human`.
 }
 ```
 
+`workflow.loop_hard_cap_override` is written only by an explicit human-reviewed
+continuation command. It clears the active hard-cap block, returns the run to
+`running`, and materializes `pending_hard_cap_override` for exactly the blocked
+target state and prospective count. The next matching `attempt.started` event
+includes the consumed override and clears the pending override while recording
+the normal workflow state entry.
+
+```json
+{
+  "state": "running",
+  "override": {
+    "workflow": "implementation",
+    "target_state": "code",
+    "count_before_override": 4,
+    "count_after_override": 5,
+    "soft": 2,
+    "hard": 4,
+    "human_action": "allow_loop_cap",
+    "reason": "loop_hard_cap_reached"
+  }
+}
+```
+
 Retry starts derive supersession from `consume_attempt_id` plus `retry_lineage`.
 
 `attempt.prompted` links the rendered prompt artifact to the current attempt.
@@ -480,6 +503,9 @@ workflow/report layers own the allowed-state policy.
   `repeated_states` lists states whose count has reached at least `2`,
   `soft_cap_warnings` stores advisory threshold hits, and `hard_cap_block`
   stores the active hard-cap human-decision stop when present.
+  `pending_hard_cap_override` stores the one-shot human-reviewed continuation
+  created by `orc run continue --allow-loop-cap` until the next matching
+  `attempt.started` consumes it.
 
 The history entry below is abbreviated; entries use the same attempt object
 shape as `active_attempt`.

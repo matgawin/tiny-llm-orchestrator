@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+const (
+	testWorkflowName      = "implementation"
+	testWorkflowStateCode = "code"
+)
+
 func TestAppendEventPreservesOrderedLogAndUpdatesStatus(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "run-1")
@@ -1916,7 +1921,7 @@ func TestUpdateStatusAppendsEventAndMaterializesLatestState(t *testing.T) {
 
 func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 	store := openStore(t, t.TempDir())
-	run, err := store.Create(CreateRunRequest{RunID: "terminal-loop", Workflow: "implementation", InitialState: "code"})
+	run, err := store.Create(CreateRunRequest{RunID: "terminal-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -1925,7 +1930,7 @@ func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 		State: readyForHumanState,
 		WorkflowStateEntry: WorkflowStateEntryRequest{
 			State:         readyForHumanState,
-			PreviousState: "code",
+			PreviousState: testWorkflowStateCode,
 			TriggerStatus: "done",
 			TriggerResult: "ready",
 		},
@@ -1938,7 +1943,7 @@ func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("terminal count = %d, want 1", got)
 	}
 	entry := status.WorkflowLoop.Entries[1]
-	if entry.State != readyForHumanState || entry.Count != 1 || entry.PreviousState != "code" || entry.TriggerStatus != "done" || entry.TriggerResult != "ready" {
+	if entry.State != readyForHumanState || entry.Count != 1 || entry.PreviousState != testWorkflowStateCode || entry.TriggerStatus != "done" || entry.TriggerResult != "ready" {
 		t.Fatalf("entry = %+v, want terminal entry with trigger", entry)
 	}
 	var payload statusUpdatedPayload
@@ -1960,7 +1965,7 @@ func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 
 func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 	store := openStore(t, t.TempDir())
-	run, err := store.Create(CreateRunRequest{RunID: "ignored-report-loop", Workflow: "implementation", InitialState: "code"})
+	run, err := store.Create(CreateRunRequest{RunID: "ignored-report-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -1973,11 +1978,136 @@ func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
+	if got := loaded.Status.WorkflowLoop.Counts[testWorkflowStateCode]; got != 1 {
 		t.Fatalf("code count = %d, want unchanged initial count 1", got)
 	}
 	if got := len(loaded.Status.WorkflowLoop.Entries); got != 1 {
 		t.Fatalf("entry count = %d, want unchanged initial entry", got)
+	}
+}
+
+func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{RunID: "loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	block := WorkflowLoopHardCap{
+		Workflow:         testWorkflowName,
+		BlockedState:     testWorkflowStateCode,
+		CurrentCount:     1,
+		ProspectiveCount: 2,
+		Soft:             1,
+		Hard:             1,
+		Reason:           WorkflowLoopHardCapReason,
+	}
+	if _, _, err := store.BlockWorkflowLoopHardCap(run.ID, block, time.Date(2026, 5, 2, 16, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("BlockWorkflowLoopHardCap returned error: %v", err)
+	}
+
+	status, event, err := store.AllowWorkflowLoopHardCap(run.ID, "allow_loop_cap", time.Date(2026, 5, 2, 16, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("AllowWorkflowLoopHardCap returned error: %v", err)
+	}
+	if event.Type != eventWorkflowHardCapOverride {
+		t.Fatalf("event type = %q, want %q", event.Type, eventWorkflowHardCapOverride)
+	}
+	if status.State != stateRunning || status.WorkflowLoop.HardCapBlock != nil {
+		t.Fatalf("status = %+v, want running with cleared active block", status)
+	}
+	override := status.WorkflowLoop.PendingHardCapOverride
+	if override == nil || override.Workflow != testWorkflowName || override.TargetState != testWorkflowStateCode || override.CountBeforeOverride != 1 || override.CountAfterOverride != 2 || override.Soft != 1 || override.Hard != 1 || override.HumanAction != "allow_loop_cap" {
+		t.Fatalf("pending override = %+v, want block-derived override", override)
+	}
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Status.WorkflowLoop.PendingHardCapOverride == nil || *loaded.Status.WorkflowLoop.PendingHardCapOverride != *override {
+		t.Fatalf("loaded override = %+v, want %+v", loaded.Status.WorkflowLoop.PendingHardCapOverride, override)
+	}
+}
+
+func TestAllowWorkflowLoopHardCapFailsWithoutActiveBlock(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{RunID: "no-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	before, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load before returned error: %v", err)
+	}
+
+	_, _, err = store.AllowWorkflowLoopHardCap(run.ID, "allow_loop_cap", time.Date(2026, 5, 2, 16, 1, 0, 0, time.UTC))
+	if err == nil || !strings.Contains(err.Error(), "no active workflow loop hard-cap block") {
+		t.Fatalf("AllowWorkflowLoopHardCap error = %v, want no-active-block failure", err)
+	}
+	after, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load after returned error: %v", err)
+	}
+	if after.Status.LastSequence != before.Status.LastSequence || after.Status.State != before.Status.State || after.Status.WorkflowLoop.PendingHardCapOverride != nil {
+		t.Fatalf("after status = %+v, want no mutation from %+v", after.Status, before.Status)
+	}
+}
+
+func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run, err := store.Create(CreateRunRequest{RunID: "consume-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	block := WorkflowLoopHardCap{
+		Workflow:         testWorkflowName,
+		BlockedState:     testWorkflowStateCode,
+		CurrentCount:     1,
+		ProspectiveCount: 2,
+		Soft:             1,
+		Hard:             1,
+		Reason:           WorkflowLoopHardCapReason,
+	}
+	if _, _, err := store.BlockWorkflowLoopHardCap(run.ID, block, time.Date(2026, 5, 2, 16, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("BlockWorkflowLoopHardCap returned error: %v", err)
+	}
+	status, _, err := store.AllowWorkflowLoopHardCap(run.ID, "allow_loop_cap", time.Date(2026, 5, 2, 16, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("AllowWorkflowLoopHardCap returned error: %v", err)
+	}
+	override := status.WorkflowLoop.PendingHardCapOverride
+	if override == nil {
+		t.Fatal("pending override is nil")
+	}
+
+	_, event, err := store.StartAttempt(run.ID, StartAttemptRequest{
+		StepID:                             testWorkflowStateCode,
+		AgentID:                            "coder",
+		AttemptID:                          "attempt-override",
+		Timeout:                            time.Minute,
+		ReportExitGrace:                    time.Second,
+		Time:                               time.Date(2026, 5, 2, 16, 2, 0, 0, time.UTC),
+		WorkflowStateEntry:                 WorkflowStateEntryRequest{State: testWorkflowStateCode, PreviousState: testWorkflowStateCode, TriggerStatus: "done", TriggerResult: "ready"},
+		ConsumeWorkflowLoopHardCapOverride: override,
+	})
+	if err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	var payload attemptStartedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal attempt.started payload: %v", err)
+	}
+	if payload.ConsumedWorkflowLoopHardCapOverride == nil || *payload.ConsumedWorkflowLoopHardCapOverride != *override {
+		t.Fatalf("consumed override payload = %+v, want %+v", payload.ConsumedWorkflowLoopHardCapOverride, override)
+	}
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts[testWorkflowStateCode]; got != 2 {
+		t.Fatalf("code count = %d, want overridden prospective count 2", got)
+	}
+	if loaded.Status.WorkflowLoop.PendingHardCapOverride != nil {
+		t.Fatalf("pending override = %+v, want consumed", loaded.Status.WorkflowLoop.PendingHardCapOverride)
 	}
 }
 

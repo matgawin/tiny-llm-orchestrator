@@ -558,6 +558,69 @@ func (s *Store) BlockWorkflowLoopHardCap(runID string, loopCap WorkflowLoopHardC
 	return status, event, nil
 }
 
+// AllowWorkflowLoopHardCap records a human-reviewed one-shot override for the
+// currently active workflow loop hard-cap block and returns the run to running.
+func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time) (Status, Event, error) {
+	if err := validateRunID(runID); err != nil {
+		return Status{}, Event{}, err
+	}
+	overrideAction := strings.TrimSpace(humanAction)
+	if overrideAction == "" {
+		return Status{}, Event{}, errors.New("workflow loop hard-cap override human action is required")
+	}
+	at = normalizeTime(at)
+	var status Status
+	var event Event
+	err := s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		if run.Status.State != stateBlockedHuman {
+			return fmt.Errorf("run %q has no active workflow loop hard-cap block; state is %q", runID, run.Status.State)
+		}
+		block := run.Status.WorkflowLoop.HardCapBlock
+		if block == nil {
+			return fmt.Errorf("run %q has no active workflow loop hard-cap block", runID)
+		}
+		if run.Status.WorkflowLoop.PendingHardCapOverride != nil {
+			return fmt.Errorf("run %q already has a pending workflow loop hard-cap override", runID)
+		}
+		override := WorkflowLoopHardCapOverride{
+			Workflow:            block.Workflow,
+			TargetState:         block.BlockedState,
+			CountBeforeOverride: block.CurrentCount,
+			CountAfterOverride:  block.ProspectiveCount,
+			Soft:                block.Soft,
+			Hard:                block.Hard,
+			HumanAction:         overrideAction,
+			Reason:              block.Reason,
+		}
+		if err := validateWorkflowLoopHardCapOverride(override); err != nil {
+			return err
+		}
+		payload, err := marshalPayload(workflowLoopHardCapOverridePayload{Override: override, State: stateRunning})
+		if err != nil {
+			return err
+		}
+		event = Event{Time: at, Type: eventWorkflowHardCapOverride, Payload: payload}
+		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			applyWorkflowLoopHardCapOverride(status, override)
+			status.State = stateRunning
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+		})
+		return err
+	})
+	if err != nil {
+		if statusBackedEventPossiblyCommitted(err) {
+			return status, event, err
+		}
+		return Status{}, Event{}, err
+	}
+	return status, event, nil
+}
+
 // WriteArtifact persists an artifact under the run directory and records it in the event log.
 func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, error) {
 	return s.writeArtifact(runID, artifact, nil)
@@ -724,14 +787,22 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 			if err != nil {
 				return err
 			}
+			if req.ConsumeWorkflowLoopHardCapOverride != nil {
+				if err := validateWorkflowLoopHardCapOverrideConsumption(run.Status, entry, *req.ConsumeWorkflowLoopHardCapOverride); err != nil {
+					return err
+				}
+			}
 			workflowEntry = &entry
+		} else if req.ConsumeWorkflowLoopHardCapOverride != nil {
+			return errors.New("workflow loop hard-cap override consumption requires workflow state entry")
 		}
 		payload, err := marshalPayload(attemptStartedPayload{
-			Attempt:            attempt,
-			ConsumeAttemptID:   routing.ConsumeAttemptID,
-			RetryLineage:       cloneRetryLineagePtr(routing.RetryLineage),
-			SupersedeReason:    routing.SupersedeReason,
-			WorkflowStateEntry: workflowEntry,
+			Attempt:                             attempt,
+			ConsumeAttemptID:                    routing.ConsumeAttemptID,
+			RetryLineage:                        cloneRetryLineagePtr(routing.RetryLineage),
+			SupersedeReason:                     routing.SupersedeReason,
+			WorkflowStateEntry:                  workflowEntry,
+			ConsumedWorkflowLoopHardCapOverride: req.ConsumeWorkflowLoopHardCapOverride,
 		})
 		if err != nil {
 			return err
@@ -741,6 +812,9 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 			attempt.StartedAt = event.Time
 			if workflowEntry != nil {
 				applyWorkflowStateEntry(status, *workflowEntry)
+			}
+			if req.ConsumeWorkflowLoopHardCapOverride != nil {
+				status.WorkflowLoop.PendingHardCapOverride = nil
 			}
 			applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
 			status.ActiveAttempt = &attempt
@@ -1844,7 +1918,7 @@ func statusBackedEventPossiblyCommitted(err error) bool {
 
 func reservedEventType(eventType string) bool {
 	switch eventType {
-	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventWorkflowSoftCap, eventWorkflowHardCap:
+	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventWorkflowSoftCap, eventWorkflowHardCap, eventWorkflowHardCapOverride:
 		return true
 	default:
 		return false
@@ -1895,6 +1969,11 @@ func applyWorkflowLoopHardCap(status *Status, loopCap WorkflowLoopHardCap) {
 	status.WorkflowLoop.HardCapBlock = &loopCap
 }
 
+func applyWorkflowLoopHardCapOverride(status *Status, override WorkflowLoopHardCapOverride) {
+	status.WorkflowLoop.PendingHardCapOverride = &override
+	status.WorkflowLoop.HardCapBlock = nil
+}
+
 func validateWorkflowLoopSoftCap(loopCap WorkflowLoopSoftCap) error {
 	switch {
 	case loopCap.Workflow == "":
@@ -1927,6 +2006,50 @@ func validateWorkflowLoopHardCap(loopCap WorkflowLoopHardCap) error {
 		return fmt.Errorf("workflow loop hard cap hard must be > 0, got %d", loopCap.Hard)
 	case loopCap.Reason != WorkflowLoopHardCapReason:
 		return fmt.Errorf("workflow loop hard cap reason = %q, want %q", loopCap.Reason, WorkflowLoopHardCapReason)
+	}
+	return nil
+}
+
+func validateWorkflowLoopHardCapOverride(override WorkflowLoopHardCapOverride) error {
+	switch {
+	case override.Workflow == "":
+		return errors.New("workflow loop hard-cap override workflow is required")
+	case override.TargetState == "":
+		return errors.New("workflow loop hard-cap override target state is required")
+	case override.CountBeforeOverride < 0:
+		return fmt.Errorf("workflow loop hard-cap override count before must be >= 0, got %d", override.CountBeforeOverride)
+	case override.CountAfterOverride <= override.CountBeforeOverride:
+		return fmt.Errorf("workflow loop hard-cap override count after must be greater than count before, got after=%d before=%d", override.CountAfterOverride, override.CountBeforeOverride)
+	case override.Soft <= 0:
+		return fmt.Errorf("workflow loop hard-cap override soft must be > 0, got %d", override.Soft)
+	case override.Hard <= 0:
+		return fmt.Errorf("workflow loop hard-cap override hard must be > 0, got %d", override.Hard)
+	case strings.TrimSpace(override.HumanAction) == "":
+		return errors.New("workflow loop hard-cap override human action is required")
+	case override.Reason != WorkflowLoopHardCapReason:
+		return fmt.Errorf("workflow loop hard-cap override reason = %q, want %q", override.Reason, WorkflowLoopHardCapReason)
+	}
+	return nil
+}
+
+func validateWorkflowLoopHardCapOverrideConsumption(status Status, entry WorkflowStateEntry, override WorkflowLoopHardCapOverride) error {
+	if err := validateWorkflowLoopHardCapOverride(override); err != nil {
+		return err
+	}
+	pending := status.WorkflowLoop.PendingHardCapOverride
+	switch {
+	case pending == nil:
+		return errors.New("workflow loop hard-cap override consumption requires pending override")
+	case *pending != override:
+		return errors.New("workflow loop hard-cap override consumption does not match pending override")
+	case entry.Workflow != override.Workflow:
+		return fmt.Errorf("workflow loop hard-cap override workflow = %q, want %q", override.Workflow, entry.Workflow)
+	case entry.State != override.TargetState:
+		return fmt.Errorf("workflow loop hard-cap override target state = %q, want %q", override.TargetState, entry.State)
+	case entry.Count != override.CountAfterOverride:
+		return fmt.Errorf("workflow loop hard-cap override count after = %d, want workflow entry count %d", override.CountAfterOverride, entry.Count)
+	case status.WorkflowLoop.Counts[entry.State] != override.CountBeforeOverride:
+		return fmt.Errorf("workflow loop hard-cap override count before = %d, want current count %d", override.CountBeforeOverride, status.WorkflowLoop.Counts[entry.State])
 	}
 	return nil
 }
@@ -2246,8 +2369,19 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			if err := validateAttemptStartRouting(replayed, routing); err != nil {
 				return Status{}, fmt.Errorf("event %d attempt routing: %w", event.Sequence, err)
 			}
+			if payload.ConsumedWorkflowLoopHardCapOverride != nil {
+				if payload.WorkflowStateEntry == nil {
+					return Status{}, fmt.Errorf("event %d consumes workflow loop hard cap override without workflow state entry", event.Sequence)
+				}
+				if err := validateWorkflowLoopHardCapOverrideConsumption(replayed, *payload.WorkflowStateEntry, *payload.ConsumedWorkflowLoopHardCapOverride); err != nil {
+					return Status{}, fmt.Errorf("event %d workflow loop hard cap override consumption: %w", event.Sequence, err)
+				}
+			}
 			if err := applyReplayedWorkflowStateEntry(&replayed, event, payload.WorkflowStateEntry); err != nil {
 				return Status{}, err
+			}
+			if payload.ConsumedWorkflowLoopHardCapOverride != nil {
+				replayed.WorkflowLoop.PendingHardCapOverride = nil
 			}
 			attempt := payload.Attempt
 			if err := validateStartedAttemptEvent(event, attempt, replayed.RunID); err != nil {
@@ -2357,6 +2491,35 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			}
 			applyWorkflowLoopHardCap(&replayed, payload.Cap)
 			replayed.State = stateBlockedHuman
+		case eventWorkflowHardCapOverride:
+			var payload workflowLoopHardCapOverridePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap_override payload: %w", event.Sequence, err)
+			}
+			if err := validateWorkflowLoopHardCapOverride(payload.Override); err != nil {
+				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap_override payload: %w", event.Sequence, err)
+			}
+			if payload.Override.Workflow != replayed.Workflow {
+				return Status{}, fmt.Errorf("event %d workflow loop hard cap override workflow %q does not match status workflow %q", event.Sequence, payload.Override.Workflow, replayed.Workflow)
+			}
+			if payload.State != stateRunning {
+				return Status{}, fmt.Errorf("event %d workflow loop hard cap override state = %q, want %q", event.Sequence, payload.State, stateRunning)
+			}
+			block := replayed.WorkflowLoop.HardCapBlock
+			if replayed.State != stateBlockedHuman || block == nil {
+				return Status{}, fmt.Errorf("event %d workflow loop hard cap override requires active hard-cap block", event.Sequence)
+			}
+			if block.Workflow != payload.Override.Workflow ||
+				block.BlockedState != payload.Override.TargetState ||
+				block.CurrentCount != payload.Override.CountBeforeOverride ||
+				block.ProspectiveCount != payload.Override.CountAfterOverride ||
+				block.Soft != payload.Override.Soft ||
+				block.Hard != payload.Override.Hard ||
+				block.Reason != payload.Override.Reason {
+				return Status{}, fmt.Errorf("event %d workflow loop hard cap override does not match active hard-cap block", event.Sequence)
+			}
+			applyWorkflowLoopHardCapOverride(&replayed, payload.Override)
+			replayed.State = stateRunning
 		}
 	}
 	return replayed, nil

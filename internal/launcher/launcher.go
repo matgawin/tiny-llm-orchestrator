@@ -146,25 +146,31 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	}
 	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
 	workflowEntry := workflowStateEntryForDecision(decision, latestOutcome, hasOutcome)
+	var consumeLoopCapOverride *runstore.WorkflowLoopHardCapOverride
 	capDecision := loopcap.Evaluate(loaded.Workflow.Name, loaded.Workflow.LoopCaps, loaded.Run.Status, decision, latestOutcome, hasOutcome)
 	if capDecision.Kind == loopcap.DecisionHard {
-		status, _, err := loaded.Store.BlockWorkflowLoopHardCap(opts.RunID, capDecision.HardCap(), at)
-		if err != nil {
-			return Result{}, err
+		if override := loaded.Run.Status.WorkflowLoop.PendingHardCapOverride; workflowLoopHardCapOverrideMatches(override, capDecision) {
+			consumeLoopCapOverride = override
+		} else {
+			status, _, err := loaded.Store.BlockWorkflowLoopHardCap(opts.RunID, capDecision.HardCap(), at)
+			if err != nil {
+				return Result{}, err
+			}
+			return Result{RunID: opts.RunID, Attempt: latestOutcome}, fmt.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
 		}
-		return Result{RunID: opts.RunID, Attempt: latestOutcome}, fmt.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
 	}
 	attempt, _, err := loaded.Store.StartAttemptContext(ctx, opts.RunID, runstore.StartAttemptRequest{
-		StepID:             decision.Step,
-		AgentID:            step.Agent,
-		AttemptID:          attemptID,
-		Timeout:            loaded.Workflow.Defaults.Timeout.Duration,
-		ReportExitGrace:    loaded.Workflow.Defaults.ReportExitGrace.Duration,
-		Time:               at,
-		ConsumeAttemptID:   routing.consumeAttemptID,
-		RetryLineage:       routing.retryLineage,
-		SupersedeReason:    routing.supersedeReason,
-		WorkflowStateEntry: workflowEntry,
+		StepID:                             decision.Step,
+		AgentID:                            step.Agent,
+		AttemptID:                          attemptID,
+		Timeout:                            loaded.Workflow.Defaults.Timeout.Duration,
+		ReportExitGrace:                    loaded.Workflow.Defaults.ReportExitGrace.Duration,
+		Time:                               at,
+		ConsumeAttemptID:                   routing.consumeAttemptID,
+		RetryLineage:                       routing.retryLineage,
+		SupersedeReason:                    routing.supersedeReason,
+		WorkflowStateEntry:                 workflowEntry,
+		ConsumeWorkflowLoopHardCapOverride: consumeLoopCapOverride,
 	})
 	if err != nil {
 		return Result{}, err
@@ -287,6 +293,19 @@ func workflowStateEntryForDecision(decision workflow.Decision, attempt runstore.
 		TriggerStatus: attempt.Status,
 		TriggerResult: attempt.Result,
 	}
+}
+
+func workflowLoopHardCapOverrideMatches(override *runstore.WorkflowLoopHardCapOverride, decision loopcap.Decision) bool {
+	if override == nil {
+		return false
+	}
+	return override.Workflow == decision.Workflow &&
+		override.TargetState == decision.State &&
+		override.CountBeforeOverride == decision.CurrentCount &&
+		override.CountAfterOverride == decision.ProspectiveCount &&
+		override.Soft == decision.Soft &&
+		override.Hard == decision.Hard &&
+		override.Reason == runstore.WorkflowLoopHardCapReason
 }
 
 func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt []byte, at time.Time) (runstore.Attempt, runstore.ArtifactRef, bool, error) {

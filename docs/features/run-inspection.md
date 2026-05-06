@@ -28,11 +28,14 @@ summary-context inputs.
 ## Command Shape
 
 ```bash
+orc run show <run-id>
 orc run status <run-id>
 orc run next <run-id>
 ```
 
-Both commands are read-only with respect to run domain state. `orc run next`
+These commands are read-only with respect to run domain state. `orc run show`
+is the human-facing status view and currently shares output with
+`orc run status`. `orc run next`
 evaluates the current persisted run state through the workflow engine and
 prints the selected action without launching a worker, creating an attempt,
 writing an event, or mutating artifacts. Loading a legacy run may still perform
@@ -73,6 +76,13 @@ entry. Hard-cap previews identify the blocked target state, prospective count,
 current count, hard cap, and `loop_hard_cap_reached` reason. These previews are
 read-only: they do not write cap events, increment counters, or move the run to
 human handoff.
+
+`orc run show`/`status` include workflow loop-cap status by workflow state:
+current entry count, soft and hard thresholds, whether the soft threshold has
+been reached, whether a hard cap is currently blocking, and the blocked target
+state with prospective count when a hard-cap human decision is active. If a
+human-reviewed loop-cap override is pending, the status output shows the
+pending override action and the one allowed count-after value.
 
 For `ready_for_human` and `blocked_for_human`, inspection identifies:
 

@@ -1,4 +1,9 @@
 version: 1
+defaults:
+  loop_caps:
+    enabled: true
+    soft: 4
+    hard: 8
 workflows:
   implementation: workflows/implementation.yaml
   bugfix: workflows/bugfix.yaml
