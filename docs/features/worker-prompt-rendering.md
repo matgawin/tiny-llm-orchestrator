@@ -67,9 +67,15 @@ Rendered prompts include:
 - explicit attempt metadata
 - the project-local role descriptor frontmatter fields and Markdown body
 - captured task context from `task/context.md`
+- workflow loop context after the selected state has passed its soft cap
 - prior report context
 - the worker-reportable `status/result` pairs for the selected step
 - the exact required `orc report` command shape
+
+Loop context includes the workflow name, repeated state, current count, soft
+cap, hard cap, prior statuses when recorded by workflow state-entry metadata,
+and guidance to break the loop or escalate instead of repeating the same
+outcome.
 
 Prior report context includes structured reports persisted on completed
 attempts, so loopback prompts for coder steps include tester failure summaries

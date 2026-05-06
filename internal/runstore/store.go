@@ -473,6 +473,91 @@ func (s *Store) UpdateStatus(runID string, update StatusUpdate) (Status, Event, 
 	return status, event, nil
 }
 
+// RecordWorkflowLoopSoftCap records the first advisory soft-cap hit for a workflow state.
+func (s *Store) RecordWorkflowLoopSoftCap(runID string, loopCap WorkflowLoopSoftCap, at time.Time) (Status, Event, error) {
+	if err := validateRunID(runID); err != nil {
+		return Status{}, Event{}, err
+	}
+	if err := validateWorkflowLoopSoftCap(loopCap); err != nil {
+		return Status{}, Event{}, err
+	}
+	at = normalizeTime(at)
+	var status Status
+	var event Event
+	err := s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		if workflowSoftCapRecorded(run.Status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, loopCap.State) {
+			status = run.Status
+			return nil
+		}
+		payload, err := marshalPayload(workflowLoopSoftCapPayload{Cap: loopCap})
+		if err != nil {
+			return err
+		}
+		event = Event{Time: at, Type: eventWorkflowSoftCap, Payload: payload}
+		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			applyWorkflowLoopSoftCap(status, loopCap)
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+		})
+		return err
+	})
+	if err != nil {
+		if statusBackedEventPossiblyCommitted(err) {
+			return status, event, err
+		}
+		return Status{}, Event{}, err
+	}
+	return status, event, nil
+}
+
+// BlockWorkflowLoopHardCap records a hard-cap stop and sends the run to human decision.
+func (s *Store) BlockWorkflowLoopHardCap(runID string, loopCap WorkflowLoopHardCap, at time.Time) (Status, Event, error) {
+	if err := validateRunID(runID); err != nil {
+		return Status{}, Event{}, err
+	}
+	if err := validateWorkflowLoopHardCap(loopCap); err != nil {
+		return Status{}, Event{}, err
+	}
+	at = normalizeTime(at)
+	var status Status
+	var event Event
+	err := s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		if run.Status.ActiveAttempt != nil {
+			return fmt.Errorf("run %q has active attempt %q; loop hard-cap block is not allowed", runID, run.Status.ActiveAttempt.AttemptID)
+		}
+		if run.Status.State != stateRunning {
+			return fmt.Errorf("run %q state is %q, want %q for loop hard-cap block", runID, run.Status.State, stateRunning)
+		}
+		payload, err := marshalPayload(workflowLoopHardCapPayload{Cap: loopCap, State: stateBlockedHuman})
+		if err != nil {
+			return err
+		}
+		event = Event{Time: at, Type: eventWorkflowHardCap, Payload: payload}
+		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			applyWorkflowLoopHardCap(status, loopCap)
+			status.State = stateBlockedHuman
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+		})
+		return err
+	})
+	if err != nil {
+		if statusBackedEventPossiblyCommitted(err) {
+			return status, event, err
+		}
+		return Status{}, Event{}, err
+	}
+	return status, event, nil
+}
+
 // WriteArtifact persists an artifact under the run directory and records it in the event log.
 func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, error) {
 	return s.writeArtifact(runID, artifact, nil)
@@ -1759,7 +1844,7 @@ func statusBackedEventPossiblyCommitted(err error) bool {
 
 func reservedEventType(eventType string) bool {
 	switch eventType {
-	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored:
+	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventWorkflowSoftCap, eventWorkflowHardCap:
 		return true
 	default:
 		return false
@@ -1791,6 +1876,59 @@ func applyWorkflowStateEntry(status *Status, entry WorkflowStateEntry) {
 	if entry.Repeated && !slices.Contains(status.WorkflowLoop.RepeatedStates, entry.State) {
 		status.WorkflowLoop.RepeatedStates = append(status.WorkflowLoop.RepeatedStates, entry.State)
 	}
+}
+
+func applyWorkflowLoopSoftCap(status *Status, loopCap WorkflowLoopSoftCap) {
+	if workflowSoftCapRecorded(status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, loopCap.State) {
+		return
+	}
+	status.WorkflowLoop.SoftCapWarnings = append(status.WorkflowLoop.SoftCapWarnings, loopCap)
+}
+
+func workflowSoftCapRecorded(caps []WorkflowLoopSoftCap, workflow, state string) bool {
+	return slices.ContainsFunc(caps, func(existing WorkflowLoopSoftCap) bool {
+		return existing.Workflow == workflow && existing.State == state
+	})
+}
+
+func applyWorkflowLoopHardCap(status *Status, loopCap WorkflowLoopHardCap) {
+	status.WorkflowLoop.HardCapBlock = &loopCap
+}
+
+func validateWorkflowLoopSoftCap(loopCap WorkflowLoopSoftCap) error {
+	switch {
+	case loopCap.Workflow == "":
+		return errors.New("workflow loop soft cap workflow is required")
+	case loopCap.State == "":
+		return errors.New("workflow loop soft cap state is required")
+	case loopCap.Count <= 0:
+		return fmt.Errorf("workflow loop soft cap count must be > 0, got %d", loopCap.Count)
+	case loopCap.Soft <= 0:
+		return fmt.Errorf("workflow loop soft cap soft must be > 0, got %d", loopCap.Soft)
+	case loopCap.Hard <= 0:
+		return fmt.Errorf("workflow loop soft cap hard must be > 0, got %d", loopCap.Hard)
+	}
+	return nil
+}
+
+func validateWorkflowLoopHardCap(loopCap WorkflowLoopHardCap) error {
+	switch {
+	case loopCap.Workflow == "":
+		return errors.New("workflow loop hard cap workflow is required")
+	case loopCap.BlockedState == "":
+		return errors.New("workflow loop hard cap blocked target state is required")
+	case loopCap.CurrentCount < 0:
+		return fmt.Errorf("workflow loop hard cap current count must be >= 0, got %d", loopCap.CurrentCount)
+	case loopCap.ProspectiveCount <= loopCap.CurrentCount:
+		return fmt.Errorf("workflow loop hard cap prospective count must be greater than current count, got prospective=%d current=%d", loopCap.ProspectiveCount, loopCap.CurrentCount)
+	case loopCap.Soft <= 0:
+		return fmt.Errorf("workflow loop hard cap soft must be > 0, got %d", loopCap.Soft)
+	case loopCap.Hard <= 0:
+		return fmt.Errorf("workflow loop hard cap hard must be > 0, got %d", loopCap.Hard)
+	case loopCap.Reason != WorkflowLoopHardCapReason:
+		return fmt.Errorf("workflow loop hard cap reason = %q, want %q", loopCap.Reason, WorkflowLoopHardCapReason)
+	}
+	return nil
 }
 
 func applyReplayedWorkflowStateEntry(status *Status, event Event, entry *WorkflowStateEntry) error {
@@ -2188,6 +2326,37 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			if payload.RunID != "" && payload.RunID != event.RunID {
 				return Status{}, fmt.Errorf("event %d report ignored run_id %q does not match event run_id %q", event.Sequence, payload.RunID, event.RunID)
 			}
+		case eventWorkflowSoftCap:
+			var payload workflowLoopSoftCapPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d workflow.loop_soft_cap payload: %w", event.Sequence, err)
+			}
+			if err := validateWorkflowLoopSoftCap(payload.Cap); err != nil {
+				return Status{}, fmt.Errorf("event %d workflow.loop_soft_cap payload: %w", event.Sequence, err)
+			}
+			if payload.Cap.Workflow != replayed.Workflow {
+				return Status{}, fmt.Errorf("event %d workflow loop soft cap workflow %q does not match status workflow %q", event.Sequence, payload.Cap.Workflow, replayed.Workflow)
+			}
+			applyWorkflowLoopSoftCap(&replayed, payload.Cap)
+		case eventWorkflowHardCap:
+			var payload workflowLoopHardCapPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap payload: %w", event.Sequence, err)
+			}
+			if err := validateWorkflowLoopHardCap(payload.Cap); err != nil {
+				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap payload: %w", event.Sequence, err)
+			}
+			if payload.Cap.Workflow != replayed.Workflow {
+				return Status{}, fmt.Errorf("event %d workflow loop hard cap workflow %q does not match status workflow %q", event.Sequence, payload.Cap.Workflow, replayed.Workflow)
+			}
+			if payload.State != stateBlockedHuman {
+				return Status{}, fmt.Errorf("event %d workflow loop hard cap state = %q, want %q", event.Sequence, payload.State, stateBlockedHuman)
+			}
+			if replayed.ActiveAttempt != nil {
+				return Status{}, fmt.Errorf("event %d blocks workflow loop while attempt %q is active", event.Sequence, replayed.ActiveAttempt.AttemptID)
+			}
+			applyWorkflowLoopHardCap(&replayed, payload.Cap)
+			replayed.State = stateBlockedHuman
 		}
 	}
 	return replayed, nil

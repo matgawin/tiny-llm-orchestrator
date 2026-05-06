@@ -66,6 +66,14 @@ and retry source attempt the next launch would consume. When retries are
 exhausted, inspection shows the latest outcome, attempt id, exhausted pair, and
 configured terminal transition.
 
+For selected next-step decisions, `orc run next` also previews workflow
+loop-cap effects using the same effective caps and persisted counters as worker
+launch. Soft-cap previews print a warning for the prospective `soft + 1`
+entry. Hard-cap previews identify the blocked target state, prospective count,
+current count, hard cap, and `loop_hard_cap_reached` reason. These previews are
+read-only: they do not write cap events, increment counters, or move the run to
+human handoff.
+
 For `ready_for_human` and `blocked_for_human`, inspection identifies:
 
 - the run directory for current summary context

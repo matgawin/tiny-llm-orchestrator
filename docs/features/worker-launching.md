@@ -38,6 +38,16 @@ for the next decision. A worker launches for `select_step` and `retry_step`.
 Terminal runs do not launch. Runs with an active attempt refuse a second worker
 until that active attempt terminalizes or is recovered.
 
+For `select_step` decisions, the launcher checks the workflow's effective loop
+caps against the persisted workflow state-entry counters before starting the
+worker. Disabled caps bypass this policy. A soft-cap hit at prospective count
+`soft + 1` records one advisory event for that workflow state, prints a clear
+warning, and still launches the selected worker. A hard-cap hit at prospective
+count `hard + 1` records a hard-cap event, leaves the target state's persisted
+count at `hard`, and moves the run to `blocked_for_human` with reason
+`loop_hard_cap_reached` instead of starting another worker. Retry decisions and
+terminal or human-handoff states do not trigger loop-cap enforcement.
+
 Each launch creates a `starting` attempt before rendering the worker prompt.
 The attempt becomes `active` only after process metadata is recorded. The
 attempt records:

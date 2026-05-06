@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
@@ -78,6 +79,7 @@ type Result struct {
 	Log       runstore.ArtifactRef
 	Launched  bool
 	Recovered bool
+	SoftCap   *runstore.WorkflowLoopSoftCap
 }
 
 // LaunchNext launches the workflow-selected worker process for a run.
@@ -144,6 +146,14 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	}
 	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
 	workflowEntry := workflowStateEntryForDecision(decision, latestOutcome, hasOutcome)
+	capDecision := loopcap.Evaluate(loaded.Workflow.Name, loaded.Workflow.LoopCaps, loaded.Run.Status, decision, latestOutcome, hasOutcome)
+	if capDecision.Kind == loopcap.DecisionHard {
+		status, _, err := loaded.Store.BlockWorkflowLoopHardCap(opts.RunID, capDecision.HardCap(), at)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{RunID: opts.RunID, Attempt: latestOutcome}, fmt.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
+	}
 	attempt, _, err := loaded.Store.StartAttemptContext(ctx, opts.RunID, runstore.StartAttemptRequest{
 		StepID:             decision.Step,
 		AgentID:            step.Agent,
@@ -159,9 +169,17 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	var softCap *runstore.WorkflowLoopSoftCap
+	if capDecision.Kind == loopcap.DecisionSoft {
+		loopCap := capDecision.SoftCap()
+		if _, _, err := loaded.Store.RecordWorkflowLoopSoftCap(opts.RunID, loopCap, at); err != nil {
+			return Result{}, err
+		}
+		softCap = &loopCap
+	}
 	if err := ctx.Err(); err != nil {
 		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
-		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished}, finishErr)
+		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
 
 	prompt, err := promptrender.Render(ctx, promptrender.Options{
@@ -178,7 +196,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 			exitState = exitStateCanceled
 		}
 		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitState, runstore.ArtifactRef{}, at, err)
-		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished}, finishErr)
+		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
 	attempt, _, err = loaded.Store.RecordAttemptPrompt(opts.RunID, runstore.AttemptPromptRequest{
 		AttemptID: attempt.AttemptID,
@@ -187,11 +205,11 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	})
 	if err != nil {
 		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
-		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, Prompt: prompt.Ref}, finishErr)
+		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, Prompt: prompt.Ref, SoftCap: softCap}, finishErr)
 	}
 
 	attempt, logRef, launched, err := runProcess(ctx, loaded, opts, attempt, prompt.Content, at)
-	result := Result{RunID: opts.RunID, Attempt: attempt, Prompt: prompt.Ref, Log: logRef, Launched: launched}
+	result := Result{RunID: opts.RunID, Attempt: attempt, Prompt: prompt.Ref, Log: logRef, Launched: launched, SoftCap: softCap}
 	if err != nil {
 		if result.Attempt.AttemptID != "" {
 			printLaunchResult(opts.Stdout, result)
@@ -917,6 +935,10 @@ func refPtr(ref runstore.ArtifactRef) *runstore.ArtifactRef {
 func printLaunchResult(w io.Writer, result Result) {
 	if w == nil {
 		return
+	}
+	if result.SoftCap != nil {
+		loopCap := result.SoftCap
+		_, _ = fmt.Fprintf(w, "warning: workflow loop soft cap reached for workflow %s state %s at count %d (soft %d, hard %d); continue only if this attempt can break the loop or escalate\n", loopCap.Workflow, loopCap.State, loopCap.Count, loopCap.Soft, loopCap.Hard)
 	}
 	action := "launched"
 	if result.Recovered {

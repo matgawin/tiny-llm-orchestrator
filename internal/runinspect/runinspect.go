@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
@@ -180,6 +181,7 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 	switch decision.Kind {
 	case workflow.DecisionSelectStep:
 		printSelectedStep(w, workflowConfig, decision.Step)
+		printLoopCapPreview(w, workflowConfig, run, decision)
 		_, _ = fmt.Fprintln(w, "launch: not launched")
 	case workflow.DecisionRetryStep:
 		printSelectedStep(w, workflowConfig, decision.Step)
@@ -199,6 +201,18 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 		reports := reportPaths(run.Status.Artifacts)
 		printReportPaths(w, reports)
 		printTerminalHumanState(w, run, decision, reports)
+	}
+}
+
+func printLoopCapPreview(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
+	latest, hasLatest := runstore.LatestConsumableOutcome(run.Status)
+	capDecision := loopcap.Evaluate(workflowConfig.Name, workflowConfig.LoopCaps, run.Status, decision, latest, hasLatest)
+	switch capDecision.Kind {
+	case loopcap.DecisionSoft:
+		_, _ = fmt.Fprintf(w, "warning: workflow loop soft cap will be reached for state %s at count %d (soft %d, hard %d)\n", capDecision.State, capDecision.ProspectiveCount, capDecision.Soft, capDecision.Hard)
+	case loopcap.DecisionHard:
+		_, _ = fmt.Fprintf(w, "blocked: workflow loop hard cap would be reached for state %s at prospective count %d (current %d, hard %d)\n", capDecision.State, capDecision.ProspectiveCount, capDecision.CurrentCount, capDecision.Hard)
+		_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", runstore.WorkflowLoopHardCapReason)
 	}
 }
 

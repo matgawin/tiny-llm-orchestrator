@@ -191,6 +191,7 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	out.WriteString("## Task Context\n\n")
 	fmt.Fprintf(&out, "%s\n\n", strings.TrimSpace(taskContext))
 
+	out.WriteString(renderLoopContext(renderCtx, opts))
 	out.WriteString(renderPriorReports(reports))
 	out.WriteString(reportContractIntro)
 	for _, pair := range allowedPairs(renderCtx.step) {
@@ -201,6 +202,47 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	out.WriteString("```\n")
 	out.WriteString(reportOptionalFields)
 	return out.Bytes(), nil
+}
+
+func renderLoopContext(renderCtx renderContext, opts Options) string {
+	caps := renderCtx.workflow.LoopCaps
+	if !caps.Enabled {
+		return ""
+	}
+	count := renderCtx.run.Status.WorkflowLoop.Counts[opts.StepID]
+	if count <= caps.Soft {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString("## Workflow Loop Context\n\n")
+	fmt.Fprintf(&out, "- workflow: `%s`\n", renderCtx.workflow.Name)
+	fmt.Fprintf(&out, "- repeated_state: `%s`\n", opts.StepID)
+	fmt.Fprintf(&out, "- current_count: `%d`\n", count)
+	fmt.Fprintf(&out, "- soft_cap: `%d`\n", caps.Soft)
+	fmt.Fprintf(&out, "- hard_cap: `%d`\n", caps.Hard)
+	statuses := priorLoopStatuses(renderCtx.run.Status.WorkflowLoop.Entries, opts.StepID)
+	if len(statuses) > 0 {
+		fmt.Fprintf(&out, "- prior_statuses: `%s`\n", strings.Join(statuses, "`, `"))
+	} else {
+		out.WriteString("- prior_statuses: not available\n")
+	}
+	out.WriteString("\nThis workflow state is past its soft loop cap. Use this attempt to break the loop with new information, choose a terminal/human-handoff report when blocked, or escalate clearly instead of repeating the same outcome.\n\n")
+	return out.String()
+}
+
+func priorLoopStatuses(entries []runstore.WorkflowStateEntry, state string) []string {
+	statuses := make([]string, 0)
+	for _, entry := range entries {
+		if entry.State != state || entry.TriggerStatus == "" {
+			continue
+		}
+		status := entry.TriggerStatus
+		if entry.TriggerResult != "" {
+			status += "/" + entry.TriggerResult
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
 }
 
 const (

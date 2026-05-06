@@ -179,6 +179,64 @@ func TestRenderIncludesStructuredPriorReportWithoutReportArtifact(t *testing.T) 
 	}
 }
 
+func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	store := openPromptStore(t, root)
+	run, err := store.Create(runstore.CreateRunRequest{
+		RunID:        "prompt-run",
+		Workflow:     "implementation",
+		InitialState: "plan",
+		Time:         fixedPromptTime(),
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	runID := run.ID
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	recordReportedLoopPromptAttempt(t, store, runID, "attempt-1", "")
+	recordReportedLoopPromptAttempt(t, store, runID, "attempt-2", "attempt-1")
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:           "plan",
+		AgentID:          "planner",
+		AttemptID:        "attempt-3",
+		Timeout:          30 * time.Minute,
+		ReportExitGrace:  30 * time.Second,
+		Time:             fixedPromptTime().Add(3 * time.Minute),
+		ConsumeAttemptID: "attempt-2",
+		WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+			State:         "plan",
+			PreviousState: "plan",
+			TriggerStatus: "done",
+			TriggerResult: "ready",
+		},
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-3",
+		Time:      fixedPromptTime().Add(4 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	assertPromptContainsAll(t, string(result.Content), []string{
+		"## Workflow Loop Context",
+		"- workflow: `implementation`",
+		"- repeated_state: `plan`",
+		"- current_count: `3`",
+		"- soft_cap: `2`",
+		"- hard_cap: `4`",
+		"- prior_statuses: `done/ready`, `done/ready`",
+		"break the loop with new information",
+	})
+}
+
 func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)
@@ -615,6 +673,85 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 		req.ReportContentSet = true
 	}
 	if _, _, err := store.RecordAttemptReport(runID, req); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+}
+
+func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID, attemptID, consumeAttemptID string) {
+	t.Helper()
+	req := runstore.StartAttemptRequest{
+		StepID:           "plan",
+		AgentID:          "planner",
+		AttemptID:        attemptID,
+		Timeout:          30 * time.Minute,
+		ReportExitGrace:  30 * time.Second,
+		Time:             fixedPromptTime().Add(time.Minute),
+		ConsumeAttemptID: consumeAttemptID,
+	}
+	if consumeAttemptID != "" {
+		req.WorkflowStateEntry = runstore.WorkflowStateEntryRequest{
+			State:         "plan",
+			PreviousState: "plan",
+			TriggerStatus: "done",
+			TriggerResult: "ready",
+		}
+	}
+	if _, _, err := store.StartAttempt(runID, req); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindPrompt,
+		Name:    "plan",
+		Content: []byte("prompt\n"),
+		Time:    fixedPromptTime().Add(80 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact prompt returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+		AttemptID: attemptID,
+		PromptRef: promptRef,
+		Time:      fixedPromptTime().Add(85 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
+	}
+	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindLog,
+		Name:    "plan",
+		Content: []byte("log\n"),
+		Time:    fixedPromptTime().Add(88 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact log returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+		AttemptID: attemptID,
+		LogRef:    logRef,
+		Time:      fixedPromptTime().Add(89 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordAttemptLog returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        attemptID,
+		PID:              12345,
+		ProcessStartTime: "123456789",
+		Time:             fixedPromptTime().Add(90 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: attemptID,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Looping.",
+		},
+		Time: fixedPromptTime().Add(2 * time.Minute),
+	}); err != nil {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 }

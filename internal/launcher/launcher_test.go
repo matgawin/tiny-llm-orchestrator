@@ -21,6 +21,11 @@ import (
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
+const (
+	launcherStatusDone  = "done"
+	launcherResultReady = "ready"
+)
+
 func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	root, runID := createLauncherRun(t, "200ms")
 
@@ -191,8 +196,8 @@ func TestWorkerRunnerUsesTerminalReportInsteadOfSynthesizedFinish(t *testing.T) 
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: attempt.AttemptID,
-			Status:    "done",
-			Result:    "ready",
+			Status:    launcherStatusDone,
+			Result:    launcherResultReady,
 			Summary:   "Plan is ready.",
 		},
 		Time: fixedLauncherTime().Add(time.Second),
@@ -264,8 +269,8 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 			StepID:    attempt.StepID,
 			AgentID:   attempt.AgentID,
 			AttemptID: attempt.AttemptID,
-			Status:    "done",
-			Result:    "ready",
+			Status:    launcherStatusDone,
+			Result:    launcherResultReady,
 			Summary:   "Plan is ready.",
 		},
 		Time: fixedLauncherTime().Add(time.Second),
@@ -302,7 +307,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 		t.Fatalf("code count = %d, want selected next-state count 1", got)
 	}
 	entries := loaded.Status.WorkflowLoop.Entries
-	if got := entries[len(entries)-1]; got.State != "code" || got.PreviousState != "plan" || got.TriggerStatus != "done" || got.TriggerResult != "ready" {
+	if got := entries[len(entries)-1]; got.State != "code" || got.PreviousState != "plan" || got.TriggerStatus != launcherStatusDone || got.TriggerResult != launcherResultReady {
 		t.Fatalf("last workflow entry = %+v, want code after plan done/ready", got)
 	}
 }
@@ -318,8 +323,8 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 			StepID:    attempt.StepID,
 			AgentID:   attempt.AgentID,
 			AttemptID: attempt.AttemptID,
-			Status:    "done",
-			Result:    "ready",
+			Status:    launcherStatusDone,
+			Result:    launcherResultReady,
 			Summary:   "Plan is ready.",
 		},
 		Time: fixedLauncherTime().Add(time.Second),
@@ -343,6 +348,113 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 	}
 	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 1 {
 		t.Fatalf("plan count = %d, want retry to preserve initial workflow count 1", got)
+	}
+}
+
+func TestLaunchNextWarnsAndContinuesAtWorkflowLoopSoftCap(t *testing.T) {
+	root, runID := createLoopCapLauncherRun(t, "enabled: true\nsoft: 2\nhard: 4\n", "")
+	store := openLauncherStore(t, root)
+	seedReportedLoopAttempt(t, store, runID, "attempt-1", "")
+	seedReportedLoopAttempt(t, store, runID, "attempt-2", "attempt-1")
+
+	var stdout bytes.Buffer
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(3 * time.Second),
+		Stdout:  &stdout,
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if !result.Launched || result.SoftCap == nil {
+		t.Fatalf("result = %+v, want launched with soft-cap warning", result)
+	}
+	if !strings.Contains(stdout.String(), "warning: workflow loop soft cap reached for workflow implementation state plan at count 3 (soft 2, hard 4)") {
+		t.Fatalf("stdout = %q, want soft-cap warning", stdout.String())
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 3 {
+		t.Fatalf("plan count = %d, want soft-cap entry count 3", got)
+	}
+	if got := loaded.Status.WorkflowLoop.SoftCapWarnings; len(got) != 1 || got[0].Count != 3 || got[0].TriggerStatus != launcherStatusDone || got[0].TriggerResult != launcherResultReady {
+		t.Fatalf("soft cap warnings = %+v, want one threshold warning with trigger", got)
+	}
+}
+
+func TestLaunchNextBlocksBeforeWorkflowLoopHardCapIncrement(t *testing.T) {
+	root, runID := createLoopCapLauncherRun(t, "enabled: true\nsoft: 1\nhard: 2\n", "")
+	store := openLauncherStore(t, root)
+	seedReportedLoopAttempt(t, store, runID, "attempt-1", "")
+	seedReportedLoopAttempt(t, store, runID, "attempt-2", "attempt-1")
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(3 * time.Second),
+	})
+	if err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {
+		t.Fatalf("LaunchNext error = %v, want hard-cap block reason", err)
+	}
+	if result.Attempt.AttemptID != "attempt-2" {
+		t.Fatalf("result attempt = %+v, want latest triggering attempt", result.Attempt)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if loaded.Status.State != workflow.RunStatusBlockedForHuman {
+		t.Fatalf("run state = %q, want blocked_for_human", loaded.Status.State)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 2 {
+		t.Fatalf("plan count = %d, want hard cap to leave count at 2", got)
+	}
+	if got := len(loaded.Status.Attempts); got != 2 {
+		t.Fatalf("attempt count = %d, want no new attempt", got)
+	}
+	block := loaded.Status.WorkflowLoop.HardCapBlock
+	if block == nil || block.BlockedState != "plan" || block.CurrentCount != 2 || block.ProspectiveCount != 3 || block.Reason != runstore.WorkflowLoopHardCapReason {
+		t.Fatalf("hard cap block = %+v, want blocked plan prospective count 3", block)
+	}
+}
+
+func TestLaunchNextBypassesDisabledWorkflowLoopCaps(t *testing.T) {
+	root, runID := createLoopCapLauncherRun(t, "enabled: false\nsoft: 1\nhard: 2\n", "")
+	store := openLauncherStore(t, root)
+	seedReportedLoopAttempt(t, store, runID, "attempt-1", "")
+	seedReportedLoopAttempt(t, store, runID, "attempt-2", "attempt-1")
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(3 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if !result.Launched {
+		t.Fatalf("Launched = false, want disabled caps to continue")
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if got := loaded.Status.WorkflowLoop.HardCapBlock; got != nil {
+		t.Fatalf("hard cap block = %+v, want none", got)
+	}
+}
+
+func TestLaunchNextUsesWorkflowSpecificLoopCapOverride(t *testing.T) {
+	root, runID := createLoopCapLauncherRun(t, "enabled: true\nsoft: 10\nhard: 20\n", "enabled: true\nsoft: 1\nhard: 2\n")
+	store := openLauncherStore(t, root)
+	seedReportedLoopAttempt(t, store, runID, "attempt-1", "")
+	seedReportedLoopAttempt(t, store, runID, "attempt-2", "attempt-1")
+
+	_, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(3 * time.Second),
+	})
+	if err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {
+		t.Fatalf("LaunchNext error = %v, want workflow override hard cap", err)
 	}
 }
 
@@ -1193,6 +1305,158 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	return root, run.ID
 }
 
+func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	writeLoopCapLauncherProject(t, root, defaultCaps, workflowCaps)
+	store := openLauncherStore(t, root)
+	run, err := store.Create(runstore.CreateRunRequest{
+		RunID:        "loop-cap-run",
+		Workflow:     "implementation",
+		InitialState: "plan",
+		Time:         fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
+		Kind:    runstore.KindTaskContext,
+		Name:    "task",
+		Content: []byte("# Task\n\nBreak the workflow loop.\n"),
+		Time:    fixedLauncherTime(),
+	}); err != nil {
+		t.Fatalf("WriteArtifact task returned error: %v", err)
+	}
+	return root, run.ID
+}
+
+func writeLoopCapLauncherProject(t *testing.T, root, defaultCaps, workflowCaps string) {
+	t.Helper()
+	orcDir := filepath.Join(root, ".orc")
+	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
+		t.Fatalf("create workflows dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
+		t.Fatalf("create agents dir: %v", err)
+	}
+	var config strings.Builder
+	config.WriteString("version: 1\n")
+	if strings.TrimSpace(defaultCaps) != "" {
+		config.WriteString("defaults:\n  loop_caps:\n")
+		for line := range strings.SplitSeq(strings.TrimRight(defaultCaps, "\n"), "\n") {
+			config.WriteString("    " + line + "\n")
+		}
+	}
+	config.WriteString("workflows:\n  implementation:\n    path: workflows/implementation.yaml\n")
+	if strings.TrimSpace(workflowCaps) != "" {
+		config.WriteString("    loop_caps:\n")
+		for line := range strings.SplitSeq(strings.TrimRight(workflowCaps, "\n"), "\n") {
+			config.WriteString("      " + line + "\n")
+		}
+	}
+	config.WriteString("agents:\n  planner: agents/planner.md\n")
+	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), config.String())
+	writeLauncherFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
+	writeLauncherFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 200ms
+  report_exit_grace: 30ms
+  retries: {}
+steps:
+  plan:
+    agent: planner
+    allowed_results:
+      done: [ready]
+    on:
+      done/ready: plan
+`)
+}
+
+func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attemptID, consumeAttemptID string) {
+	t.Helper()
+	req := runstore.StartAttemptRequest{
+		StepID:           "plan",
+		AgentID:          "planner",
+		AttemptID:        attemptID,
+		Timeout:          200 * time.Millisecond,
+		ReportExitGrace:  30 * time.Millisecond,
+		Time:             fixedLauncherTime(),
+		ConsumeAttemptID: consumeAttemptID,
+	}
+	if consumeAttemptID != "" {
+		req.WorkflowStateEntry = runstore.WorkflowStateEntryRequest{
+			State:         "plan",
+			PreviousState: "plan",
+			TriggerStatus: launcherStatusDone,
+			TriggerResult: launcherResultReady,
+		}
+	}
+	if _, _, err := store.StartAttempt(runID, req); err != nil {
+		t.Fatalf("StartAttempt %s returned error: %v", attemptID, err)
+	}
+	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindPrompt,
+		Name:    "plan",
+		Content: []byte("prompt\n"),
+		Time:    fixedLauncherTime().Add(250 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact prompt %s returned error: %v", attemptID, err)
+	}
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+		AttemptID: attemptID,
+		PromptRef: promptRef,
+		Time:      fixedLauncherTime().Add(300 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptPrompt %s returned error: %v", attemptID, err)
+	}
+	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindLog,
+		Name:    "plan",
+		Content: []byte("log\n"),
+		Time:    fixedLauncherTime().Add(350 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact log %s returned error: %v", attemptID, err)
+	}
+	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+		AttemptID: attemptID,
+		LogRef:    logRef,
+		Time:      fixedLauncherTime().Add(400 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptLog %s returned error: %v", attemptID, err)
+	}
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        attemptID,
+		PID:              12345,
+		ProcessStartTime: "123456789",
+		Time:             fixedLauncherTime().Add(500 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess %s returned error: %v", attemptID, err)
+	}
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: attemptID,
+			Status:    launcherStatusDone,
+			Result:    launcherResultReady,
+			Summary:   "Ready to continue.",
+		},
+		Time: fixedLauncherTime().Add(time.Second),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport %s returned error: %v", attemptID, err)
+	}
+}
+
 func writeLauncherProject(t *testing.T, root, timeout string, opts launcherRunOptions) {
 	t.Helper()
 	reportExitGrace := opts.ReportExitGrace
@@ -1329,7 +1593,7 @@ func runProcessWithScheduledReadyReport(t *testing.T, scenario scheduledReadyRep
 	if err != nil {
 		t.Fatalf("runProcess returned error: %v", err)
 	}
-	if result.State != runstore.AttemptStateReported || result.Status != "done" || result.Result != "ready" {
+	if result.State != runstore.AttemptStateReported || result.Status != launcherStatusDone || result.Result != launcherResultReady {
 		t.Fatalf("attempt = %+v, want valid report authoritative", result)
 	}
 	return scheduledReadyReportProcessResult{
@@ -1378,8 +1642,8 @@ func recordReadyLauncherReport(store *runstore.Store, run *runstore.Run, attempt
 			StepID:    run.Status.ActiveAttempt.StepID,
 			AgentID:   run.Status.ActiveAttempt.AgentID,
 			AttemptID: attemptID,
-			Status:    "done",
-			Result:    "ready",
+			Status:    launcherStatusDone,
+			Result:    launcherResultReady,
 			Summary:   "Reported while process is running.",
 		},
 		Time: fixedLauncherTime().Add(time.Second),

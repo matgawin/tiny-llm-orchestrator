@@ -10,6 +10,7 @@ const (
 	schemaVersion = 1
 
 	stateRunning        = "running"
+	stateBlockedHuman   = "blocked_for_human"
 	attemptStatusFailed = "failed"
 
 	eventRunCreated       = "run.created"
@@ -24,6 +25,8 @@ const (
 	eventAttemptReported  = "attempt.reported"
 	eventAttemptWarning   = "attempt.warning"
 	eventReportIgnored    = "report.ignored"
+	eventWorkflowSoftCap  = "workflow.loop_soft_cap"
+	eventWorkflowHardCap  = "workflow.loop_hard_cap"
 
 	KindTaskContext  ArtifactKind = "task_context"
 	KindTaskSnapshot ArtifactKind = "task_snapshot"
@@ -33,6 +36,8 @@ const (
 	KindSnapshot     ArtifactKind = "snapshot"
 	KindSummary      ArtifactKind = "summary"
 	KindFollowup     ArtifactKind = "followup"
+
+	WorkflowLoopHardCapReason = "loop_hard_cap_reached"
 )
 
 // Store owns durable run state for one project root.
@@ -233,9 +238,11 @@ type AttemptWarning struct {
 
 // WorkflowLoop records workflow state entries accepted into durable run state.
 type WorkflowLoop struct {
-	Counts         map[string]int       `json:"counts,omitempty"`
-	Entries        []WorkflowStateEntry `json:"entries,omitempty"`
-	RepeatedStates []string             `json:"repeated_states,omitempty"`
+	Counts          map[string]int        `json:"counts,omitempty"`
+	Entries         []WorkflowStateEntry  `json:"entries,omitempty"`
+	RepeatedStates  []string              `json:"repeated_states,omitempty"`
+	SoftCapWarnings []WorkflowLoopSoftCap `json:"soft_cap_warnings,omitempty"`
+	HardCapBlock    *WorkflowLoopHardCap  `json:"hard_cap_block,omitempty"`
 }
 
 // WorkflowStateEntry records one accepted workflow state entry.
@@ -256,6 +263,33 @@ type WorkflowStateEntryRequest struct {
 	PreviousState string
 	TriggerStatus string
 	TriggerResult string
+}
+
+// WorkflowLoopSoftCap records the first advisory soft-cap hit for a workflow state.
+type WorkflowLoopSoftCap struct {
+	Workflow      string `json:"workflow"`
+	State         string `json:"state"`
+	Count         int    `json:"count"`
+	Soft          int    `json:"soft"`
+	Hard          int    `json:"hard"`
+	PreviousState string `json:"previous_state,omitempty"`
+	TriggerStatus string `json:"trigger_status,omitempty"`
+	TriggerResult string `json:"trigger_result,omitempty"`
+}
+
+// WorkflowLoopHardCap records the deterministic human-decision stop before a
+// worker-selecting state would exceed the configured hard cap.
+type WorkflowLoopHardCap struct {
+	Workflow         string `json:"workflow"`
+	BlockedState     string `json:"blocked_target_state"`
+	CurrentCount     int    `json:"current_count"`
+	ProspectiveCount int    `json:"prospective_count"`
+	Soft             int    `json:"soft"`
+	Hard             int    `json:"hard"`
+	PreviousState    string `json:"previous_state,omitempty"`
+	TriggerStatus    string `json:"trigger_status,omitempty"`
+	TriggerResult    string `json:"trigger_result,omitempty"`
+	Reason           string `json:"reason"`
 }
 
 // FollowupSource identifies where a recorded follow-up was proposed.
@@ -416,6 +450,15 @@ type reportIgnoredPayload struct {
 	AttemptID string   `json:"attempt_id,omitempty"`
 	Reason    string   `json:"reason"`
 	Errors    []string `json:"errors,omitempty"`
+}
+
+type workflowLoopSoftCapPayload struct {
+	Cap WorkflowLoopSoftCap `json:"cap"`
+}
+
+type workflowLoopHardCapPayload struct {
+	Cap   WorkflowLoopHardCap `json:"cap"`
+	State string              `json:"state"`
 }
 
 // StatusMaterializationError means durable event/artifact state committed, but status.json was not refreshed.

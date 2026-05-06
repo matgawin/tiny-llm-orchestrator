@@ -180,8 +180,8 @@ exists, including an empty directory.
 
 The `workflow_state_entry` field is present when the status update is an
 accepted workflow transition into a terminal or human-handoff state. Terminal
-states are counted for auditability; loop cap enforcement is owned by later
-runtime policy.
+states are counted for auditability; loop cap enforcement applies only to
+worker-selecting transitions.
 
 `artifact.written` is written when the store persists a standalone artifact.
 Markdown report details accepted with `orc report` are the exception: their
@@ -246,6 +246,48 @@ state is recorded at run creation with count `1`. Later counts increment only
 when routing is accepted into durable run state: a selected worker state in
 `attempt.started`, or a terminal/human state in `status.updated`. Failed report
 validation and `report.ignored` events do not increment these counters.
+
+`workflow.loop_soft_cap` is written once per workflow state when a
+worker-selecting transition reaches prospective count `soft + 1`. The launcher
+still starts the worker.
+
+```json
+{
+  "cap": {
+    "workflow": "implementation",
+    "state": "code",
+    "count": 3,
+    "soft": 2,
+    "hard": 4,
+    "previous_state": "test",
+    "trigger_status": "done",
+    "trigger_result": "passed"
+  }
+}
+```
+
+`workflow.loop_hard_cap` is written instead of starting a worker when a
+worker-selecting transition would reach prospective count `hard + 1`. The
+target state's persisted count is not incremented by this event, and the run
+state is materialized as `blocked_for_human`.
+
+```json
+{
+  "state": "blocked_for_human",
+  "cap": {
+    "workflow": "implementation",
+    "blocked_target_state": "code",
+    "current_count": 4,
+    "prospective_count": 5,
+    "soft": 2,
+    "hard": 4,
+    "previous_state": "test",
+    "trigger_status": "done",
+    "trigger_result": "passed",
+    "reason": "loop_hard_cap_reached"
+  }
+}
+```
 
 Retry starts derive supersession from `consume_attempt_id` plus `retry_lineage`.
 
@@ -435,7 +477,9 @@ workflow/report layers own the allowed-state policy.
 - Process warnings are materialized in `warnings`.
 - Workflow loop state is materialized in `workflow_loop`. `counts` stores the
   latest count per workflow state, `entries` preserves the accepted run path,
-  and `repeated_states` lists states whose count has reached at least `2`.
+  `repeated_states` lists states whose count has reached at least `2`,
+  `soft_cap_warnings` stores advisory threshold hits, and `hard_cap_block`
+  stores the active hard-cap human-decision stop when present.
 
 The history entry below is abbreviated; entries use the same attempt object
 shape as `active_attempt`.
