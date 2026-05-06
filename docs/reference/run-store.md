@@ -503,6 +503,11 @@ their paths, singleton behavior, and event references. See
 [../features/run-start.md](../features/run-start.md#task-snapshot-schema) for
 the task snapshot schema.
 
+Final handoff summaries are repeatable `summary` artifacts. Their artifact
+references in `status.json` are the durable record that human-review summaries
+exist. State-guarded artifact writes check the run state while holding the run
+lock; `record-summary` uses that to require `ready_for_human` at commit time.
+
 VCS pre-run and post-run summaries are ordinary `snapshot` artifacts named
 `vcs-pre-run` and `vcs-post-run`, for example
 `snapshots/000004-vcs-pre-run.json`. The VCS inspector owns their JSON schema;

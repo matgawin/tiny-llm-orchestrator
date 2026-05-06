@@ -1973,6 +1973,45 @@ func TestWriteArtifactPersistsSupportedArtifactsAndLoadsRefs(t *testing.T) {
 	}
 }
 
+func TestWriteArtifactIfStateRequiresMatchingState(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "state-guarded-artifact")
+	summary := Artifact{
+		Kind:    KindSummary,
+		Name:    "orchestrator",
+		Content: []byte("Summary\n"),
+	}
+
+	_, err := store.WriteArtifactIfState(run.ID, readyForHumanState, summary)
+	requireErrorContains(t, err, "state is", stateRunning)
+	var stateErr *StateMismatchError
+	if !errors.As(err, &stateErr) {
+		t.Fatalf("error = %T %[1]v, want StateMismatchError", err)
+	}
+	if stateErr.RunID != run.ID || stateErr.Got != stateRunning || stateErr.Want != readyForHumanState {
+		t.Fatalf("state mismatch = %+v, want run/state precondition details", stateErr)
+	}
+
+	loaded, loadErr := store.Load(run.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if len(loaded.Status.Artifacts) != 0 {
+		t.Fatalf("artifacts = %+v, want none after rejected state-guarded write", loaded.Status.Artifacts)
+	}
+
+	if _, _, err := store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
+		t.Fatalf("UpdateStatus returned error: %v", err)
+	}
+	ref, err := store.WriteArtifactIfState(run.ID, readyForHumanState, summary)
+	if err != nil {
+		t.Fatalf("WriteArtifactIfState returned error: %v", err)
+	}
+	if ref.Kind != KindSummary {
+		t.Fatalf("artifact kind = %q, want %q", ref.Kind, KindSummary)
+	}
+}
+
 func TestReadArtifactReadsRecordedArtifact(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "read-artifact")

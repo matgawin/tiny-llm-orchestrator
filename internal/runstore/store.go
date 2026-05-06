@@ -450,6 +450,23 @@ func (s *Store) UpdateStatus(runID string, update StatusUpdate) (Status, Event, 
 
 // WriteArtifact persists an artifact under the run directory and records it in the event log.
 func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, error) {
+	return s.writeArtifact(runID, artifact, nil)
+}
+
+// WriteArtifactIfState persists an artifact only while the run is in the expected state.
+func (s *Store) WriteArtifactIfState(runID, expectedState string, artifact Artifact) (ArtifactRef, error) {
+	if expectedState == "" {
+		return ArtifactRef{}, errors.New("expected state is required")
+	}
+	return s.writeArtifact(runID, artifact, func(run *Run) error {
+		if run.Status.State != expectedState {
+			return &StateMismatchError{RunID: run.ID, Got: run.Status.State, Want: expectedState}
+		}
+		return nil
+	})
+}
+
+func (s *Store) writeArtifact(runID string, artifact Artifact, validate func(*Run) error) (ArtifactRef, error) {
 	if err := validateRunID(runID); err != nil {
 		return ArtifactRef{}, err
 	}
@@ -458,6 +475,11 @@ func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, err
 		run, err := s.load(runID)
 		if err != nil {
 			return err
+		}
+		if validate != nil {
+			if err := validate(run); err != nil {
+				return err
+			}
 		}
 		sequence := nextEventSequence(run)
 		relPath, err := artifactPath(artifact.Kind, artifact.Name, sequence)

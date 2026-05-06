@@ -26,15 +26,15 @@
     '';
     orc = pkgs.buildGoModule {
       pname = "orc";
-      version = "0.1.0";
+      version = "1.0.0";
       src = ./.;
-      vendorHash = null;
+      vendorHash = "sha256-/jAJ1jeLiRsFxfflj8sqD85rluauepXODoEeGK4l8FQ=";
       subPackages = ["cmd/orc"];
 
       ldflags = [
         "-s"
         "-w"
-        "-X tiny-llm-orchestrator/orc/internal/cli.version=0.1.0"
+        "-X tiny-llm-orchestrator/orc/internal/cli.version=1.0.0"
       ];
     };
   in {

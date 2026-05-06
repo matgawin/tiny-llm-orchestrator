@@ -63,6 +63,20 @@ func (err *ReportTargetError) Unwrap() error {
 	return err.Err
 }
 
+// StateMismatchError reports a locked run state that did not satisfy a write precondition.
+type StateMismatchError struct {
+	RunID string
+	Got   string
+	Want  string
+}
+
+func (err *StateMismatchError) Error() string {
+	if err == nil {
+		return "run state did not match expected state"
+	}
+	return fmt.Sprintf("run %q state is %q, want %q", err.RunID, err.Got, err.Want)
+}
+
 // CreateRunRequest describes the durable run identity to create.
 type CreateRunRequest struct {
 	RunID    string

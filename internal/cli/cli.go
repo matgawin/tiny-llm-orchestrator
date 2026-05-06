@@ -15,6 +15,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runinspect"
 	"tiny-llm-orchestrator/orc/internal/runstart"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/runsummary"
 )
 
 const (
@@ -241,6 +242,8 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return executeRunInspect("status", args[1:], stdout, stderr, runinspect.Status)
 	case "next":
 		return executeRunInspect("next", args[1:], stdout, stderr, runinspect.Next)
+	case "record-summary":
+		return executeRunRecordSummary(args[1:], stdout, stderr)
 	case "summary-context":
 		return executeRunInspect("summary-context", args[1:], stdout, stderr, runinspect.SummaryContext)
 	default:
@@ -252,6 +255,55 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		}
 		return fmt.Errorf("unknown run command: %s", args[0])
 	}
+}
+
+func executeRunRecordSummary(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return runRecordSummaryFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	if args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand {
+		return printRunRecordSummaryHelp(stdout)
+	}
+	runID := args[0]
+	if runID == "" {
+		return runRecordSummaryFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	var file string
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--file":
+			if !assignFlagValue(args, &i, &file) {
+				return runRecordSummaryFlagError(stderr, fmt.Errorf("%s requires a value", arg))
+			}
+		case "-h", helpFlag, helpCommand:
+			return printRunRecordSummaryHelp(stdout)
+		default:
+			return runRecordSummaryFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
+		}
+	}
+	if strings.TrimSpace(file) == "" {
+		return runRecordSummaryFlagError(stderr, fmt.Errorf("--file is required"))
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	result, err := runsummary.Record(context.Background(), runsummary.Options{
+		Root:  root,
+		RunID: runID,
+		File:  file,
+	})
+	if err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s run record-summary: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "recorded final summary for run %s at %s\n", result.RunID, result.SummaryRef.Path); err != nil {
+		return err
+	}
+	return nil
 }
 
 func executeRunAddFollowup(args []string, stdout, stderr io.Writer) error {
@@ -434,6 +486,16 @@ func runAddFollowupFlagError(stderr io.Writer, err error) error {
 	return err
 }
 
+func runRecordSummaryFlagError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s run record-summary: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	if helpErr := printRunRecordSummaryHelp(stderr); helpErr != nil {
+		return helpErr
+	}
+	return err
+}
+
 func printHelp(w io.Writer) error {
 	_, err := fmt.Fprintf(w, `%s is the Tiny LLM Orchestrator control plane.
 
@@ -480,12 +542,27 @@ Usage:
 Available Commands:
   add-followup     Record out-of-scope follow-up work
   next             Inspect the next workflow action without launching it
+  record-summary   Record a final ready-for-review summary
   start            Start a run from explicit task context
   status           Show persisted run state
   summary-context  Render persisted review context
 
 Flags:
   -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printRunRecordSummaryHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run record-summary records a final ready-for-review summary for a ready run.
+
+Usage:
+  %s run record-summary <run-id> --file <path>
+
+Flags:
+      --file <path>  Markdown summary file to copy into the run store
+  -h, --help         Show command help
 `, appName, appName)
 
 	return err

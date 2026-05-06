@@ -360,14 +360,8 @@ func TestExecuteRunAddFollowupRequiresTitle(t *testing.T) {
 func TestExecuteRunAddFollowupOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	beadsDir := filepath.Join(root, "..", ".beads")
-	beadID := "main-readable"
-	path := fakeCLIBDPath(t, beadID, beadsDir, true)
-	t.Setenv("PATH", path)
-	t.Setenv("BEADS_DIR", beadsDir)
-	result := executeCLIRunStart(t, root, []string{"--bead", beadID}, nil)
+	result := startCLIBeadBackedRunThenBlockBD(t, root)
 
-	t.Setenv("PATH", fakeCLIBDPath(t, beadID, beadsDir, false))
 	output := executeCLICommand(t, []string{
 		"run", "add-followup", result.runID,
 		"--title", "Create bead manually",
@@ -380,6 +374,24 @@ func TestExecuteRunAddFollowupOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 		"Source: orchestrator",
 		"Human should decide whether to create a bead.",
 	})
+}
+
+func TestRunRecordSummaryOnBeadBackedRunDoesNotCallBD(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := startCLIBeadBackedRunThenBlockBD(t, root)
+	if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: "ready_for_human"}); err != nil {
+		t.Fatalf("UpdateStatus returned error: %v", err)
+	}
+	summaryPath := filepath.Join(root, "final-summary.md")
+	writeCLIFile(t, summaryPath, "# Final Summary\n\nSuggested bead note for the human.\n")
+
+	output := executeCLICommand(t, []string{"run", "record-summary", result.runID, "--file", summaryPath})
+	assertCLIOutputContainsAll(t, output, []string{"recorded final summary for run " + result.runID, "summaries/"})
+	_, content := latestCLIArtifactContent(t, root, result.runID, runstore.KindSummary)
+	if !strings.Contains(content, "Suggested bead note for the human.") {
+		t.Fatalf("summary content = %q, want bead note suggestion preserved", content)
+	}
 }
 
 func TestExecuteWorkerHelp(t *testing.T) {
@@ -661,6 +673,67 @@ func TestWorkerLaunchNextRoutesImplementationWorkflowReportsEndToEnd(t *testing.
 	attemptsBeforeApprovalTerminal := len(loadCLIRun(t, run.root, run.runID).Status.Attempts)
 	launchCLIWorkerReport(t, run.runID, approved("Review approved."))
 	terminalizeCLIWorkflow(t, run.root, run.runID, "ready_for_human", attemptsBeforeApprovalTerminal+1, "Review approved.")
+}
+
+func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) {
+	run := startCLIImplementationReportRun(t)
+	launchCLIWorkerReport(t, run.runID, ready("Plan is ready."))
+	launchCLIWorkerReport(t, run.runID, ready("Code is ready for tests."))
+	launchCLIWorkerReport(t, run.runID, passed("Tests passed."))
+	attemptsBeforeApprovalTerminal := len(loadCLIRun(t, run.root, run.runID).Status.Attempts)
+	launchCLIWorkerReport(t, run.runID, approved("Review approved."))
+	terminalizeCLIWorkflow(t, run.root, run.runID, "ready_for_human", attemptsBeforeApprovalTerminal+1, "Review approved.")
+
+	summaryPath := filepath.Join(run.root, "final-summary.md")
+	writeCLIFile(t, summaryPath, "# Final Summary\n\nChanges, tests, risks, follow-ups, VCS summary, and review checklist.\n")
+	recordOutput := executeCLICommand(t, []string{"run", "record-summary", run.runID, "--file", summaryPath})
+	assertCLIOutputContainsAll(t, recordOutput, []string{"recorded final summary", "summaries/"})
+
+	summaryRef, summaryContent := latestCLIArtifactContent(t, run.root, run.runID, runstore.KindSummary)
+	if !strings.Contains(summaryContent, "review checklist") {
+		t.Fatalf("summary content = %q, want copied final handoff content", summaryContent)
+	}
+	statusOutput := executeCLICommand(t, []string{"run", "status", run.runID})
+	assertCLIOutputContainsAll(t, statusOutput, []string{"state: ready_for_human", "summary: " + summaryRef.Path})
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"worker", "launch-next", run.runID}, &stdout, &stderr); err == nil {
+		t.Fatal("Execute returned nil error, want terminal no-launch error after summary")
+	}
+	afterLaunch := loadCLIRun(t, run.root, run.runID)
+	if got := len(afterLaunch.Status.Attempts); got != attemptsBeforeApprovalTerminal+1 {
+		t.Fatalf("attempt history len = %d, want no worker launch after summary", got)
+	}
+}
+
+func TestRunRecordSummaryRejectsNotReadyRuns(t *testing.T) {
+	for _, state := range []string{"running", "blocked_for_human", "cancelled"} {
+		t.Run(state, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			if state != "running" {
+				if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: state}); err != nil {
+					t.Fatalf("UpdateStatus returned error: %v", err)
+				}
+			}
+			summaryPath := filepath.Join(root, "final-summary.md")
+			writeCLIFile(t, summaryPath, "# Final Summary\n")
+
+			var stdout, stderr bytes.Buffer
+			err := Execute([]string{"run", "record-summary", result.runID, "--file", summaryPath}, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want rejection")
+			}
+			assertCLIOutputContainsAll(t, stderr.String(), []string{`want "ready_for_human"`, "use summary-context"})
+			loaded := loadCLIRun(t, root, result.runID)
+			for _, ref := range loaded.Status.Artifacts {
+				if ref.Kind == runstore.KindSummary {
+					t.Fatalf("summary ref = %+v, want none after rejection", ref)
+				}
+			}
+		})
+	}
 }
 
 func TestWorkerLaunchNextRoutesImplementationBlockedReportsToHuman(t *testing.T) {
@@ -1917,10 +1990,10 @@ if [ "$1" = "show" ] && [ "$2" = %q ] && [ "$3" = "--json" ]; then
 fi
 printf 'unexpected bd args: %%s %%s %%s\n' "$1" "$2" "$3" >&2
 exit 2
-`, beadsDir, beadID, beadID)
+	`, beadsDir, beadID, beadID)
 	} else {
 		script = `#!/bin/sh
-printf 'bd must not be called during follow-up recording\n' >&2
+printf 'bd must not be called after run start\n' >&2
 exit 9
 `
 	}
@@ -1971,6 +2044,17 @@ func executeCLIRunStart(t *testing.T, root string, sourceArgs []string, stdin *s
 		runID:    runID,
 		snapshot: readCLISnapshot(t, root, runID),
 	}
+}
+
+func startCLIBeadBackedRunThenBlockBD(t *testing.T, root string) cliRunStartResult {
+	t.Helper()
+	beadsDir := filepath.Join(root, "..", ".beads")
+	beadID := "main-readable"
+	t.Setenv("PATH", fakeCLIBDPath(t, beadID, beadsDir, true))
+	t.Setenv("BEADS_DIR", beadsDir)
+	result := executeCLIRunStart(t, root, []string{"--bead", beadID}, nil)
+	t.Setenv("PATH", fakeCLIBDPath(t, beadID, beadsDir, false))
+	return result
 }
 
 func executeCLICommand(t *testing.T, args []string) string {
@@ -2044,6 +2128,38 @@ func readCLIFile(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return content
+}
+
+func latestCLIArtifactRef(t *testing.T, run *runstore.Run, kind runstore.ArtifactKind) runstore.ArtifactRef {
+	t.Helper()
+	var ref runstore.ArtifactRef
+	for _, candidate := range run.Status.Artifacts {
+		if candidate.Kind != kind {
+			continue
+		}
+		if ref.Path == "" || candidate.EventSequence > ref.EventSequence {
+			ref = candidate
+		}
+	}
+	if ref.Path == "" {
+		t.Fatalf("run %s has no %s artifact", run.ID, kind)
+	}
+	return ref
+}
+
+func latestCLIArtifactContent(t *testing.T, root, runID string, kind runstore.ArtifactKind) (runstore.ArtifactRef, string) {
+	t.Helper()
+	store := openCLIStore(t, root)
+	run, err := store.Load(runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	ref := latestCLIArtifactRef(t, run, kind)
+	content, err := store.ReadArtifact(runID, ref)
+	if err != nil {
+		t.Fatalf("ReadArtifact returned error: %v", err)
+	}
+	return ref, string(content)
 }
 
 func readCLILaunchLogs(t *testing.T, root, runID string) string {

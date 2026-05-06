@@ -18,6 +18,7 @@ follow-up handling, or VCS summary rendering.
 ## Related Docs
 
 - [run-inspection.md](run-inspection.md)
+- [final-summary-recording.md](final-summary-recording.md)
 - [follow-up-recording.md](follow-up-recording.md)
 - [run-start.md](run-start.md)
 - [../reference/run-store.md](../reference/run-store.md)
@@ -30,6 +31,10 @@ orc run summary-context <run-id>
 ```
 
 Unknown run ids fail with a clear not-found error.
+
+Use `summary-context` to gather the persisted inputs for a final handoff. Use
+[`orc run record-summary`](final-summary-recording.md) to persist that handoff
+for `ready_for_human` runs.
 
 ## Read-Only Behavior
 
