@@ -38,10 +38,11 @@ and handoff risk.
 
 1. Read the task context, prior reports, changed paths, and verification output.
 2. Inspect the actual diff or changed files.
-3. Prioritize concrete bugs, behavioral regressions, missing tests, stale docs,
+3. Run `task check` to run all of the required checks.
+4. Prioritize concrete bugs, behavioral regressions, missing tests, stale docs,
    and contract drift.
-4. Distinguish blocking findings from non-blocking follow-up suggestions.
-5. Report exact files, commands reviewed, risks, and requested changes.
+5. Distinguish blocking findings from non-blocking follow-up suggestions.
+6. Report exact files, commands reviewed, risks, and requested changes.
 
 ## Boundaries
 

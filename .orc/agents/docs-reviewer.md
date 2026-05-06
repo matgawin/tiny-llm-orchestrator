@@ -49,6 +49,7 @@ and the task's change.
 - Do not request docs for tiny internal refactors with no durable surface.
 - Do not duplicate canonical docs into multiple places.
 - Do not edit files.
+- Do not run tests.
 
 ## Report Rubric
 

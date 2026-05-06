@@ -48,6 +48,7 @@ or abstractions that add surface area without reducing complexity.
 - Do not request consolidation when local repetition makes the workflow clearer.
 - Do not edit files.
 - Do not turn a narrow review into a broad architecture critique.
+- Do not run tests.
 
 ## Report Rubric
 

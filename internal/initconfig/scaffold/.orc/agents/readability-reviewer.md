@@ -49,6 +49,7 @@ maintainable by a future contributor.
 - Do not request churn for personal taste.
 - Do not require new abstractions unless they remove real complexity.
 - Do not edit files.
+- Do not run tests.
 
 ## Report Rubric
 
