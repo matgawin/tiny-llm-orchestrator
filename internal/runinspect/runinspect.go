@@ -24,10 +24,10 @@ import (
 )
 
 const (
-	notAvailable         = "not available"
-	none                 = "none"
-	pendingWorkerOutcome = "pending_worker_outcome"
+	notAvailable = "not available"
+	none         = "none"
 
+	outcomeReasonLimit  = 400
 	summaryExcerptLimit = 4000
 )
 
@@ -44,7 +44,7 @@ func Status(_ context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	renderStatus(inspection.stdout, inspection.run, inspection.decision)
+	renderStatus(inspection.stdout, inspection.workflow, inspection.run, inspection.decision)
 	return nil
 }
 
@@ -151,20 +151,14 @@ func loadProjectRun(opts Options) (config.Workflow, *runstore.Store, *runstore.R
 }
 
 func evaluate(workflowConfig config.Workflow, run *runstore.Run) (workflow.Decision, error) {
-	if _, ok := runstore.PendingLauncherOutcome(run.Status); ok {
-		return workflow.Decision{Kind: workflow.DecisionTerminal, RunStatus: pendingWorkerOutcome}, nil
-	}
 	decision, err := workflow.Evaluate(workflowConfig, runstate.WorkflowState(run.Status))
 	if err != nil {
 		return workflow.Decision{}, fmt.Errorf("evaluate run %q: %w", run.ID, err)
 	}
-	if _, ok := runstore.LatestReportedOutcome(run.Status); ok && decision.Kind == workflow.DecisionRetryStep {
-		return workflow.Decision{Kind: workflow.DecisionTerminal, RunStatus: pendingWorkerOutcome}, nil
-	}
 	return decision, nil
 }
 
-func renderStatus(w io.Writer, run *runstore.Run, decision workflow.Decision) {
+func renderStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
 	printRunHeader(w, run, decision)
 	_, _ = fmt.Fprintf(w, "workflow: %s\n", run.Status.Workflow)
 	_, _ = fmt.Fprintf(w, "created_at: %s\n", formatTime(run.Status.CreatedAt))
@@ -173,6 +167,7 @@ func renderStatus(w io.Writer, run *runstore.Run, decision workflow.Decision) {
 	_, _ = fmt.Fprintf(w, "selected_step: %s\n", selectedStep(decision))
 	_, _ = fmt.Fprintf(w, "active_attempt: %s\n", activeAttemptValue(run.Status.ActiveAttempt))
 	_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", terminalReason(decision))
+	printDecisionOutcomeDetails(w, workflowConfig, run, decision)
 	reports := reportPaths(run.Status.Artifacts)
 	printReportPaths(w, reports)
 	printArtifacts(w, run.Status.Artifacts)
@@ -184,9 +179,11 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 	_, _ = fmt.Fprintf(w, "decision: %s\n", decision.Kind)
 	switch decision.Kind {
 	case workflow.DecisionSelectStep:
-		step := workflowConfig.Steps[decision.Step]
-		_, _ = fmt.Fprintf(w, "selected_step: %s\n", decision.Step)
-		_, _ = fmt.Fprintf(w, "agent: %s\n", step.Agent)
+		printSelectedStep(w, workflowConfig, decision.Step)
+		_, _ = fmt.Fprintln(w, "launch: not launched")
+	case workflow.DecisionRetryStep:
+		printSelectedStep(w, workflowConfig, decision.Step)
+		printDecisionOutcomeDetails(w, workflowConfig, run, decision)
 		_, _ = fmt.Fprintln(w, "launch: not launched")
 	case workflow.DecisionWaitActiveAttempt:
 		_, _ = fmt.Fprintf(w, "active_attempt: %s\n", activeAttemptValue(run.Status.ActiveAttempt))
@@ -197,11 +194,18 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 		_, _ = fmt.Fprintln(w, "launch: already active")
 	case workflow.DecisionTerminal:
 		_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", terminalReason(decision))
+		printDecisionOutcomeDetails(w, workflowConfig, run, decision)
 		_, _ = fmt.Fprintln(w, "launch: no worker should launch")
 		reports := reportPaths(run.Status.Artifacts)
 		printReportPaths(w, reports)
 		printTerminalHumanState(w, run, decision, reports)
 	}
+}
+
+func printSelectedStep(w io.Writer, workflowConfig config.Workflow, stepID string) {
+	step := workflowConfig.Steps[stepID]
+	_, _ = fmt.Fprintf(w, "selected_step: %s\n", stepID)
+	_, _ = fmt.Fprintf(w, "agent: %s\n", step.Agent)
 }
 
 func renderSummaryContext(ctx context.Context, inspection inspection) error {
@@ -400,7 +404,7 @@ func effectiveRunState(run *runstore.Run, decision workflow.Decision) string {
 }
 
 func selectedStep(decision workflow.Decision) string {
-	if decision.Kind == workflow.DecisionSelectStep {
+	if decision.Kind == workflow.DecisionSelectStep || decision.Kind == workflow.DecisionRetryStep {
 		return decision.Step
 	}
 	return none
@@ -411,6 +415,74 @@ func terminalReason(decision workflow.Decision) string {
 		return none
 	}
 	return decision.RunStatus
+}
+
+func latestConsumableOutcome(run *runstore.Run) (runstore.Attempt, bool) {
+	if run == nil {
+		return runstore.Attempt{}, false
+	}
+	return runstore.LatestConsumableOutcome(run.Status)
+}
+
+func printDecisionOutcomeDetails(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
+	switch decision.Kind {
+	case workflow.DecisionRetryStep:
+		printRetryDecision(w, workflowConfig, run, decision)
+	case workflow.DecisionTerminal:
+		printTerminalOutcome(w, workflowConfig, run, decision)
+	}
+}
+
+func printRetryDecision(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
+	outcome, hasOutcome := latestConsumableOutcome(run)
+	if !hasOutcome {
+		return
+	}
+	pair := outcomePair(outcome)
+	_, _ = fmt.Fprintf(w, "retrying_after: %s\n", pair)
+	_, _ = fmt.Fprintf(w, "retry_count: %s\n", retryCountText(workflowConfig, pair, decision.Retry.Counts[pair]))
+	_, _ = fmt.Fprintf(w, "retry_source_attempt: %s\n", outcome.AttemptID)
+}
+
+func printTerminalOutcome(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
+	outcome, hasOutcome := latestConsumableOutcome(run)
+	if !hasOutcome {
+		return
+	}
+	pair := outcomePair(outcome)
+	_, _ = fmt.Fprintf(w, "last_outcome: %s\n", pair)
+	_, _ = fmt.Fprintf(w, "last_attempt: %s\n", outcome.AttemptID)
+	if reason, ok := invalidReportReason(outcome); ok {
+		_, _ = fmt.Fprintf(w, "invalid_report_reason: %s\n", reason)
+	}
+	if outcome.Status == "failed" {
+		_, _ = fmt.Fprintf(w, "retry_exhausted: %s\n", pair)
+		_, _ = fmt.Fprintf(w, "retry_count: %s\n", retryCountText(workflowConfig, pair, retryCountConsumedByRun(run, outcome, pair)))
+	}
+	_, _ = fmt.Fprintf(w, "transition: %s -> %s\n", pair, decision.RunStatus)
+}
+
+func outcomePair(outcome runstore.Attempt) string {
+	return outcome.Status + "/" + outcome.Result
+}
+
+func retryCountConsumedByRun(run *runstore.Run, outcome runstore.Attempt, pair string) int {
+	if run.Status.RetryLineage != nil && run.Status.RetryLineage.StepID == outcome.StepID {
+		return run.Status.RetryLineage.Counts[pair]
+	}
+	return 0
+}
+
+func invalidReportReason(attempt runstore.Attempt) (string, bool) {
+	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Report == nil || attempt.Report.Summary == "" {
+		return "", false
+	}
+	reason := strings.NewReplacer("\r", " ", "\n", " ").Replace(excerptText(attempt.Report.Summary, outcomeReasonLimit))
+	return strings.TrimSpace(reason), true
+}
+
+func retryCountText(workflowConfig config.Workflow, pair string, consumed int) string {
+	return fmt.Sprintf("%d/%d", consumed, workflowConfig.Defaults.Retries[pair])
 }
 
 func printReportPaths(w io.Writer, reports []string) {

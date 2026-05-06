@@ -119,7 +119,7 @@ Latest-state changes are recorded as `status.updated` events and then materializ
 Callers may append custom events with non-reserved event types. Reserved event
 types are `run.created`, `status.updated`, `artifact.written`,
 `attempt.started`, `attempt.prompted`, `attempt.logged`, `attempt.process_started`,
-`attempt.finished`, `attempt.recovered`, `attempt.reported`, and
+`attempt.finished`, `attempt.recovered`, `attempt.reported`, `attempt.warning`, and
 `report.ignored`; those are written only through the dedicated store APIs.
 
 For caller events, callers provide:
@@ -192,6 +192,31 @@ continues.
 }
 ```
 
+When `attempt.started` consumes a previously terminal outcome, routing fields
+are added beside the `attempt` object:
+
+- `consume_attempt_id`: required when a start consumes the latest terminal
+  outcome, so routing cannot be skipped.
+- `retry_lineage`: retry-only metadata with updated retry counts for the
+  replacement attempt's step execution lineage.
+- `supersede_reason`: retry-only `status/result` text stored on the consumed
+  attempt when retry lineage is present.
+
+```json
+{
+  "consume_attempt_id": "20260504T120000Z-plan-a1b2c3",
+  "retry_lineage": {
+    "step_id": "plan",
+    "counts": {
+      "failed/missing_report": 1
+    }
+  },
+  "supersede_reason": "failed/missing_report"
+}
+```
+
+Retry starts derive supersession from `consume_attempt_id` plus `retry_lineage`.
+
 `attempt.prompted` links the rendered prompt artifact to the current attempt.
 The link is one-time and only valid while the current attempt is `starting`.
 
@@ -249,6 +274,24 @@ launcher restart, or an expired active attempt whose process identity is still
 live. V1 records unverifiable attempts as `failed/process_error` with
 `exit_state=unknown`. Expired live attempts are recorded as `failed/timeout`
 with `state=timed_out` and `exit_state=timeout`.
+
+`attempt.warning` records process facts that do not change the authoritative
+attempt outcome. The launcher uses warning events when a valid reported attempt
+is followed by a nonzero worker exit or when a still-running worker is
+terminated after `report_exit_grace`.
+
+```json
+{
+  "warning": {
+    "attempt_id": "20260504T120000Z-plan-a1b2c3",
+    "kind": "post_report_process_exit",
+    "exit_code": 1,
+    "exit_state": "exited",
+    "message": "worker exited nonzero after valid report; report remains authoritative",
+    "time": "2026-05-04T12:00:05Z"
+  }
+}
+```
 
 `attempt.reported` terminalizes the run's current `active_attempt` with a
 structured worker report accepted through `orc report`. The attempt must already
@@ -329,7 +372,8 @@ Store-written status files contain:
   "updated_at": "2026-05-02T14:30:22Z",
   "last_sequence": 1,
   "artifacts": [],
-  "attempts": []
+  "attempts": [],
+  "warnings": []
 }
 ```
 
@@ -337,11 +381,17 @@ In v1, `state` is caller-validated. The store requires status updates and
 `status.updated` event payloads to provide a non-empty state string, but
 workflow/report layers own the allowed-state policy.
 
-When a worker attempt is starting or active, `status.json` includes
-`active_attempt` and an `attempts` history. Terminal attempts remain in
-`attempts`; terminalizing an attempt removes `active_attempt`. The history
-entry below is abbreviated; entries use the same attempt object shape as
-`active_attempt`.
+`status.json` materializes current attempt state and attempt history:
+
+- Starting or active workers appear in `active_attempt` and `attempts`.
+- Terminal attempts remain in `attempts`; terminalizing an attempt removes
+  `active_attempt`.
+- Retry launches materialize the `attempt.started` routing metadata on latest
+  status.
+- Process warnings are materialized in `warnings`.
+
+The history entry below is abbreviated; entries use the same attempt object
+shape as `active_attempt`.
 
 ```json
 {
@@ -381,7 +431,13 @@ entry below is abbreviated; entries use the same attempt object shape as
       },
       "started_at": "2026-05-04T12:00:00Z"
     }
-  ]
+  ],
+  "retry_lineage": {
+    "step_id": "plan",
+    "counts": {
+      "failed/missing_report": 1
+    }
+  }
 }
 ```
 
@@ -398,7 +454,8 @@ Report persistence also materializes:
 - `reported`
 - `invalid_report`
 
-Later retry slices may add superseded states.
+Retries do not replace terminal attempt states with a `superseded` state; see
+the `attempt.started` contract above for retry routing metadata.
 
 ## Artifacts
 
@@ -574,9 +631,10 @@ append-then-status ordering: it commits the report artifact before appending
 - `AppendEvent`, `UpdateStatus`, `WriteArtifact`, `StartAttempt`,
   `StartAttemptContext`, `RecordAttemptPrompt`, `RecordAttemptLog`,
   `RecordAttemptProcess`, `RecordAttemptProcessContext`, `FinishAttempt`,
-  `RecoverAttempt`, `RecordAttemptReport`, and `RecordIgnoredReport` take a
-  run-level lock, append their event, then refresh `status.json`, except for the
-  report-content commit-order case described above.
+  `RecoverAttempt`, `RecordAttemptReport`, `RecordAttemptWarning`, and
+  `RecordIgnoredReport` take a run-level lock, append their event, then refresh
+  `status.json`, except for the report-content commit-order case described
+  above.
 - `Load`, `ReadArtifact`, and `OpenArtifactAppend` also take the run-level lock.
   For legacy runs that predate `.lock`, these APIs create the missing lock file
   as metadata-only backfill before replaying state, reading artifact content, or
@@ -604,8 +662,9 @@ append-then-status ordering: it commits the report artifact before appending
   `process_error`.
 - Retrying attempt writes is not idempotent unless the caller first reloads and
   observes the current active attempt or terminal attempt history.
-- Replay rejects `attempt.started` while a pending launcher-synthesized outcome
-  remains unconsumed.
+- `attempt.started` lifecycle preconditions are replay-validated. Replay rejects
+  starts that skip or mismatch a latest consumable outcome, or whose routing
+  metadata does not match the `attempt.started` contract above.
 
 ## Log Append API
 

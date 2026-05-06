@@ -18,6 +18,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
@@ -65,7 +66,7 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	}
 }
 
-func TestLaunchNextRefusesManualRelaunchAfterSynthesizedFailure(t *testing.T) {
+func TestLaunchNextRoutesExhaustedSynthesizedFailureToBlocked(t *testing.T) {
 	root, runID := createLauncherRun(t, "200ms")
 	first, err := LaunchNext(context.Background(), Options{
 		Root:    root,
@@ -77,21 +78,84 @@ func TestLaunchNextRefusesManualRelaunchAfterSynthesizedFailure(t *testing.T) {
 		t.Fatalf("first LaunchNext returned error: %v", err)
 	}
 
+	assertLaunchNextBlocksWithoutRelaunch(t, root, runID, first.Attempt.AttemptID, 1)
+}
+
+func TestLaunchNextRoutesExhaustedTimeoutToBlocked(t *testing.T) {
+	root, runID := createLauncherRun(t, "20ms")
+	first, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "sleep 1"},
+		Time:    fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("first LaunchNext returned error: %v", err)
+	}
+	if first.Attempt.State != runstore.AttemptStateTimedOut || first.Attempt.Result != resultTimeout {
+		t.Fatalf("first attempt = %+v, want failed/timeout", first.Attempt)
+	}
+
+	assertLaunchNextBlocksWithoutRelaunch(t, root, runID, first.Attempt.AttemptID, 1)
+}
+
+func TestLaunchNextRetriesThenExhaustsSynthesizedFailure(t *testing.T) {
+	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{
+		TaskContext: true,
+		Retries:     map[string]int{"failed/missing_report": 1},
+	})
+	first, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat"},
+		Time:    fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("first LaunchNext returned error: %v", err)
+	}
 	second, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
 		Command: []string{"sh", "-c", "cat"},
-		Time:    fixedLauncherTime().Add(time.Minute),
+		Time:    fixedLauncherTime().Add(time.Second),
 	})
-	if err == nil || !strings.Contains(err.Error(), "pending worker outcome") {
-		t.Fatalf("second LaunchNext error = %v, want pending worker outcome refusal", err)
+	if err != nil {
+		t.Fatalf("retry LaunchNext returned error: %v", err)
 	}
-	if second.Attempt.AttemptID != first.Attempt.AttemptID {
-		t.Fatalf("second attempt = %+v, want original attempt %q", second.Attempt, first.Attempt.AttemptID)
+	assertRetryLaunch(t, root, runID, first.Attempt.AttemptID, second.Attempt, "failed/missing_report", 1)
+
+	loaded := assertLaunchNextBlocksWithoutRelaunch(t, root, runID, second.Attempt.AttemptID, 2)
+	if loaded.Status.RetryLineage == nil || loaded.Status.RetryLineage.Counts["failed/missing_report"] != 1 {
+		t.Fatalf("terminal retry lineage = %+v, want exhausted count preserved", loaded.Status.RetryLineage)
 	}
-	loaded := loadLauncherRun(t, root, runID)
-	if got := len(loaded.Status.Attempts); got != 1 {
-		t.Fatalf("attempt history len = %d, want no relaunch", got)
+}
+
+func TestLaunchNextRetriesSynthesizedProcessError(t *testing.T) {
+	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{
+		TaskContext: true,
+		Retries:     map[string]int{"failed/process_error": 1},
+	})
+	first, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null; exit 7"},
+		Time:    fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("first LaunchNext returned error: %v", err)
+	}
+	second, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Time:    fixedLauncherTime().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("retry LaunchNext returned error: %v", err)
+	}
+	assertRetryLaunch(t, root, runID, first.Attempt.AttemptID, second.Attempt, "failed/process_error", 1)
+	if first.Attempt.Result != runstore.AttemptResultProcessError {
+		t.Fatalf("first result = %q, want process_error", first.Attempt.Result)
 	}
 }
 
@@ -150,6 +214,45 @@ func TestWorkerRunnerUsesTerminalReportInsteadOfSynthesizedFinish(t *testing.T) 
 	}
 }
 
+func TestRunProcessTerminatesWorkerAfterReportExitGrace(t *testing.T) {
+	result := runProcessWithScheduledReadyReport(t, scheduledReadyReportProcess{
+		AttemptID: "reported-grace",
+		Timeout:   "5s",
+		Command:   []string{"sh", "-c", "cat >/dev/null; sleep 5"},
+	})
+	assertLauncherWarning(t, result.Run, result.Attempt.AttemptID, warningKindPostReportGraceTerminated)
+}
+
+func TestRunProcessReportExitGraceOutlivesOriginalWorkflowTimeout(t *testing.T) {
+	result := runProcessWithScheduledReadyReport(t, scheduledReadyReportProcess{
+		AttemptID:       "reported-near-timeout",
+		Timeout:         "200ms",
+		ReportExitGrace: "250ms",
+		ReportDelay:     120 * time.Millisecond,
+		Command:         []string{"sh", "-c", "cat >/dev/null; sleep 5"},
+	})
+	if result.Elapsed < 300*time.Millisecond {
+		t.Fatalf("elapsed = %s, want report-exit grace to outlive original workflow timeout", result.Elapsed)
+	}
+	assertLauncherWarning(t, result.Run, result.Attempt.AttemptID, warningKindPostReportGraceTerminated)
+}
+
+func TestRunProcessRecordsWarningForNonzeroExitAfterReport(t *testing.T) {
+	result := runProcessWithScheduledReadyReport(t, scheduledReadyReportProcess{
+		AttemptID:       "reported-nonzero",
+		Timeout:         "5s",
+		ReportExitGrace: "1s",
+		Command:         []string{"sh", "-c", "cat >/dev/null; sleep 0.05; exit 7"},
+	})
+	warning := assertLauncherWarning(t, result.Run, result.Attempt.AttemptID, warningKindPostReportProcessExit)
+	if warning.ExitCode == nil || *warning.ExitCode != 7 {
+		t.Fatalf("warning exit_code = %+v, want 7", warning.ExitCode)
+	}
+	if !warning.Time.After(result.Attempt.StartedAt) {
+		t.Fatalf("warning time = %s, want after attempt start %s", warning.Time, result.Attempt.StartedAt)
+	}
+}
+
 func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{TaskContext: true, TwoStep: true})
 	store := openLauncherStore(t, root)
@@ -190,7 +293,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	}
 }
 
-func TestLaunchNextParksReportedRetryStepOutcome(t *testing.T) {
+func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{TaskContext: true, Retries: map[string]int{"done/ready": 1}})
 	store := openLauncherStore(t, root)
 	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-retry", "plan", "planner")
@@ -210,15 +313,16 @@ func TestLaunchNextParksReportedRetryStepOutcome(t *testing.T) {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 
-	_, err := LaunchNext(context.Background(), Options{
+	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
 		Command: []string{"sh", "-c", "cat >/dev/null"},
 		Time:    fixedLauncherTime().Add(2 * time.Second),
 	})
-	if err == nil || !strings.Contains(err.Error(), "pending worker outcome done/ready") {
-		t.Fatalf("LaunchNext error = %v, want pending reported retry outcome", err)
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
 	}
+	assertRetryLaunch(t, root, runID, attempt.AttemptID, result.Attempt, "done/ready", 1)
 }
 
 func TestRunProcessZeroExitNonReaderWithLargePromptRecordsMissingReport(t *testing.T) {
@@ -1035,9 +1139,10 @@ func createLauncherRunWithoutTask(t *testing.T, timeout string) (string, string)
 }
 
 type launcherRunOptions struct {
-	TaskContext bool
-	TwoStep     bool
-	Retries     map[string]int
+	TaskContext     bool
+	TwoStep         bool
+	Retries         map[string]int
+	ReportExitGrace string
 }
 
 func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRunOptions) (string, string) {
@@ -1068,10 +1173,14 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 
 func writeLauncherProject(t *testing.T, root, timeout string, opts launcherRunOptions) {
 	t.Helper()
+	reportExitGrace := opts.ReportExitGrace
+	if reportExitGrace == "" {
+		reportExitGrace = "30ms"
+	}
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
 		MarkdownFallback: true,
 		Timeout:          timeout,
-		ReportExitGrace:  "30ms",
+		ReportExitGrace:  reportExitGrace,
 		FailedResults:    []string{"missing_report", "process_error", "timeout"},
 		TwoStep:          opts.TwoStep,
 		Retries:          opts.Retries,
@@ -1094,22 +1203,7 @@ func linkLauncherPromptAndLog(t *testing.T, store *runstore.Store, runID, attemp
 
 func linkLauncherPromptAndLogNamed(t *testing.T, store *runstore.Store, runID, attemptID, name string) {
 	t.Helper()
-	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
-		Kind:    runstore.KindPrompt,
-		Name:    name,
-		Content: []byte("prompt\n"),
-		Time:    fixedLauncherTime(),
-	})
-	if err != nil {
-		t.Fatalf("WriteArtifact prompt returned error: %v", err)
-	}
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
-		AttemptID: attemptID,
-		PromptRef: promptRef,
-		Time:      fixedLauncherTime(),
-	}); err != nil {
-		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
-	}
+	_ = recordLauncherPromptNamed(t, store, runID, attemptID, name)
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    name,
@@ -1126,6 +1220,33 @@ func linkLauncherPromptAndLogNamed(t *testing.T, store *runstore.Store, runID, a
 	}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
+}
+
+func recordLauncherPrompt(t *testing.T, store *runstore.Store, runID, attemptID string) []byte {
+	t.Helper()
+	return recordLauncherPromptNamed(t, store, runID, attemptID, "plan-"+attemptID)
+}
+
+func recordLauncherPromptNamed(t *testing.T, store *runstore.Store, runID, attemptID, name string) []byte {
+	t.Helper()
+	prompt := []byte("prompt\n")
+	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindPrompt,
+		Name:    name,
+		Content: prompt,
+		Time:    fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact prompt returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+		AttemptID: attemptID,
+		PromptRef: promptRef,
+		Time:      fixedLauncherTime(),
+	}); err != nil {
+		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
+	}
+	return prompt
 }
 
 func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runcontext.Context, runstore.Attempt) {
@@ -1150,6 +1271,154 @@ func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runc
 		t.Fatalf("Load returned error: %v", err)
 	}
 	return loaded, attempt
+}
+
+type scheduledReadyReportProcess struct {
+	AttemptID       string
+	Timeout         string
+	ReportExitGrace string
+	ReportDelay     time.Duration
+	Command         []string
+}
+
+type scheduledReadyReportProcessResult struct {
+	Attempt runstore.Attempt
+	Run     *runstore.Run
+	Elapsed time.Duration
+}
+
+func runProcessWithScheduledReadyReport(t *testing.T, scenario scheduledReadyReportProcess) scheduledReadyReportProcessResult {
+	t.Helper()
+	opts := launcherRunOptions{TaskContext: true, ReportExitGrace: scenario.ReportExitGrace}
+	root, runID := createLauncherRunWithOptions(t, scenario.Timeout, opts)
+	loaded, attempt := prepareRunProcessAttempt(t, root, runID, scenario.AttemptID)
+	prompt := recordLauncherPrompt(t, loaded.Store, runID, attempt.AttemptID)
+	waitForReport := scheduleReadyReportWhenActiveAfter(t, loaded.Store, runID, attempt.AttemptID, scenario.ReportDelay)
+
+	started := time.Now()
+	result, _, _, err := runProcess(context.Background(), loaded, Options{
+		Root:    root,
+		RunID:   runID,
+		Command: scenario.Command,
+		Time:    fixedLauncherTime(),
+	}, attempt, prompt, fixedLauncherTime())
+	elapsed := time.Since(started)
+	waitForReport()
+	if err != nil {
+		t.Fatalf("runProcess returned error: %v", err)
+	}
+	if result.State != runstore.AttemptStateReported || result.Status != "done" || result.Result != "ready" {
+		t.Fatalf("attempt = %+v, want valid report authoritative", result)
+	}
+	return scheduledReadyReportProcessResult{
+		Attempt: result,
+		Run:     loadLauncherRun(t, root, runID),
+		Elapsed: elapsed,
+	}
+}
+
+func scheduleReadyReportWhenActiveAfter(t *testing.T, store *runstore.Store, runID, attemptID string, delay time.Duration) func() {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			run, err := store.Load(runID)
+			if err != nil {
+				done <- err
+				return
+			}
+			if run.Status.ActiveAttempt != nil && run.Status.ActiveAttempt.AttemptID == attemptID && run.Status.ActiveAttempt.State == runstore.AttemptStateActive {
+				if delay > 0 {
+					time.Sleep(delay)
+				}
+				err := recordReadyLauncherReport(store, run, attemptID)
+				done <- err
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		done <- errors.New("attempt did not become active")
+	}()
+	return func() {
+		t.Helper()
+		if err := <-done; err != nil {
+			t.Fatalf("scheduled report failed: %v", err)
+		}
+	}
+}
+
+func recordReadyLauncherReport(store *runstore.Store, run *runstore.Run, attemptID string) error {
+	_, _, err := store.RecordAttemptReport(run.ID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateReported,
+		Report: runstore.Report{
+			RunID:     run.ID,
+			StepID:    run.Status.ActiveAttempt.StepID,
+			AgentID:   run.Status.ActiveAttempt.AgentID,
+			AttemptID: attemptID,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Reported while process is running.",
+		},
+		Time: fixedLauncherTime().Add(time.Second),
+	})
+	return err
+}
+
+func assertLauncherWarning(t *testing.T, run *runstore.Run, attemptID, kind string) runstore.AttemptWarning {
+	t.Helper()
+	for _, warning := range run.Status.Warnings {
+		if warning.AttemptID == attemptID && warning.Kind == kind {
+			return warning
+		}
+	}
+	t.Fatalf("warnings = %+v, want %s for attempt %s", run.Status.Warnings, kind, attemptID)
+	return runstore.AttemptWarning{}
+}
+
+func assertLaunchNextBlocksWithoutRelaunch(t *testing.T, root, runID, attemptID string, expectedAttempts int) *runstore.Run {
+	t.Helper()
+	wantState := workflow.RunStatusBlockedForHuman
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat"},
+		Time:    fixedLauncherTime().Add(time.Minute),
+	})
+	if err == nil || !strings.Contains(err.Error(), "transitioned to "+wantState) {
+		t.Fatalf("LaunchNext error = %v, want blocked transition", err)
+	}
+	if result.Attempt.AttemptID != attemptID {
+		t.Fatalf("attempt = %+v, want original attempt %q", result.Attempt, attemptID)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if loaded.Status.State != wantState {
+		t.Fatalf("run state = %q, want %s", loaded.Status.State, wantState)
+	}
+	if got := len(loaded.Status.Attempts); got != expectedAttempts {
+		t.Fatalf("attempt history len = %d, want no relaunch from %d attempts", got, expectedAttempts)
+	}
+	return loaded
+}
+
+func assertRetryLaunch(t *testing.T, root, runID, previousAttemptID string, retryAttempt runstore.Attempt, pair string, count int) {
+	t.Helper()
+	if retryAttempt.AttemptID == "" || retryAttempt.AttemptID == previousAttemptID {
+		t.Fatalf("retry attempt id = %q, want new attempt distinct from %q", retryAttempt.AttemptID, previousAttemptID)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if got := len(loaded.Status.Attempts); got != 2 {
+		t.Fatalf("attempt history len = %d, want retry attempt", got)
+	}
+	if loaded.Status.Attempts[0].AttemptID != previousAttemptID {
+		t.Fatalf("first attempt id = %q, want %q", loaded.Status.Attempts[0].AttemptID, previousAttemptID)
+	}
+	if loaded.Status.Attempts[0].SupersededBy != retryAttempt.AttemptID {
+		t.Fatalf("first attempt superseded_by = %q, want %q", loaded.Status.Attempts[0].SupersededBy, retryAttempt.AttemptID)
+	}
+	if loaded.Status.RetryLineage == nil || loaded.Status.RetryLineage.Counts[pair] != count {
+		t.Fatalf("retry lineage = %+v, want %s count %d", loaded.Status.RetryLineage, pair, count)
+	}
 }
 
 func recordProcessForLauncherTest(t *testing.T, store *runstore.Store, runID, attemptID string) {

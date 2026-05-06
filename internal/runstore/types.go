@@ -22,6 +22,7 @@ const (
 	eventAttemptFinished  = "attempt.finished"
 	eventAttemptRecovered = "attempt.recovered"
 	eventAttemptReported  = "attempt.reported"
+	eventAttemptWarning   = "attempt.warning"
 	eventReportIgnored    = "report.ignored"
 
 	KindTaskContext  ArtifactKind = "task_context"
@@ -80,16 +81,18 @@ type Run struct {
 
 // Status is the materialized latest state stored in status.json.
 type Status struct {
-	SchemaVersion int           `json:"schema_version"`
-	RunID         string        `json:"run_id"`
-	Workflow      string        `json:"workflow"`
-	State         string        `json:"state"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
-	LastSequence  int           `json:"last_sequence"`
-	Artifacts     []ArtifactRef `json:"artifacts"`
-	ActiveAttempt *Attempt      `json:"active_attempt,omitempty"`
-	Attempts      []Attempt     `json:"attempts"`
+	SchemaVersion int              `json:"schema_version"`
+	RunID         string           `json:"run_id"`
+	Workflow      string           `json:"workflow"`
+	State         string           `json:"state"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
+	LastSequence  int              `json:"last_sequence"`
+	Artifacts     []ArtifactRef    `json:"artifacts"`
+	ActiveAttempt *Attempt         `json:"active_attempt,omitempty"`
+	Attempts      []Attempt        `json:"attempts"`
+	RetryLineage  *RetryLineage    `json:"retry_lineage,omitempty"`
+	Warnings      []AttemptWarning `json:"warnings"`
 }
 
 // StatusUpdate describes latest-state fields to materialize with an event.
@@ -149,6 +152,9 @@ type Attempt struct {
 	StartedAt        time.Time    `json:"started_at"`
 	FinishedAt       *time.Time   `json:"finished_at,omitempty"`
 	Recovered        bool         `json:"recovered,omitempty"`
+	SupersededBy     string       `json:"superseded_by,omitempty"`
+	SupersededAt     *time.Time   `json:"superseded_at,omitempty"`
+	SupersededReason string       `json:"superseded_reason,omitempty"`
 }
 
 const (
@@ -191,6 +197,23 @@ type Followup struct {
 	Details string `json:"details,omitempty"`
 }
 
+// RetryLineage records retry counts consumed in the current step execution lineage.
+type RetryLineage struct {
+	StepID string         `json:"step_id"`
+	Counts map[string]int `json:"counts,omitempty"`
+}
+
+// AttemptWarning records a process fact that does not change the authoritative
+// terminal outcome of a worker attempt.
+type AttemptWarning struct {
+	AttemptID string    `json:"attempt_id"`
+	Kind      string    `json:"kind"`
+	ExitCode  *int      `json:"exit_code,omitempty"`
+	ExitState string    `json:"exit_state,omitempty"`
+	Message   string    `json:"message,omitempty"`
+	Time      time.Time `json:"time"`
+}
+
 // FollowupSource identifies where a recorded follow-up was proposed.
 type FollowupSource string
 
@@ -230,6 +253,12 @@ type StartAttemptRequest struct {
 	Timeout         time.Duration
 	ReportExitGrace time.Duration
 	Time            time.Time
+	// ConsumeAttemptID records the latest terminal attempt ID this start consumes.
+	ConsumeAttemptID string
+	// RetryLineage records updated retry counts when the consumed outcome is retried.
+	RetryLineage *RetryLineage
+	// SupersedeReason records the consumed status/result pair that triggered the retry.
+	SupersedeReason string
 }
 
 // AttemptPromptRequest links the rendered prompt artifact to the active attempt.
@@ -288,7 +317,10 @@ type IgnoreReportRequest struct {
 }
 
 type attemptStartedPayload struct {
-	Attempt Attempt `json:"attempt"`
+	Attempt          Attempt       `json:"attempt"`
+	ConsumeAttemptID string        `json:"consume_attempt_id,omitempty"`
+	RetryLineage     *RetryLineage `json:"retry_lineage,omitempty"`
+	SupersedeReason  string        `json:"supersede_reason,omitempty"`
 }
 
 type attemptPromptedPayload struct {
@@ -322,6 +354,10 @@ type attemptReportedPayload struct {
 	State        string        `json:"state"`
 	Report       Report        `json:"report"`
 	FollowupRefs []ArtifactRef `json:"followup_refs,omitempty"`
+}
+
+type attemptWarningPayload struct {
+	Warning AttemptWarning `json:"warning"`
 }
 
 type reportIgnoredPayload struct {

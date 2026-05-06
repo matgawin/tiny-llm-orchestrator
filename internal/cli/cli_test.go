@@ -573,11 +573,19 @@ func TestWorkerLaunchNextRoutesValidReportWithoutPendingOutcome(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute returned nil error, want terminal no-launch error")
 	}
-	if strings.Contains(stderr.String(), "pending worker outcome") {
-		t.Fatalf("stderr = %q, want routed terminal decision not pending outcome", stderr.String())
+	stderrText := stderr.String()
+	if strings.Contains(stderrText, "pending worker outcome") {
+		t.Fatalf("stderr = %q, want routed terminal decision not legacy pending outcome", stderrText)
 	}
-	if !strings.Contains(stderr.String(), "decision is terminal") {
-		t.Fatalf("stderr = %q, want terminal decision", stderr.String())
+	if !strings.Contains(stderrText, "transitioned to ready_for_human") {
+		t.Fatalf("stderr = %q, want terminal transition", stderrText)
+	}
+	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if loaded.Status.State != "ready_for_human" {
+		t.Fatalf("run state = %q, want ready_for_human", loaded.Status.State)
 	}
 }
 

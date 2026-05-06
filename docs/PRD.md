@@ -52,7 +52,12 @@ The Go CLI owns deterministic behavior:
 - `blocked_for_human` run-state handling
 - ready-for-human-review terminal state
 
-Worker agents are treated as useful but unreliable executors. A worker succeeds only when it provides a valid structured report. In the current worker-launching slice, if a worker exits without reporting or times out, the CLI records a synthesized outcome and parks it for later report/retry routing. The workflow's deterministic retry or `blocked_for_human` policy is applied by follow-on report-routing work.
+Worker agents are treated as useful but unreliable executors. A worker succeeds
+only when it provides a valid structured report.
+
+Failed or invalid worker outcomes are recorded durably and routed through the
+workflow's deterministic retry or `blocked_for_human` policy. Exact launcher
+mechanics live in [worker-launching.md](features/worker-launching.md).
 
 Beads remains the preferred external issue tracker when available. The CLI may read bead context, but v1 does not write bead notes or close beads. If beads is unavailable or a run is started without a bead, the CLI uses explicit local Markdown task context. Task closure remains a manual human action after review.
 
@@ -83,9 +88,7 @@ The design therefore treats each worker as an external process that must produce
 ## Target V1 Scope
 
 Target V1 should implement the smallest useful orchestrator loop. The current
-implementation is landing this surface incrementally; for example, the current
-worker-launching slice records synthesized no-report outcomes, while retry
-routing remains follow-on target V1 work after `orc report`.
+implementation is landing this surface incrementally.
 
 - `orc init`
 - `orc run start --workflow implementation --bead <id>`
@@ -277,32 +280,20 @@ Worker report statuses are distinct from run statuses.
 
 V1 workflows are sequential. Exactly one worker step may be active for a run at a time.
 
-The workflow engine is the only authority for selecting the next step. `orc worker launch-next <run-id>` launches the currently selected runnable step. A debug command may allow launching a named step, but it must refuse to launch a step that is not currently selected unless an explicit force flag is provided.
+The workflow engine is the only authority for selecting the next step.
+Launchers must follow the workflow-selected runnable step; debug commands that
+name a step must refuse non-selected steps unless an explicit force flag is
+provided.
 
-## Current v1 Launcher Slice
-
-The current implemented worker-launching slice creates a structured attempt id,
-renders a worker prompt, supervises the worker process group, streams logs, and
-records launcher-synthesized failed outcomes when no valid report exists yet:
-
-- `failed/missing_report`
-- `failed/process_error`
-- `failed/timeout`
-
-The launcher does not yet consume retry policy or launch replacement attempts
-from those synthesized outcomes. It parks the terminal outcome so follow-on
-report/routing work can apply retry accounting deterministically. The
-operational attempt contract lives in
-[worker-launching.md](features/worker-launching.md), and the durable event/status
-shape lives in [run-store.md](reference/run-store.md).
+Detailed launcher behavior is specified in
+[worker-launching.md](features/worker-launching.md). The durable event/status
+contract is specified in [run-store.md](reference/run-store.md).
 
 ## Report Model
 
 `orc report` is the report-authority model for worker-to-orchestrator
 communication. Only the current `active_attempt` in attempt state `active` can
-receive a valid report.
-Future retry routing creates replacement attempts and records retry lineage
-without allowing workers to choose the next step directly.
+receive a valid report. Workers do not choose the next step directly.
 
 `orc report` accepts structured fields from flags or `--json-file` and
 validates them before updating run state. `--json-file` cannot be combined with
@@ -395,18 +386,11 @@ Target report authority:
   `reported` as soon as `orc report` persists it.
 - The persisted valid report is authoritative for workflow routing immediately;
   launchers and inspection consume it from run state.
-- Post-report nonzero-exit warnings and `report_exit_grace` termination are
-  owned by the later synthesized-failure/post-report process slice; that slice
-  preserves the valid report as the routing outcome while recording process
+- Post-report nonzero-exit warnings and `report_exit_grace` termination
+  preserve the valid report as the routing outcome while recording process
   warnings separately.
-- No-report outcomes, invalid reports, timeouts, and process errors feed retry
-  policy in the report-routing slice.
-
-Target retry policy is keyed by reported or synthesized `(status, result)` pairs
-and scoped to a step execution lineage. The relevant pair's count increments
-when the same step is retried. Counts reset when the workflow applies an `on:`
-transition and later enters the step through normal routing, even when that
-transition targets the same step.
+- Outcome routing and retry mechanics are specified in
+  [worker-launching.md](features/worker-launching.md).
 
 ## Task Context Model
 
@@ -467,11 +451,6 @@ and Markdown-backed runs.
 - V1 runs are sequential. Exactly one worker may be active for a run at a time.
 - Workers are launched with `orc worker launch-next <run-id>` so the CLI, not the orchestrator, selects the runnable step.
 - Each worker launch creates an attempt id that reports must include; the attempt is `starting` until process metadata is recorded.
-- A valid worker report terminalizes the active attempt immediately when `orc report` persists it; post-report process grace handling is deferred.
-- If a worker exits without a valid report, the launcher records a synthesized failed outcome; retry application is deferred to report-routing work.
-- If a worker exceeds its configured timeout without a valid report, the launcher terminates it and records a synthesized failed timeout outcome; retry application is deferred to report-routing work.
-- Retry counters are keyed by `status/result`, scoped to a step execution lineage, and reset whenever the workflow applies an `on:` transition, even when that transition targets the same step.
-- If retries are exhausted, the run enters `blocked_for_human` unless the workflow routes the exhausted outcome elsewhere.
 - If tests require network or approval, the worker reports blocked and the run stops.
 - Direct filesystem report persistence is the v1 transport.
 - A localhost HTTP report server is deferred until direct reports are proven insufficient.
@@ -516,7 +495,7 @@ and Markdown-backed runs.
 
 - **Name**: Worker Launcher
 - **Responsibility**: Start Codex CLI worker processes.
-- **Interface**: Current v1 public surface is `orc worker launch-next <run-id>`. It launches only the workflow-selected next step, creates an attempt id, renders the prompt, records prompt/log/process metadata, supervises the worker process group, and records launcher-synthesized terminal outcomes. Sandbox flags, additional readable-directory flags, and retry outcome routing are future report/routing surfaces rather than current launcher inputs.
+- **Interface**: Current v1 public surface is `orc worker launch-next <run-id>`. It launches workers for runnable `select_step` and `retry_step` decisions and records worker attempt process state. Sandbox flags and additional readable-directory flags are future launcher inputs.
 - **Tested**: targeted integration coverage if practical
 
 - **Name**: Report Command

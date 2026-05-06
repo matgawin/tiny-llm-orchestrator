@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,9 @@ const (
 	exitStateStartFailed      = "start_failed"
 	exitStateTimeout          = "timeout"
 	exitStateExited           = "exited"
+
+	warningKindPostReportGraceTerminated = "post_report_grace_terminated"
+	warningKindPostReportProcessExit     = "post_report_process_exit"
 
 	execHelperEnv = "ORC_LAUNCHER_EXEC_HELPER"
 	execHelperArg = "__orc-launcher-exec-helper"
@@ -98,16 +102,11 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	if attempt, ok := runstore.PendingLauncherOutcome(loaded.Run.Status); ok {
-		return Result{RunID: opts.RunID, Attempt: attempt}, fmt.Errorf("run %q has pending worker outcome %s/%s for attempt %q; no launchable worker until report routing handles it", opts.RunID, attempt.Status, attempt.Result, attempt.AttemptID)
-	}
+	latestOutcome, hasOutcome := runstore.LatestConsumableOutcome(loaded.Run.Status)
 	state := runstate.WorkflowState(loaded.Run.Status)
 	decision, err := workflow.Evaluate(loaded.Workflow, state)
 	if err != nil {
 		return Result{}, fmt.Errorf("evaluate run %q: %w", opts.RunID, err)
-	}
-	if decision.Kind == workflow.DecisionRetryStep {
-		return Result{}, fmt.Errorf("run %q has pending worker outcome %s/%s for reported attempt; retry routing has not handled it yet", opts.RunID, state.Outcome.Status, state.Outcome.Result)
 	}
 	if decision.Kind == workflow.DecisionWaitActiveAttempt {
 		result, err := recoverOrRefuseActiveAttempt(loaded.Store, loaded.Run)
@@ -116,7 +115,16 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		}
 		return result, err
 	}
-	if decision.Kind != workflow.DecisionSelectStep {
+	if decision.Kind == workflow.DecisionTerminal && hasOutcome && loaded.Run.Status.State == workflow.RunStatusRunning {
+		if _, _, err := loaded.Store.UpdateStatus(opts.RunID, runstore.StatusUpdate{
+			State: decision.RunStatus,
+			Time:  normalizeTime(opts.Time),
+		}); err != nil {
+			return Result{}, err
+		}
+		return Result{RunID: opts.RunID, Attempt: latestOutcome}, fmt.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
+	}
+	if decision.Kind != workflow.DecisionSelectStep && decision.Kind != workflow.DecisionRetryStep {
 		return Result{}, fmt.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
 	}
 	step := loaded.Workflow.Steps[decision.Step]
@@ -128,13 +136,17 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
 	attempt, _, err := loaded.Store.StartAttemptContext(ctx, opts.RunID, runstore.StartAttemptRequest{
-		StepID:          decision.Step,
-		AgentID:         step.Agent,
-		AttemptID:       attemptID,
-		Timeout:         loaded.Workflow.Defaults.Timeout.Duration,
-		ReportExitGrace: loaded.Workflow.Defaults.ReportExitGrace.Duration,
-		Time:            at,
+		StepID:           decision.Step,
+		AgentID:          step.Agent,
+		AttemptID:        attemptID,
+		Timeout:          loaded.Workflow.Defaults.Timeout.Duration,
+		ReportExitGrace:  loaded.Workflow.Defaults.ReportExitGrace.Duration,
+		Time:             at,
+		ConsumeAttemptID: routing.consumeAttemptID,
+		RetryLineage:     routing.retryLineage,
+		SupersedeReason:  routing.supersedeReason,
 	})
 	if err != nil {
 		return Result{}, err
@@ -215,6 +227,28 @@ func isContextError(err error) bool {
 
 func loadLaunchContext(root, runID string) (runcontext.Context, error) {
 	return runcontext.Load(root, runID)
+}
+
+type startRouting struct {
+	consumeAttemptID string
+	retryLineage     *runstore.RetryLineage
+	supersedeReason  string
+}
+
+func startRoutingForDecision(decision workflow.Decision, attempt runstore.Attempt, ok bool) startRouting {
+	if !ok {
+		return startRouting{}
+	}
+	routing := startRouting{consumeAttemptID: attempt.AttemptID}
+	if decision.Kind != workflow.DecisionRetryStep {
+		return routing
+	}
+	routing.retryLineage = &runstore.RetryLineage{
+		StepID: decision.Retry.Step,
+		Counts: maps.Clone(decision.Retry.Counts),
+	}
+	routing.supersedeReason = attempt.Status + "/" + attempt.Result
+	return routing
 }
 
 func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt []byte, at time.Time) (runstore.Attempt, runstore.ArtifactRef, bool, error) {
@@ -363,7 +397,7 @@ func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
 		closeErr := r.stdin.Close()
 		promptWriteDone <- errors.Join(err, closeErr)
 	}()
-	waitResult := waitWithTimeout(r.ctx, r.loaded.Workflow.Defaults.Timeout.Duration, r.cmd)
+	waitResult := r.waitWithTimeoutAndReport()
 	promptWriteErr := <-promptWriteDone
 	if promptWriteErr != nil && waitResult.err != nil {
 		_, _ = r.logFile.WriteString(promptWriteErr.Error() + "\n")
@@ -372,7 +406,7 @@ func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
 	if terminal, ok, err := r.reportTerminalAttemptAfterWait(); err != nil {
 		return terminal, errors.Join(logErr, err)
 	} else if ok {
-		return terminal, logErr
+		return terminal, errors.Join(logErr, r.recordPostReportWarning(terminal, waitResult))
 	}
 	finished, finishErr := r.finishWaitOutcome(waitResult)
 	var ctxErr error
@@ -382,18 +416,50 @@ func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
 	return finished, errors.Join(logErr, finishErr, ctxErr)
 }
 
-func (r *workerRunner) reportTerminalAttemptAfterWait() (runstore.Attempt, bool, error) {
-	run, err := r.loaded.Store.Load(r.loaded.Run.ID)
-	if err != nil {
-		return runstore.Attempt{}, false, err
-	}
-	for i := len(run.Status.Attempts) - 1; i >= 0; i-- {
-		attempt := run.Status.Attempts[i]
-		if attempt.AttemptID == r.attempt.AttemptID && (attempt.State == runstore.AttemptStateReported || attempt.State == runstore.AttemptStateInvalidReport) {
-			return attempt, true, nil
+func (r *workerRunner) recordPostReportWarning(attempt runstore.Attempt, waitResult waitResult) error {
+	warningTime := normalizeTime(waitResult.warningTime)
+	switch {
+	case waitResult.postReportGraceExceeded:
+		return r.recordAttemptWarning(attempt, warningKindPostReportGraceTerminated, nil, "report_exit_grace_exceeded", "worker was terminated after valid report and report-exit grace", warningTime)
+	case waitResult.err != nil && waitResult.ctxErr == nil && !waitResult.workflowTimeout:
+		var exitErr *exec.ExitError
+		if !errors.As(waitResult.err, &exitErr) {
+			return nil
 		}
+		code := exitErr.ExitCode()
+		return r.recordAttemptWarning(attempt, warningKindPostReportProcessExit, &code, exitStateExited, "worker exited nonzero after valid report; report remains authoritative", warningTime)
+	default:
+		return nil
 	}
-	return runstore.Attempt{}, false, nil
+}
+
+func (r *workerRunner) recordAttemptWarning(attempt runstore.Attempt, kind string, exitCode *int, exitState, message string, at time.Time) error {
+	_, _, err := r.loaded.Store.RecordAttemptWarning(r.loaded.Run.ID, runstore.AttemptWarning{
+		AttemptID: attempt.AttemptID,
+		Kind:      kind,
+		ExitCode:  exitCode,
+		ExitState: exitState,
+		Message:   message,
+		Time:      at,
+	})
+	return err
+}
+
+func (r *workerRunner) waitWithTimeoutAndReport() waitResult {
+	return waitForWorkerProcessWithReport(r.ctx, r.loaded.Workflow.Defaults.Timeout.Duration, r.loaded.Workflow.Defaults.ReportExitGrace.Duration, r.cmd, r.pollReportedAttemptIgnoringLoadError)
+}
+
+func (r *workerRunner) pollReportedAttemptIgnoringLoadError() bool {
+	_, ok, err := loadAttemptByID(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, func(attempt runstore.Attempt) bool {
+		return attempt.State == runstore.AttemptStateReported
+	})
+	return ok && err == nil
+}
+
+func (r *workerRunner) reportTerminalAttemptAfterWait() (runstore.Attempt, bool, error) {
+	return loadAttemptByID(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, func(attempt runstore.Attempt) bool {
+		return attempt.State == runstore.AttemptStateReported || attempt.State == runstore.AttemptStateInvalidReport
+	})
 }
 
 func (r *workerRunner) finishWaitOutcome(waitResult waitResult) (runstore.Attempt, error) {
@@ -588,9 +654,11 @@ func filteredExecEnv(env []string) []string {
 }
 
 type waitResult struct {
-	err             error
-	ctxErr          error
-	workflowTimeout bool
+	err                     error
+	ctxErr                  error
+	workflowTimeout         bool
+	postReportGraceExceeded bool
+	warningTime             time.Time
 }
 
 func outcomeFromWait(result waitResult) (string, string, *int, string) {
@@ -612,33 +680,61 @@ func outcomeFromWait(result waitResult) (string, string, *int, string) {
 	return runstore.AttemptStateProcessError, resultProcessError, nil, result.err.Error()
 }
 
-func waitWithTimeout(ctx context.Context, timeout time.Duration, cmd *exec.Cmd) waitResult {
+func waitForWorkerProcessWithReport(ctx context.Context, timeout, reportExitGrace time.Duration, cmd *exec.Cmd, reportPersisted func() bool) waitResult {
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
 	}()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case err := <-done:
-		terminateProcessGroup(cmd.Process.Pid)
-		return waitResult{err: err}
-	case <-timer.C:
-		terminateProcessGroup(cmd.Process.Pid)
-		err := <-done
-		if err != nil {
-			return waitResult{err: err, workflowTimeout: true}
+	workflowTimer := time.NewTimer(timeout)
+	defer workflowTimer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	var graceTimer *time.Timer
+	defer func() {
+		if graceTimer != nil {
+			graceTimer.Stop()
 		}
-		return waitResult{err: context.DeadlineExceeded, workflowTimeout: true}
-	case <-ctx.Done():
-		ctxErr := ctx.Err()
-		terminateProcessGroup(cmd.Process.Pid)
-		err := <-done
-		if err != nil {
-			return waitResult{err: err, ctxErr: ctxErr}
+	}()
+	var reportGraceDone <-chan time.Time
+	for {
+		select {
+		case err := <-done:
+			terminateProcessGroup(cmd.Process.Pid)
+			return waitResult{err: err, warningTime: time.Now().UTC()}
+		case <-workflowTimer.C:
+			return terminateAndCollectWaitResult(cmd.Process.Pid, done, waitResult{workflowTimeout: true}, context.DeadlineExceeded)
+		case <-reportGraceDone:
+			return terminateAndCollectWaitResult(cmd.Process.Pid, done, waitResult{postReportGraceExceeded: true, warningTime: time.Now().UTC()}, context.DeadlineExceeded)
+		case <-ticker.C:
+			if reportGraceDone == nil && reportPersisted != nil && reportPersisted() {
+				graceTimer, reportGraceDone = startReportExitGrace(workflowTimer, reportExitGrace)
+			}
+		case <-ctx.Done():
+			ctxErr := ctx.Err()
+			return terminateAndCollectWaitResult(cmd.Process.Pid, done, waitResult{ctxErr: ctxErr}, ctxErr)
 		}
-		return waitResult{err: ctxErr, ctxErr: ctxErr}
 	}
+}
+
+func startReportExitGrace(workflowTimer *time.Timer, grace time.Duration) (*time.Timer, <-chan time.Time) {
+	if !workflowTimer.Stop() {
+		select {
+		case <-workflowTimer.C:
+		default:
+		}
+	}
+	graceTimer := time.NewTimer(grace)
+	return graceTimer, graceTimer.C
+}
+
+func terminateAndCollectWaitResult(pid int, done <-chan error, result waitResult, fallback error) waitResult {
+	terminateProcessGroup(pid)
+	err := <-done
+	if err == nil {
+		err = fallback
+	}
+	result.err = err
+	return result
 }
 
 func terminateProcessGroup(pid int) {
@@ -707,6 +803,20 @@ func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runst
 		Time:      time.Now().UTC(),
 	})
 	return recovered, err
+}
+
+func loadAttemptByID(store *runstore.Store, runID, attemptID string, match func(runstore.Attempt) bool) (runstore.Attempt, bool, error) {
+	run, err := store.Load(runID)
+	if err != nil {
+		return runstore.Attempt{}, false, err
+	}
+	for i := len(run.Status.Attempts) - 1; i >= 0; i-- {
+		attempt := run.Status.Attempts[i]
+		if attempt.AttemptID == attemptID && (match == nil || match(attempt)) {
+			return attempt, true, nil
+		}
+	}
+	return runstore.Attempt{}, false, nil
 }
 
 func attemptStillStarting(attempt runstore.Attempt, now time.Time) bool {

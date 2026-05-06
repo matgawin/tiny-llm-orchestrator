@@ -45,19 +45,15 @@ parse, or sequence attempt ids.
 By default, prompt rendering only accepts the currently selected runnable step.
 The current implementation computes the selected step by evaluating the
 workflow from persisted run status. That means a newly started `running` run
-selects the workflow start step, while terminal states such as
-`ready_for_human` and `blocked_for_human` have no runnable step.
+selects the workflow start step, retry-routed runs select the `retry_step`, and
+terminal states such as `ready_for_human` and `blocked_for_human` have no
+runnable step.
 
 The worker launcher intentionally creates the starting attempt before rendering
 the prompt. Prompt rendering still checks the selected step from run status and
 caller-provided step metadata; it does not treat that newly starting attempt as
-a reason to refuse rendering. The attempt transitions to active only after
-process metadata is recorded.
-
-Prompt rendering evaluates valid reported outcomes when choosing the selected
-step, so a worker launched after a routed report receives the prompt for the
-next workflow-selected step. Retry lineage still belongs to the later retry
-routing slice. Active-attempt state is persisted by the worker launcher.
+	a reason to refuse rendering. The attempt transitions to active only after
+	process metadata is recorded.
 
 An internal unselected-step option may render a declared non-selected step in a
 running run for tests or a future debug caller. It does not override terminal

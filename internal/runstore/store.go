@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -166,6 +167,7 @@ func (s *Store) Create(req CreateRunRequest) (*Run, error) {
 		LastSequence:  event.Sequence,
 		Artifacts:     []ArtifactRef{},
 		Attempts:      []Attempt{},
+		Warnings:      []AttemptWarning{},
 	}
 	if err := writeStatus(filepath.Join(tempDir, statusName), status); err != nil {
 		return nil, fmt.Errorf("run %q status: %w", runID, err)
@@ -577,19 +579,26 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 		}) {
 			return fmt.Errorf("run %q already has attempt %q", runID, attempt.AttemptID)
 		}
-		if pending, ok := PendingLauncherOutcome(run.Status); ok {
-			return fmt.Errorf("run %q has pending worker outcome %s/%s for attempt %q", runID, pending.Status, pending.Result, pending.AttemptID)
+		routing := attemptStartRoutingFromFields(req.ConsumeAttemptID, req.RetryLineage, req.SupersedeReason)
+		if err := validateAttemptStartRouting(run.Status, routing); err != nil {
+			return fmt.Errorf("run %q %w", runID, err)
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		payload, err := marshalPayload(attemptStartedPayload{Attempt: attempt})
+		payload, err := marshalPayload(attemptStartedPayload{
+			Attempt:          attempt,
+			ConsumeAttemptID: routing.ConsumeAttemptID,
+			RetryLineage:     cloneRetryLineagePtr(routing.RetryLineage),
+			SupersedeReason:  routing.SupersedeReason,
+		})
 		if err != nil {
 			return err
 		}
 		event = Event{Time: req.Time, Type: eventAttemptStarted, Payload: payload}
 		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			attempt.StartedAt = event.Time
+			applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
 			status.ActiveAttempt = &attempt
 			status.Attempts = append(status.Attempts, attempt)
 			status.UpdatedAt = event.Time
@@ -682,6 +691,45 @@ func (s *Store) FinishAttemptContext(ctx context.Context, runID string, req Fini
 // RecoverAttempt terminalizes an unverifiable active attempt during launcher restart recovery.
 func (s *Store) RecoverAttempt(runID string, req FinishAttemptRequest) (Attempt, Event, error) {
 	return s.terminalizeAttempt(context.Background(), runID, req, eventAttemptRecovered, true)
+}
+
+// RecordAttemptWarning records a process warning without changing attempt outcome.
+func (s *Store) RecordAttemptWarning(runID string, warning AttemptWarning) (Status, Event, error) {
+	if err := validateRunID(runID); err != nil {
+		return Status{}, Event{}, err
+	}
+	warning.Time = normalizeTime(warning.Time)
+	payload, err := marshalPayload(attemptWarningPayload{Warning: warning})
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	event := Event{Time: warning.Time, Type: eventAttemptWarning, Payload: payload}
+	var status Status
+	err = s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		if err := validateAttemptWarning(run.Status, warning); err != nil {
+			return fmt.Errorf("run %q %w", runID, err)
+		}
+		var committedEvent Event
+		status, committedEvent, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			warning.Time = event.Time
+			status.Warnings = append(status.Warnings, warning)
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+		})
+		event = committedEvent
+		return err
+	})
+	if err != nil {
+		if statusBackedEventPossiblyCommitted(err) {
+			return status, event, err
+		}
+		return Status{}, Event{}, err
+	}
+	return status, event, nil
 }
 
 // RecordAttemptReport terminalizes the current active attempt with a structured worker report.
@@ -1420,33 +1468,33 @@ func currentOrLatestAttempt(status Status, attemptID string) Attempt {
 	return latestAttempt(status.Attempts, attemptID)
 }
 
-// PendingLauncherOutcome returns the latest launcher-synthesized terminal
-// attempt that has not yet been consumed by report/retry routing.
-func PendingLauncherOutcome(status Status) (Attempt, bool) {
+// LatestConsumableOutcome returns the latest terminal attempt that workflow
+// routing can consume.
+func LatestConsumableOutcome(status Status) (Attempt, bool) {
 	if status.State != stateRunning || status.ActiveAttempt != nil || len(status.Attempts) == 0 {
 		return Attempt{}, false
 	}
 	attempt := status.Attempts[len(status.Attempts)-1]
-	if !pendingLauncherAttemptOutcome(attempt) {
+	if !terminalRoutingOutcome(attempt) {
 		return Attempt{}, false
 	}
 	return attempt, true
 }
 
-// LatestReportedOutcome returns the latest valid worker-reported outcome that
-// report/routing callers can feed into the workflow engine.
-func LatestReportedOutcome(status Status) (Attempt, bool) {
-	if status.State != stateRunning || status.ActiveAttempt != nil || len(status.Attempts) == 0 {
-		return Attempt{}, false
+func unconsumedLauncherAttemptOutcome(attempt Attempt) bool {
+	if attempt.State == AttemptStateReported {
+		return false
 	}
-	attempt := status.Attempts[len(status.Attempts)-1]
-	if attempt.State != AttemptStateReported || attempt.Status == "" || attempt.Result == "" {
-		return Attempt{}, false
-	}
-	return attempt, true
+	return terminalRoutingOutcome(attempt)
 }
 
-func pendingLauncherAttemptOutcome(attempt Attempt) bool {
+func terminalRoutingOutcome(attempt Attempt) bool {
+	if attempt.SupersededBy != "" {
+		return false
+	}
+	if attempt.State == AttemptStateReported && attempt.Status != "" && attempt.Result != "" {
+		return true
+	}
 	if validTerminalAttemptOutcome(attempt.State, attempt.Status, attempt.Result) {
 		return true
 	}
@@ -1454,6 +1502,76 @@ func pendingLauncherAttemptOutcome(attempt Attempt) bool {
 		return attempt.Status == attemptStatusFailed && attempt.Result == AttemptResultInvalidReport
 	}
 	return false
+}
+
+func applyAttemptStartRouting(status *Status, at time.Time, newAttemptID string, routing attemptStartRouting) {
+	if routing.RetryLineage != nil {
+		supersededAt := at
+		for i := len(status.Attempts) - 1; i >= 0; i-- {
+			if status.Attempts[i].AttemptID == routing.ConsumeAttemptID {
+				status.Attempts[i].SupersededBy = newAttemptID
+				status.Attempts[i].SupersededAt = &supersededAt
+				status.Attempts[i].SupersededReason = routing.SupersedeReason
+				break
+			}
+		}
+	}
+	status.RetryLineage = cloneRetryLineagePtr(routing.RetryLineage)
+}
+
+func validateRetryLineage(retry RetryLineage) error {
+	if retry.StepID == "" {
+		return errors.New("retry lineage step_id is required")
+	}
+	for pair, count := range retry.Counts {
+		if pair == "" {
+			return errors.New("retry lineage pair is required")
+		}
+		if count < 0 {
+			return fmt.Errorf("retry count for %q must be >= 0, got %d", pair, count)
+		}
+	}
+	return nil
+}
+
+type attemptStartRouting struct {
+	ConsumeAttemptID string
+	RetryLineage     *RetryLineage
+	SupersedeReason  string
+}
+
+func attemptStartRoutingFromFields(consumeAttemptID string, retryLineage *RetryLineage, supersedeReason string) attemptStartRouting {
+	return attemptStartRouting{
+		ConsumeAttemptID: consumeAttemptID,
+		RetryLineage:     retryLineage,
+		SupersedeReason:  supersedeReason,
+	}
+}
+
+func validateAttemptStartRouting(status Status, routing attemptStartRouting) error {
+	latest, hasLatest := LatestConsumableOutcome(status)
+	if hasLatest && unconsumedLauncherAttemptOutcome(latest) && routing.ConsumeAttemptID != latest.AttemptID {
+		return fmt.Errorf("has unconsumed launcher outcome %s/%s for attempt %q", latest.Status, latest.Result, latest.AttemptID)
+	}
+	if routing.ConsumeAttemptID != "" && (!hasLatest || latest.AttemptID != routing.ConsumeAttemptID) {
+		return fmt.Errorf("latest outcome attempt is not %q", routing.ConsumeAttemptID)
+	}
+	if routing.RetryLineage != nil {
+		if routing.ConsumeAttemptID == "" {
+			return errors.New("retry lineage requires consume_attempt_id")
+		}
+		if err := validateRetryLineage(*routing.RetryLineage); err != nil {
+			return fmt.Errorf("retry lineage: %w", err)
+		}
+	}
+	return nil
+}
+
+func cloneRetryLineagePtr(retry *RetryLineage) *RetryLineage {
+	if retry == nil {
+		return nil
+	}
+	return &RetryLineage{StepID: retry.StepID, Counts: maps.Clone(retry.Counts)}
 }
 
 func (s *Store) withRunLock(runID string, fn func() error) error {
@@ -1582,7 +1700,7 @@ func statusBackedEventPossiblyCommitted(err error) bool {
 
 func reservedEventType(eventType string) bool {
 	switch eventType {
-	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventReportIgnored:
+	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored:
 		return true
 	default:
 		return false
@@ -1836,6 +1954,7 @@ func replayStatus(events []Event, status Status) (Status, error) {
 		LastSequence:  events[len(events)-1].Sequence,
 		Artifacts:     []ArtifactRef{},
 		Attempts:      []Attempt{},
+		Warnings:      []AttemptWarning{},
 	}
 	for _, event := range events[1:] {
 		replayed.UpdatedAt = event.Time
@@ -1874,8 +1993,9 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			if replayed.ActiveAttempt != nil {
 				return Status{}, fmt.Errorf("event %d starts attempt %q while attempt %q is active", event.Sequence, payload.Attempt.AttemptID, replayed.ActiveAttempt.AttemptID)
 			}
-			if pending, ok := PendingLauncherOutcome(replayed); ok {
-				return Status{}, fmt.Errorf("event %d starts attempt while pending worker outcome %s/%s for attempt %q is unconsumed", event.Sequence, pending.Status, pending.Result, pending.AttemptID)
+			routing := attemptStartRoutingFromFields(payload.ConsumeAttemptID, payload.RetryLineage, payload.SupersedeReason)
+			if err := validateAttemptStartRouting(replayed, routing); err != nil {
+				return Status{}, fmt.Errorf("event %d attempt routing: %w", event.Sequence, err)
 			}
 			attempt := payload.Attempt
 			if err := validateStartedAttemptEvent(event, attempt, replayed.RunID); err != nil {
@@ -1886,6 +2006,7 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			}) {
 				return Status{}, fmt.Errorf("event %d duplicate attempt %q", event.Sequence, attempt.AttemptID)
 			}
+			applyAttemptStartRouting(&replayed, event.Time, attempt.AttemptID, routing)
 			replayed.ActiveAttempt = &attempt
 			replayed.Attempts = append(replayed.Attempts, attempt)
 		case eventAttemptPrompted:
@@ -1932,6 +2053,14 @@ func replayStatus(events []Event, status Status) (Status, error) {
 				return Status{}, fmt.Errorf("event %d attempt.reported payload: %w", event.Sequence, err)
 			}
 			if err := reportReplayedActiveAttempt(&replayed, event, payload); err != nil {
+				return Status{}, err
+			}
+		case eventAttemptWarning:
+			var payload attemptWarningPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d attempt.warning payload: %w", event.Sequence, err)
+			}
+			if err := applyReplayedAttemptWarning(&replayed, event, payload.Warning); err != nil {
 				return Status{}, err
 			}
 		case eventReportIgnored:
@@ -2107,6 +2236,32 @@ func reportReplayedActiveAttempt(status *Status, event Event, payload attemptRep
 		status.Artifacts = append(status.Artifacts, ref)
 	}
 	status.ActiveAttempt = nil
+	return nil
+}
+
+func applyReplayedAttemptWarning(status *Status, event Event, warning AttemptWarning) error {
+	if err := validateAttemptWarning(*status, warning); err != nil {
+		return fmt.Errorf("event %d warning: %w", event.Sequence, err)
+	}
+	if !warning.Time.Equal(event.Time) {
+		return fmt.Errorf("event %d warning time does not match event time", event.Sequence)
+	}
+	status.Warnings = append(status.Warnings, warning)
+	return nil
+}
+
+func validateAttemptWarning(status Status, warning AttemptWarning) error {
+	if warning.AttemptID == "" {
+		return errors.New("attempt_id is required")
+	}
+	if warning.Kind == "" {
+		return errors.New("kind is required")
+	}
+	if !slices.ContainsFunc(status.Attempts, func(attempt Attempt) bool {
+		return attempt.AttemptID == warning.AttemptID
+	}) {
+		return fmt.Errorf("has no attempt %q", warning.AttemptID)
+	}
 	return nil
 }
 

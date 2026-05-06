@@ -19,6 +19,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
+const forbiddenLegacyPendingWorkerOutcome = "pending_worker_outcome"
+
 func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
@@ -110,7 +112,7 @@ func TestStatusAndNextShowActiveAttempt(t *testing.T) {
 	})
 }
 
-func TestNextRefusesPendingLauncherOutcome(t *testing.T) {
+func TestNextRoutesExhaustedLauncherOutcome(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
@@ -121,15 +123,81 @@ func TestNextRefusesPendingLauncherOutcome(t *testing.T) {
 	recordMissingReportAttempt(t, store, runID, "attempt-missing-report")
 
 	status, next := inspectStatusAndNext(t, root, runID)
-	assertContainsAll(t, "status", status, []string{
+	statusOnly := []string{
 		"selected_step: none\n",
 		"active_attempt: none\n",
-		"terminal_reason: pending_worker_outcome\n",
-	})
+	}
+	terminalOutcome := []string{
+		"terminal_reason: blocked_for_human\n",
+		"last_outcome: failed/missing_report\n",
+		"last_attempt: attempt-missing-report\n",
+		"retry_exhausted: failed/missing_report\n",
+		"retry_count: 0/0\n",
+		"transition: failed/missing_report -> blocked_for_human\n",
+	}
+	assertContainsAll(t, "status", status, statusOnly)
+	assertBothOutputsContain(t, status, next, terminalOutcome)
 	assertContainsAll(t, "next", next, []string{
 		"decision: terminal\n",
-		"terminal_reason: pending_worker_outcome\n",
 		"launch: no worker should launch\n",
+	})
+}
+
+func TestStatusAndNextShowInvalidReportOutcome(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	recordLaunchedAttempt(t, store, runID, "attempt-invalid-report")
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		State: runstore.AttemptStateInvalidReport,
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-invalid-report",
+			Status:    "failed",
+			Result:    runstore.AttemptResultInvalidReport,
+			Summary:   "report schema invalid: missing summary",
+		},
+		Time: fixedTime().Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	status, next := inspectStatusAndNext(t, root, runID)
+	assertBothOutputsContain(t, status, next, []string{
+		"terminal_reason: blocked_for_human\n",
+		"last_outcome: failed/invalid_report\n",
+		"last_attempt: attempt-invalid-report\n",
+		"invalid_report_reason: report schema invalid: missing summary\n",
+		"retry_exhausted: failed/invalid_report\n",
+		"retry_count: 0/0\n",
+		"transition: failed/invalid_report -> blocked_for_human\n",
+	})
+}
+
+func TestStatusAndNextShowExhaustedRetryCountFromWorkflowPolicy(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteProject(t, root, testutil.ProjectOptions{
+		MarkdownFallback: true,
+		FailedResults:    []string{"missing_report", "process_error", "timeout", "invalid_report"},
+		Retries:          map[string]int{"failed/missing_report": 2},
+	})
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	recordRetriedMissingReportAttempt(t, store, runID, 2)
+
+	status, next := inspectStatusAndNext(t, root, runID)
+	assertBothOutputsContain(t, status, next, []string{
+		"retry_exhausted: failed/missing_report\n",
+		"retry_count: 2/2\n",
 	})
 }
 
@@ -172,8 +240,8 @@ func TestNextRoutesValidReportedOutcome(t *testing.T) {
 		"launch: no worker should launch\n",
 		"review_state: ready_for_human; no more workers should launch\n",
 	})
-	if strings.Contains(next, pendingWorkerOutcome) {
-		t.Fatalf("next output contains pending worker outcome for valid report:\n%s", next)
+	if strings.Contains(next, forbiddenLegacyPendingWorkerOutcome) {
+		t.Fatalf("next output contains legacy pending worker outcome for valid report:\n%s", next)
 	}
 }
 
@@ -252,12 +320,12 @@ func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
 		"agent: coder\n",
 		"launch: not launched\n",
 	})
-	if strings.Contains(next, pendingWorkerOutcome) {
-		t.Fatalf("next output contains pending worker outcome for valid report:\n%s", next)
+	if strings.Contains(next, forbiddenLegacyPendingWorkerOutcome) {
+		t.Fatalf("next output contains legacy pending worker outcome for valid report:\n%s", next)
 	}
 }
 
-func TestNextParksReportedRetryStepOutcome(t *testing.T) {
+func TestNextShowsReportedRetryStepOutcome(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
 		MarkdownFallback: true,
@@ -288,9 +356,12 @@ func TestNextParksReportedRetryStepOutcome(t *testing.T) {
 
 	_, next := inspectStatusAndNext(t, root, runID)
 	assertContainsAll(t, "next", next, []string{
-		"decision: terminal\n",
-		"terminal_reason: pending_worker_outcome\n",
-		"launch: no worker should launch\n",
+		"decision: retry_step\n",
+		"selected_step: plan\n",
+		"retrying_after: done/ready\n",
+		"retry_count: 1/1\n",
+		"retry_source_attempt: attempt-retry\n",
+		"launch: not launched\n",
 	})
 }
 
@@ -306,6 +377,81 @@ func recordMissingReportAttempt(t *testing.T, store *runstore.Store, runID, atte
 		Time:      fixedTime().Add(2 * time.Minute),
 	}); err != nil {
 		t.Fatalf("FinishAttempt returned error: %v", err)
+	}
+}
+
+func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runID string, retryCount int) {
+	t.Helper()
+	const firstAttemptID = "attempt-missing-report"
+	const retryAttemptID = "attempt-retry"
+	recordMissingReportAttempt(t, store, runID, firstAttemptID)
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:           "plan",
+		AgentID:          "planner",
+		AttemptID:        retryAttemptID,
+		Timeout:          30 * time.Minute,
+		ReportExitGrace:  30 * time.Second,
+		ConsumeAttemptID: firstAttemptID,
+		RetryLineage:     &runstore.RetryLineage{StepID: "plan", Counts: map[string]int{"failed/missing_report": retryCount}},
+		SupersedeReason:  "retry",
+		Time:             fixedTime().Add(3 * time.Minute),
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	recordAttemptPromptLogAndProcess(t, store, runID, "plan", retryAttemptID, 3200*time.Millisecond)
+	if _, _, err := store.FinishAttempt(runID, runstore.FinishAttemptRequest{
+		AttemptID: retryAttemptID,
+		State:     runstore.AttemptStateMissingReport,
+		Status:    "failed",
+		Result:    runstore.AttemptResultMissingReport,
+		ExitState: "exited",
+		Time:      fixedTime().Add(4 * time.Minute),
+	}); err != nil {
+		t.Fatalf("FinishAttempt returned error: %v", err)
+	}
+}
+
+func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID, stepID, attemptID string, at time.Duration) {
+	t.Helper()
+	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindPrompt,
+		Name:    stepID + "-" + attemptID,
+		Content: []byte("prompt\n"),
+		Time:    fixedTime().Add(at),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact prompt returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+		AttemptID: attemptID,
+		PromptRef: promptRef,
+		Time:      fixedTime().Add(at + 100*time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
+	}
+	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindLog,
+		Name:    stepID + "-" + attemptID,
+		Content: []byte("log\n"),
+		Time:    fixedTime().Add(at + 200*time.Millisecond),
+	})
+	if err != nil {
+		t.Fatalf("WriteArtifact log returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+		AttemptID: attemptID,
+		LogRef:    logRef,
+		Time:      fixedTime().Add(at + 300*time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptLog returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        attemptID,
+		PID:              12345,
+		ProcessStartTime: "123456789",
+		Time:             fixedTime().Add(at + 400*time.Millisecond),
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 }
 
@@ -660,46 +806,7 @@ func recordLaunchedStepAttempt(t *testing.T, store *runstore.Store, runID, stepI
 	}); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
-	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
-		Kind:    runstore.KindPrompt,
-		Name:    stepID + "-" + attemptID,
-		Content: []byte("prompt\n"),
-		Time:    fixedTime().Add(1200 * time.Millisecond),
-	})
-	if err != nil {
-		t.Fatalf("WriteArtifact prompt returned error: %v", err)
-	}
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
-		AttemptID: attemptID,
-		PromptRef: promptRef,
-		Time:      fixedTime().Add(1300 * time.Millisecond),
-	}); err != nil {
-		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
-	}
-	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
-		Kind:    runstore.KindLog,
-		Name:    stepID + "-" + attemptID,
-		Content: []byte("log\n"),
-		Time:    fixedTime().Add(1400 * time.Millisecond),
-	})
-	if err != nil {
-		t.Fatalf("WriteArtifact log returned error: %v", err)
-	}
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
-		AttemptID: attemptID,
-		LogRef:    logRef,
-		Time:      fixedTime().Add(1500 * time.Millisecond),
-	}); err != nil {
-		t.Fatalf("RecordAttemptLog returned error: %v", err)
-	}
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
-		AttemptID:        attemptID,
-		PID:              12345,
-		ProcessStartTime: "123456789",
-		Time:             fixedTime().Add(1600 * time.Millisecond),
-	}); err != nil {
-		t.Fatalf("RecordAttemptProcess returned error: %v", err)
-	}
+	recordAttemptPromptLogAndProcess(t, store, runID, stepID, attemptID, 1200*time.Millisecond)
 }
 
 func writeSummaryTaskContext(t *testing.T, store *runstore.Store, runID, content string) {
@@ -854,6 +961,12 @@ func assertContainsAll(t *testing.T, label, output string, wants []string) {
 	}
 }
 
+func assertBothOutputsContain(t *testing.T, status, next string, wants []string) {
+	t.Helper()
+	assertContainsAll(t, "status", status, wants)
+	assertContainsAll(t, "next", next, wants)
+}
+
 func readRunInspectTestdata(t *testing.T, name string) string {
 	t.Helper()
 	content, err := os.ReadFile(filepath.Join("testdata", name))
@@ -899,6 +1012,7 @@ func writeProject(t *testing.T, root string) {
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
 		MarkdownFallback: true,
 		BlockedResults:   []string{"blocked"},
+		FailedResults:    []string{"missing_report", "process_error", "timeout", "invalid_report"},
 	})
 }
 

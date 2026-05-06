@@ -599,9 +599,9 @@ func TestStartAttemptRejectsDuplicateHistoricalAttemptID(t *testing.T) {
 	requireErrorContains(t, err, "already has attempt", "attempt-001")
 }
 
-func TestStartAttemptRejectsPendingLauncherOutcome(t *testing.T) {
+func TestStartAttemptRejectsUnconsumedLauncherOutcome(t *testing.T) {
 	store := openStore(t, t.TempDir())
-	run := createManualRun(t, store, "pending-outcome-attempt-run")
+	run := createManualRun(t, store, "unconsumed-outcome-attempt-run")
 	startAttemptForTest(t, store, run.ID, "attempt-001")
 	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 	recordProcessForTest(t, store, run.ID, "attempt-001")
@@ -622,7 +622,22 @@ func TestStartAttemptRejectsPendingLauncherOutcome(t *testing.T) {
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
 	})
-	requireErrorContains(t, err, "pending worker outcome", "attempt-001")
+	requireErrorContains(t, err, "unconsumed launcher outcome", "attempt-001")
+}
+
+func TestStartAttemptRejectsRetryLineageWithoutConsumedOutcome(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "retry-lineage-without-consume-run")
+
+	_, _, err := store.StartAttempt(run.ID, StartAttemptRequest{
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       "attempt-001",
+		Timeout:         30 * time.Minute,
+		ReportExitGrace: 30 * time.Second,
+		RetryLineage:    &RetryLineage{StepID: "plan", Counts: map[string]int{"failed/missing_report": 1}},
+	})
+	requireErrorContains(t, err, "retry lineage requires consume_attempt_id")
 }
 
 func TestStartAttemptContextCancellationWhileLocalRunLockHeld(t *testing.T) {
@@ -754,37 +769,54 @@ func TestUpdateStatusRejectsNonRunningStateWhileAttemptActive(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsDuplicateHistoricalAttemptID(t *testing.T) {
-	store := openStore(t, t.TempDir())
-	run := createManualRun(t, store, "duplicate-attempt-replay-run")
-	startAttemptForTest(t, store, run.ID, "attempt-001")
-	if _, _, err := store.FinishAttempt(run.ID, FinishAttemptRequest{
-		AttemptID: "attempt-001",
-		State:     AttemptStateProcessError,
-		Status:    "failed",
-		Result:    "process_error",
-		ExitState: "exited",
-	}); err != nil {
-		t.Fatalf("FinishAttempt returned error: %v", err)
-	}
-	events := readRunEvents(t, run)
-	var duplicate Event
-	for _, event := range events {
-		if event.Type == eventAttemptStarted {
-			duplicate = event
-			break
+func TestLoadRejectsAttemptStartedReplayBeforeConsumingLauncherOutcome(t *testing.T) {
+	assertLoadRejectsAttemptStartAfterUnconsumedLauncherOutcome(t, "replayed original attempt.started", func(t *testing.T, run *Run) Event {
+		t.Helper()
+		events := readRunEvents(t, run)
+		for _, event := range events {
+			if event.Type == eventAttemptStarted {
+				event.Sequence = len(events) + 1
+				return event
+			}
 		}
-	}
-	duplicate.Sequence = len(events) + 1
-	writeRunEvents(t, run, append(events, duplicate))
-
-	_, err := store.Load(run.ID)
-	requireErrorContains(t, err, "pending worker outcome", "attempt-001")
+		t.Fatal("attempt.started event not found")
+		return Event{}
+	})
 }
 
-func TestLoadRejectsAttemptStartedAfterPendingLauncherOutcome(t *testing.T) {
+func TestLoadRejectsNewAttemptStartedAfterUnconsumedLauncherOutcome(t *testing.T) {
+	assertLoadRejectsAttemptStartAfterUnconsumedLauncherOutcome(t, "new attempt.started", func(t *testing.T, run *Run) Event {
+		t.Helper()
+		attempt, err := newStartedAttempt(run.ID, StartAttemptRequest{
+			StepID:          "plan",
+			AgentID:         "planner",
+			AttemptID:       "attempt-002",
+			Timeout:         30 * time.Minute,
+			ReportExitGrace: 30 * time.Second,
+		})
+		if err != nil {
+			t.Fatalf("newStartedAttempt returned error: %v", err)
+		}
+		payload, err := marshalPayload(attemptStartedPayload{Attempt: attempt})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		events := readRunEvents(t, run)
+		return Event{
+			SchemaVersion: schemaVersion,
+			Sequence:      len(events) + 1,
+			Time:          time.Date(2026, 5, 4, 12, 2, 0, 0, time.UTC),
+			RunID:         run.ID,
+			Type:          eventAttemptStarted,
+			Payload:       payload,
+		}
+	})
+}
+
+func assertLoadRejectsAttemptStartAfterUnconsumedLauncherOutcome(t *testing.T, name string, nextEvent func(*testing.T, *Run) Event) {
+	t.Helper()
 	store := openStore(t, t.TempDir())
-	run := createManualRun(t, store, "pending-outcome-replay-run")
+	run := createManualRun(t, store, "unconsumed-outcome-"+strings.ReplaceAll(name, " ", "-"))
 	startAttemptForTest(t, store, run.ID, "attempt-001")
 	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 	recordProcessForTest(t, store, run.ID, "attempt-001")
@@ -797,33 +829,12 @@ func TestLoadRejectsAttemptStartedAfterPendingLauncherOutcome(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("FinishAttempt returned error: %v", err)
 	}
-	attempt, err := newStartedAttempt(run.ID, StartAttemptRequest{
-		StepID:          "plan",
-		AgentID:         "planner",
-		AttemptID:       "attempt-002",
-		Timeout:         30 * time.Minute,
-		ReportExitGrace: 30 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("newStartedAttempt returned error: %v", err)
-	}
-	payload, err := marshalPayload(attemptStartedPayload{Attempt: attempt})
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
-	}
 	events := readRunEvents(t, run)
-	events = append(events, Event{
-		SchemaVersion: schemaVersion,
-		Sequence:      len(events) + 1,
-		Time:          time.Date(2026, 5, 4, 12, 2, 0, 0, time.UTC),
-		RunID:         run.ID,
-		Type:          eventAttemptStarted,
-		Payload:       payload,
-	})
-	writeRunEvents(t, run, events)
+	unconsumedStart := nextEvent(t, run)
+	writeRunEvents(t, run, append(events, unconsumedStart))
 
-	_, err = store.Load(run.ID)
-	requireErrorContains(t, err, "pending worker outcome", "attempt-001")
+	_, err := store.Load(run.ID)
+	requireErrorContains(t, err, "unconsumed launcher outcome", "attempt-001")
 }
 
 func TestLoadRejectsStatusUpdatedToTerminalWhileAttemptActive(t *testing.T) {

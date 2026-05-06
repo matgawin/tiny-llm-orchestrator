@@ -28,16 +28,15 @@ Contributors changing worker process launch, active-attempt state, no-report out
 orc worker launch-next <run-id>
 ```
 
-The v1 public command has no flags. It launches only the workflow-selected step
-for the run. `orc run next` remains read-only inspection and never launches a
-worker.
+The v1 public command has no flags. `orc run next` remains read-only inspection
+and never launches a worker.
 
 ## Launch Contract
 
 The launcher loads project config, loads the run, and asks the workflow engine
-for the next decision. A worker launches only for `select_step`. Terminal runs
-and runs with an active attempt do not launch a replacement worker in the same
-command.
+for the next decision. A worker launches for `select_step` and `retry_step`.
+Terminal runs do not launch. Runs with an active attempt refuse a second worker
+until that active attempt terminalizes or is recovered.
 
 Each launch creates a `starting` attempt before rendering the worker prompt.
 The attempt becomes `active` only after process metadata is recorded. The
@@ -84,22 +83,29 @@ the process runs:
 
 ## No-Report Outcomes
 
-Worker process completion before report-routing and post-report process handling
-is interpreted as a synthesized failed outcome when no valid report has already
-terminalized the attempt:
+Worker process completion is interpreted as a synthesized failed outcome when
+no valid report has already terminalized the attempt:
 
 - exit code `0`: `failed/missing_report`
 - nonzero exit: `failed/process_error`
 - timeout before a valid report exists: `failed/timeout`
 
-The launcher records these outcomes on the attempt. It does not apply workflow
-retry policy or launch a retry attempt in this slice; synthesized failure
-routing belongs to the follow-on workflow retry integration. Until that routing
-exists, `launch-next` refuses to relaunch after a synthesized terminal outcome
-or invalid current-attempt report so retry accounting cannot be bypassed
-manually. Valid reported outcomes are evaluated through the workflow engine, so
-`launch-next` can launch the selected next step when the reported pair routes to
-one.
+The launcher records these outcomes on the attempt and feeds them through the
+same workflow `status/result` routing model as reported outcomes. If retry
+policy remains for the outcome pair, the next `launch-next` invocation records
+retry routing metadata and starts the replacement attempt. If retries are
+exhausted, that `launch-next` invocation applies the configured `on:`
+transition, commonly `blocked_for_human`. The `attempt.started` routing fields
+are specified in [run-store.md](../reference/run-store.md).
+
+## Post-Report Process Cleanup
+
+Valid reported outcomes remain authoritative for routing. If a valid report is
+persisted while the worker process is still running, the launcher starts the
+configured `report_exit_grace` timer from the persisted report observation. A
+worker that keeps running beyond that grace is terminated as process-management
+cleanup. If the worker exits nonzero after a valid report, the launcher records
+a warning event with the exit code.
 
 ## Supervision
 

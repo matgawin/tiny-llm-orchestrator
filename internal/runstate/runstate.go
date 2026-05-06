@@ -2,18 +2,26 @@
 package runstate
 
 import (
+	"maps"
+
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 // WorkflowState returns the workflow evaluation state for a persisted run status,
-// including the latest valid reported outcome when present.
+// including the latest terminal outcome that workflow routing can consume.
 func WorkflowState(status runstore.Status) workflow.RunState {
 	state := workflow.RunState{
 		Status:        status.State,
 		ActiveAttempt: status.ActiveAttempt != nil,
 	}
-	if attempt, ok := runstore.LatestReportedOutcome(status); ok {
+	if status.RetryLineage != nil {
+		state.Retry = workflow.RetryLineage{
+			Step:   status.RetryLineage.StepID,
+			Counts: maps.Clone(status.RetryLineage.Counts),
+		}
+	}
+	if attempt, ok := runstore.LatestConsumableOutcome(status); ok {
 		state.ActiveAttempt = false
 		state.SelectedStep = attempt.StepID
 		state.Outcome = &workflow.Outcome{

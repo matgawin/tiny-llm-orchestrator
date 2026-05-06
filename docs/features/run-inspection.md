@@ -13,8 +13,8 @@ summary-context inputs.
 ## Read This When
 
 - You are changing `orc run status` or `orc run next`.
-- You need to know what run inspection reports before retry routing is
-  implemented.
+- You need to know how run inspection reports selected, retrying, blocked, or
+  terminal workflow decisions.
 - You are wiring later commands that consume the workflow-selected next step.
 
 ## Related Docs
@@ -45,9 +45,9 @@ Unknown run ids fail with a clear not-found error.
 Inspection reads the run through the Run Store and loads the configured
 workflow named by `status.json`.
 
-Run start records durable status and task artifacts. Worker launch records
-active attempts. `orc report` records terminal structured report outcomes, but
-retry lineage and routed replacement attempts belong to later slices.
+Run start records durable status and task artifacts. Worker launch and
+`orc report` update durable run status; inspection renders those persisted
+facts without mutating the run.
 
 For a newly started `running` run with no selected step persisted, `run next`
 uses the workflow engine's start-step behavior and reports that start step as
@@ -58,16 +58,13 @@ attempt id and `run next` reports `wait_active_attempt` instead of launchable
 step selection.
 
 For a `running` run whose latest attempt ended with a valid worker report,
-inspection evaluates the persisted reported `status/result` pair through the
-workflow engine and renders the selected next step or terminal state. When that
-reported outcome evaluates to `ready_for_human` or `blocked_for_human`,
-inspection renders that human terminal state as the effective state even though
-the persisted run status remains unchanged until a later state-update slice. If
-that reported outcome evaluates to `retry_step`, inspection parks it as
-`pending_worker_outcome` until retry routing can create replacement attempts
-with retry accounting. Launcher-synthesized failures and invalid current-attempt
-reports are also parked as `pending_worker_outcome` before retry routing
-consumes them. This prevents manual relaunch without retry accounting.
+launcher-synthesized failure, or current-attempt invalid report, inspection
+evaluates the persisted `status/result` pair through the workflow engine and
+renders the selected next step, retry step, or terminal state. When an outcome
+evaluates to `retry_step`, inspection shows the retrying outcome, retry count,
+and retry source attempt the next launch would consume. When retries are
+exhausted, inspection shows the latest outcome, attempt id, exhausted pair, and
+configured terminal transition.
 
 For `ready_for_human` and `blocked_for_human`, inspection identifies:
 
