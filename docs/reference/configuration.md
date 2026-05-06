@@ -186,11 +186,69 @@ Workflow-declared outcome statuses are:
 including system-owned synthesized outcomes. It is broader than the set of
 outcomes a worker may author with `orc report`.
 
-Each step must declare:
+Workflow steps may be agent-backed or deterministic process steps. Omitted
+`kind` is backward-compatible and means `agent`.
+
+Agent steps declare:
 
 - `agent`: an agent id present in `.orc/config.yaml`
 - `allowed_results`: a non-empty map of allowed statuses to non-empty result lists
 - `on`: a deterministic transition map keyed by `status/result`
+
+Agent steps may also set `kind: agent`; they must not set `command` or
+`script`.
+
+Command steps declare argv-only process execution:
+
+```yaml
+steps:
+  check:
+    kind: command
+    command:
+      argv: ["task", "check"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: ready_for_human
+      done/failed: code
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+```
+
+`command.argv` must contain at least one non-empty argument. Shell-string
+commands are not supported in v1; argv entries are passed directly to process
+execution without shell parsing, expansion, or interpolation.
+
+Script steps declare a repository-relative executable path plus optional args:
+
+```yaml
+steps:
+  verify-loop-counters:
+    kind: script
+    script:
+      path: scripts/verify-loop-counters.sh
+      args: ["--strict"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: ready_for_human
+      done/failed: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+```
+
+Script paths must be clean repository-relative paths. Absolute paths,
+traversal outside the repository, and symlink escapes are rejected. Inline
+script bodies are not supported in v1. Command and script steps may set
+repo-relative `cwd`, which defaults to the repository root, and `env` entries
+that override inherited environment values.
+
+Kind-specific validation rejects mixed definitions: agent steps require
+`agent`; command steps require `command.argv` and must not set `agent` or
+`script`; script steps require `script.path` and must not set `agent` or
+`command`; unsupported `kind` values are configuration errors.
 
 Allowed result values must be non-empty strings. Every `on` key must be declared in `allowed_results`, and every declared `status/result` pair must have a deterministic transition to another step or a supported terminal state.
 
@@ -198,7 +256,10 @@ Worker-authored reports may use workflow-declared outcome pairs except reserved
 system-owned failure results. `orc report` rejects `failed/error`,
 `failed/invalid_report`, `failed/missing_report`, `failed/timeout`, and
 `failed/process_error`; those are written only by report validation, run-store,
-or launcher paths.
+or launcher paths. Command and script steps do not call `orc report`; Orc writes
+their system reports with fixed v1 outcomes: exit code 0 becomes `done/passed`,
+nonzero exit becomes `done/failed`, timeout becomes `failed/timeout`, and
+spawn or process setup failure becomes `failed/process_error`.
 
 Supported terminal states:
 

@@ -2,9 +2,11 @@ package runstore
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 type stagedArtifact struct {
@@ -58,6 +60,47 @@ func stageArtifact(path string, artifact Artifact) (stagedArtifact, error) {
 	}, nil
 }
 
+func stageArtifactFromFile(path string, artifact Artifact, sourcePath string) (stagedArtifact, error) {
+	if artifact.Kind == KindFollowup {
+		return stagedArtifact{}, fmt.Errorf("artifact kind %q cannot be written from file", artifact.Kind)
+	}
+	if err := validateArtifactFile(path); err != nil {
+		return stagedArtifact{}, err
+	}
+	if err := validateRegularFile(sourcePath, "artifact source "+filepath.Base(sourcePath)); err != nil {
+		return stagedArtifact{}, err
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return stagedArtifact{}, fmt.Errorf("artifact %s already exists", filepath.Base(path))
+	} else if !os.IsNotExist(err) {
+		return stagedArtifact{}, err
+	}
+	tempName, err := writeStagedFileFromFile(path, sourcePath)
+	if err != nil {
+		return stagedArtifact{}, err
+	}
+	cleanup := func() {
+		_ = os.Remove(tempName) // #nosec G703 -- tempName was created under the scoped artifact directory.
+	}
+	commit := func() error {
+		if err := os.Rename(tempName, path); err != nil { // #nosec G703 -- both paths are scoped to the run directory.
+			return fmt.Errorf("replace %s: %w", path, err)
+		}
+		return nil
+	}
+	rollback := func() error {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return stagedArtifact{
+		commit:   commit,
+		rollback: rollback,
+		cleanup:  cleanup,
+	}, nil
+}
+
 func writeStagedFile(path string, content []byte) (string, error) {
 	if err := ensureDir(filepath.Dir(path)); err != nil {
 		return "", err
@@ -74,6 +117,43 @@ func writeStagedFile(path string, content []byte) (string, error) {
 		_ = os.Remove(tempName) // #nosec G703 -- tempName comes from os.CreateTemp in the target directory.
 	}
 	if _, err := temp.Write(content); err != nil {
+		cleanup(true)
+		return "", err
+	}
+	if err := temp.Chmod(0o600); err != nil {
+		cleanup(true)
+		return "", err
+	}
+	if err := temp.Close(); err != nil {
+		cleanup(false)
+		return "", err
+	}
+	return tempName, nil
+}
+
+func writeStagedFileFromFile(path, sourcePath string) (string, error) {
+	if err := ensureDir(filepath.Dir(path)); err != nil {
+		return "", err
+	}
+	source, err := os.OpenFile(sourcePath, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- sourcePath is validated as a regular launcher-owned artifact source.
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp") // #nosec G304 -- path is scoped to the run directory.
+	if err != nil {
+		return "", err
+	}
+	tempName := temp.Name()
+	cleanup := func(closeFile bool) {
+		if closeFile {
+			_ = temp.Close()
+		}
+		_ = os.Remove(tempName) // #nosec G703 -- tempName comes from os.CreateTemp in the target directory.
+	}
+	if _, err := io.Copy(temp, source); err != nil {
 		cleanup(true)
 		return "", err
 	}

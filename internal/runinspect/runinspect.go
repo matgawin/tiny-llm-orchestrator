@@ -290,7 +290,12 @@ func printLoopCapPreview(w io.Writer, workflowConfig config.Workflow, run *runst
 func printSelectedStep(w io.Writer, workflowConfig config.Workflow, stepID string) {
 	step := workflowConfig.Steps[stepID]
 	_, _ = fmt.Fprintf(w, "selected_step: %s\n", stepID)
-	_, _ = fmt.Fprintf(w, "agent: %s\n", step.Agent)
+	_, _ = fmt.Fprintf(w, "kind: %s\n", step.EffectiveKind())
+	if step.EffectiveKind() == config.StepKindAgent {
+		_, _ = fmt.Fprintf(w, "agent: %s\n", step.Agent)
+		return
+	}
+	_, _ = fmt.Fprintln(w, "note: deterministic step selected; orc run next did not execute it")
 }
 
 func renderSummaryContext(ctx context.Context, inspection inspection) error {
@@ -326,7 +331,11 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 		step := inspection.workflow.Steps[stepID]
 		_, _ = fmt.Fprintln(w, "- step:")
 		printIndentedStringField(w, "id", stepID)
-		printIndentedStringField(w, "agent", step.Agent)
+		if step.EffectiveKind() == config.StepKindAgent {
+			printIndentedStringField(w, "agent", step.Agent)
+		} else {
+			printIndentedStringField(w, "kind", step.EffectiveKind())
+		}
 		_, _ = fmt.Fprintf(w, "  attempts: %d\n", countStepAttempts(run.Status.Attempts, stepID))
 	}
 	printStringField(w, "decision", string(inspection.decision.Kind))

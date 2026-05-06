@@ -623,7 +623,17 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 
 // WriteArtifact persists an artifact under the run directory and records it in the event log.
 func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, error) {
-	return s.writeArtifact(runID, artifact, nil)
+	return s.writeArtifactWithStage(runID, artifact, nil, stageArtifact)
+}
+
+// WriteArtifactFromFile persists an artifact by streaming content from sourcePath.
+func (s *Store) WriteArtifactFromFile(runID string, artifact Artifact, sourcePath string) (ArtifactRef, error) {
+	if sourcePath == "" {
+		return ArtifactRef{}, errors.New("artifact source path is required")
+	}
+	return s.writeArtifactWithStage(runID, artifact, nil, func(path string, artifact Artifact) (stagedArtifact, error) {
+		return stageArtifactFromFile(path, artifact, sourcePath)
+	})
 }
 
 // WriteArtifactIfState persists an artifact only while the run is in the expected state.
@@ -640,6 +650,10 @@ func (s *Store) WriteArtifactIfState(runID, expectedState string, artifact Artif
 }
 
 func (s *Store) writeArtifact(runID string, artifact Artifact, validate func(*Run) error) (ArtifactRef, error) {
+	return s.writeArtifactWithStage(runID, artifact, validate, stageArtifact)
+}
+
+func (s *Store) writeArtifactWithStage(runID string, artifact Artifact, validate func(*Run) error, stage func(string, Artifact) (stagedArtifact, error)) (ArtifactRef, error) {
 	if err := validateRunID(runID); err != nil {
 		return ArtifactRef{}, err
 	}
@@ -675,7 +689,7 @@ func (s *Store) writeArtifact(runID string, artifact Artifact, validate func(*Ru
 		if err := ensureArtifactParentDir(run.Path, relPath); err != nil {
 			return fmt.Errorf("run %q artifact %s: %w", runID, relPath, err)
 		}
-		staged, err := stageArtifact(path, artifact)
+		staged, err := stage(path, artifact)
 		if err != nil {
 			return fmt.Errorf("run %q artifact %s: %w", runID, relPath, err)
 		}
@@ -1006,13 +1020,16 @@ func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Atte
 			staged = append(staged, *stagedFollowup)
 		}
 		defer cleanupStagedArtifacts(staged)
-		if err := applyAttemptReport(&attempt, state, report); err != nil {
+		if err := applyAttemptReport(run.Status, &attempt, state, report, req); err != nil {
 			return err
 		}
 		payload, err := marshalPayload(attemptReportedPayload{
 			AttemptID:    report.AttemptID,
 			State:        state,
 			Report:       *attempt.Report,
+			ExitCode:     attempt.ExitCode,
+			ExitState:    attempt.ExitState,
+			LogRef:       attempt.LogRef,
 			FollowupRefs: followupRefs,
 		})
 		if err != nil {
@@ -1364,9 +1381,9 @@ func applyTerminalAttemptOutcome(status Status, attempt *Attempt, outcome termin
 	return logRef, nil
 }
 
-func applyAttemptReport(attempt *Attempt, state string, report Report) error {
+func applyAttemptReport(status Status, attempt *Attempt, state string, report Report, req RecordReportRequest) error {
 	switch {
-	case attempt.State != AttemptStateActive:
+	case attempt.State != AttemptStateActive && (!req.AllowStartingAttempt || attempt.State != AttemptStateStarting):
 		return fmt.Errorf("attempt %q state %q, want active", attempt.AttemptID, attempt.State)
 	case report.RunID != attempt.RunID:
 		return fmt.Errorf("report run_id %q does not match active attempt run_id %q", report.RunID, attempt.RunID)
@@ -1390,6 +1407,19 @@ func applyAttemptReport(attempt *Attempt, state string, report Report) error {
 	attempt.State = state
 	attempt.Status = report.Status
 	attempt.Result = report.Result
+	attempt.ExitCode = req.ExitCode
+	attempt.ExitState = req.ExitState
+	logRef := req.LogRef
+	if logRef == nil {
+		logRef = attempt.LogRef
+	}
+	if logRef != nil {
+		if err := validateRecordedArtifactRef(status, *logRef, KindLog); err != nil {
+			return err
+		}
+		ref := *logRef
+		attempt.LogRef = &ref
+	}
 	attempt.ReportRef = report.ReportRef
 	report.RunID = attempt.RunID
 	report.StepID = attempt.StepID
@@ -2661,7 +2691,13 @@ func reportReplayedActiveAttempt(status *Status, event Event, payload attemptRep
 	}
 	if err := updateReplayedActiveAttempt(status, event, payload.AttemptID, func(attempt *Attempt) error {
 		finishedAt := event.Time
-		if err := applyAttemptReport(attempt, payload.State, payload.Report); err != nil {
+		req := RecordReportRequest{
+			ExitCode:             payload.ExitCode,
+			ExitState:            payload.ExitState,
+			LogRef:               payload.LogRef,
+			AllowStartingAttempt: attempt.State == AttemptStateStarting,
+		}
+		if err := applyAttemptReport(*status, attempt, payload.State, payload.Report, req); err != nil {
 			return err
 		}
 		attempt.FinishedAt = &finishedAt

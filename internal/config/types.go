@@ -13,6 +13,10 @@ const (
 	schemaVersion           = 1
 	executionModeSequential = "sequential"
 
+	StepKindAgent   = "agent"
+	StepKindCommand = "command"
+	StepKindScript  = "script"
+
 	taskContextBeadsDisabled = "disabled"
 	taskContextBeadsOptional = "optional"
 	taskContextBeadsRequired = "required"
@@ -244,9 +248,42 @@ func (i OptionalInt) MarshalYAML() (any, error) {
 
 // Step is a named workflow step after validation.
 type Step struct {
+	Kind           string              `yaml:"kind"`
 	Agent          string              `yaml:"agent"`
+	Command        CommandStep         `yaml:"command"`
+	Script         ScriptStep          `yaml:"script"`
+	CWD            string              `yaml:"cwd"`
+	Env            map[string]string   `yaml:"env"`
 	AllowedResults map[string][]string `yaml:"allowed_results"`
 	On             map[string]string   `yaml:"on"`
+}
+
+// EffectiveKind returns the backward-compatible v1 step kind.
+func (s Step) EffectiveKind() string {
+	if s.Kind == "" {
+		return StepKindAgent
+	}
+	return s.Kind
+}
+
+// EffectiveAgentID returns the attempt actor id persisted for the step.
+func (s Step) EffectiveAgentID() string {
+	if s.Agent != "" {
+		return s.Agent
+	}
+	return s.EffectiveKind()
+}
+
+// CommandStep declares an argv-only deterministic command step.
+type CommandStep struct {
+	Argv []string `yaml:"argv"`
+}
+
+// ScriptStep declares a deterministic repo-relative executable script step.
+type ScriptStep struct {
+	Path string   `yaml:"path"`
+	Args []string `yaml:"args"`
+	Body string   `yaml:"body"`
 }
 
 // AgentRef records a project-local agent reference used by a workflow.

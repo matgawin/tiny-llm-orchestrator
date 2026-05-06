@@ -196,7 +196,8 @@ separate `artifact.written` event.
 
 The artifact reference shape is defined in [Artifacts](#artifacts).
 
-`attempt.started` is written when a worker launch creates a `starting` attempt.
+`attempt.started` is written when a worker or deterministic command/script
+launch creates a `starting` attempt.
 The attempt remains the run's `active_attempt` while launch preparation
 continues.
 
@@ -214,6 +215,11 @@ continues.
   }
 }
 ```
+
+For command and script steps, `agent_id` is the system actor id for the
+deterministic kind (`command` or `script`). These attempts still use the same
+attempt id, start, active process, terminal report, retry lineage, and workflow
+routing fields as agent attempts.
 
 When `attempt.started` consumes a previously terminal outcome, routing fields
 are added beside the `attempt` object:
@@ -391,13 +397,18 @@ terminated after `report_exit_grace`.
 ```
 
 `attempt.reported` terminalizes the run's current `active_attempt` with a
-structured worker report accepted through `orc report`. The attempt must already
-be in attempt state `active`; `starting` attempts are not reportable.
+structured report. Agent reports are accepted through `orc report` after the
+attempt reaches `active`. Orc-authored command/script reports may also
+terminalize a `starting` attempt for process setup failures that occur before
+process metadata can be recorded.
 
 ```json
 {
   "attempt_id": "20260504T120000Z-plan-a1b2c3",
   "state": "reported",
+  "exit_code": 0,
+  "exit_state": "exited",
+  "log_ref": "<artifact reference>",
   "report": {
     "run_id": "20260502T143022Z-implementation-main-997-a1b2c3",
     "step_id": "plan",

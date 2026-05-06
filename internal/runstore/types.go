@@ -396,12 +396,16 @@ type FinishAttemptRequest struct {
 
 // RecordReportRequest terminalizes the active attempt with a structured report.
 type RecordReportRequest struct {
-	Report           Report
-	State            string
-	ReportContent    []byte
-	ReportContentSet bool
-	ReportName       string
-	Time             time.Time
+	Report               Report
+	State                string
+	ReportContent        []byte
+	ReportContentSet     bool
+	ReportName           string
+	ExitCode             *int
+	ExitState            string
+	LogRef               *ArtifactRef
+	AllowStartingAttempt bool
+	Time                 time.Time
 }
 
 // IgnoreReportRequest records a report that did not target the active attempt.
@@ -454,6 +458,9 @@ type attemptReportedPayload struct {
 	AttemptID    string        `json:"attempt_id"`
 	State        string        `json:"state"`
 	Report       Report        `json:"report"`
+	ExitCode     *int          `json:"exit_code,omitempty"`
+	ExitState    string        `json:"exit_state,omitempty"`
+	LogRef       *ArtifactRef  `json:"log_ref,omitempty"`
 	FollowupRefs []ArtifactRef `json:"followup_refs,omitempty"`
 }
 

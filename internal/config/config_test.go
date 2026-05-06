@@ -101,6 +101,133 @@ func TestLoadWorkflowPreservesStepDeclarationOrder(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsCommandAndScriptSteps(t *testing.T) {
+	workflow := `name: implementation
+start: check
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries: {}
+steps:
+  check:
+    kind: command
+    command:
+      argv: ["task", "check"]
+    cwd: tools
+    env:
+      ORC_MODE: deterministic
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: verify
+      done/failed: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+  verify:
+    kind: script
+    script:
+      path: scripts/verify.sh
+      args: ["--strict"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: ready_for_human
+      done/failed: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+`
+	root := writeMinimalProject(t, projectFixture{workflow: workflow})
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	check := project.Workflows["implementation"].Steps["check"]
+	if check.EffectiveKind() != StepKindCommand || !slices.Equal(check.Command.Argv, []string{"task", "check"}) {
+		t.Fatalf("check step = %+v, want command argv", check)
+	}
+	verify := project.Workflows["implementation"].Steps["verify"]
+	if verify.EffectiveKind() != StepKindScript || verify.Script.Path != "scripts/verify.sh" {
+		t.Fatalf("verify step = %+v, want script path", verify)
+	}
+	if len(project.Workflows["implementation"].ReferencedAgents) != 0 {
+		t.Fatalf("referenced agents = %+v, want none for deterministic-only workflow", project.Workflows["implementation"].ReferencedAgents)
+	}
+}
+
+func TestLoadRejectsInvalidStepKinds(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepYAML string
+		contains []string
+	}{
+		{
+			name: "command with agent",
+			stepYAML: `kind: command
+agent: planner
+command:
+  argv: ["task", "check"]`,
+			contains: []string{`kind command must not set agent`},
+		},
+		{
+			name: "command missing argv",
+			stepYAML: `kind: command
+command: {}`,
+			contains: []string{`command.argv must declare at least one argument`},
+		},
+		{
+			name: "script with traversal path",
+			stepYAML: `kind: script
+script:
+  path: ../verify.sh`,
+			contains: []string{`script.path "../verify.sh" must be clean and stay under repository root`},
+		},
+		{
+			name: "agent with command",
+			stepYAML: `agent: planner
+command:
+  argv: ["task", "check"]`,
+			contains: []string{`kind agent must not set command`},
+		},
+		{
+			name: "agent with script body",
+			stepYAML: `agent: planner
+script:
+  body: echo unsupported`,
+			contains: []string{`script.body is not supported in v1`},
+		},
+		{
+			name: "command with script body",
+			stepYAML: `kind: command
+command:
+  argv: ["task", "check"]
+script:
+  body: echo unsupported`,
+			contains: []string{`script.body is not supported in v1`},
+		},
+		{
+			name: "unsupported kind",
+			stepYAML: `kind: shell
+command:
+  argv: ["task", "check"]`,
+			contains: []string{`unsupported kind "shell"`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{workflow: workflowWithRawStep(tt.stepYAML)})
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
+	}
+}
+
 func TestLoadWorkflowLoopCaps(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -510,6 +637,35 @@ func generatedWorkflowCase(t *testing.T, name string, mutate func(Workflow) Work
 
 func workflowWithoutRetries(t *testing.T) string {
 	return removeOnce(t, workflowYAML(t, nil), "  retries: {}\n")
+}
+
+func workflowWithRawStep(stepYAML string) string {
+	var b strings.Builder
+	b.WriteString(`name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries: {}
+steps:
+  plan:
+`)
+	for line := range strings.SplitSeq(strings.TrimRight(stepYAML, "\n"), "\n") {
+		b.WriteString("    ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	b.WriteString(`    allowed_results:
+      done: [passed]
+    on:
+      done/passed: ready_for_human
+`)
+	return b.String()
 }
 
 func minimalWorkflowSpec() Workflow {

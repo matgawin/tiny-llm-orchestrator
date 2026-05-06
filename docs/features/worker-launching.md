@@ -34,7 +34,7 @@ and never launches a worker.
 ## Launch Contract
 
 The launcher loads project config, loads the run, and asks the workflow engine
-for the next decision. A worker launches for `select_step` and `retry_step`.
+for the next decision. `select_step` and `retry_step` are executable decisions.
 Terminal runs do not launch. Runs with an active attempt refuse a second worker
 until that active attempt terminalizes or is recovered.
 
@@ -54,7 +54,7 @@ worker, and increments the target state's count to the previously blocked
 prospective count. The override does not raise configured caps or reset loop
 counters; a later hard-cap hit requires another explicit continue command.
 
-Each launch creates a `starting` attempt before rendering the worker prompt.
+Agent launches create a `starting` attempt before rendering the worker prompt.
 The attempt becomes `active` only after process metadata is recorded. The
 attempt records:
 
@@ -81,9 +81,35 @@ worker environment, and receives the rendered prompt on stdin. In the Nix
 development shell, `codex` is the repo wrapper that adds the Beads directory
 before invoking the underlying Codex binary.
 
+Command and script steps use the same selected-step, active-attempt, retry,
+timeout, and persisted status lifecycle, but they execute a deterministic local
+foreground process instead of launching an LLM worker. `orc run next` remains
+read-only for these steps and prints that the deterministic step was selected
+without executing it. `orc worker launch-next <run-id>` executes the selected
+command or script.
+
+Command steps pass `command.argv` directly to `exec` with no shell
+interpretation. Script steps execute the configured repository-relative script
+path plus args directly. Both kinds run from the repository root unless a
+repo-relative `cwd` is configured, inherit the launcher environment, apply
+configured `env` overrides, and run with closed stdin. They are bounded,
+non-interactive foreground executions, not daemon, watcher, background-job, or
+general async job-runner steps.
+
+Orc writes command/script reports itself; subprocesses do not call
+`orc report`. Exit mapping is fixed in v1:
+
+- exit code 0: `done/passed`
+- nonzero exit: `done/failed`
+- workflow timeout: `failed/timeout`
+- spawn or setup error: `failed/process_error`
+
+The generated outcome must be declared in the step's `allowed_results`; normal
+workflow evaluation rejects undeclared outcomes instead of silently routing.
+
 ## Logs
 
-Worker stdout and stderr stream into one combined run-store `log` artifact while
+Agent worker stdout and stderr stream into one combined run-store `log` artifact while
 the process runs:
 
 - The launcher records the log artifact and links it from the starting attempt
@@ -96,6 +122,13 @@ the process runs:
   finishes.
 - After the attempt terminalizes, the log remains readable but is no longer
   appendable through the run-store streaming append API.
+
+Command and script steps persist stdout and stderr as separate full `log`
+artifacts whose names include the step id, attempt id, and stream identity.
+Failure report summaries include bounded stream tails, labeled as stdout and
+stderr. The default displayed tail is the last 100 lines or 12 KiB, whichever
+is smaller; full streams remain in the run artifacts for inspection and later
+prompt or summary context.
 
 ## No-Report Outcomes
 

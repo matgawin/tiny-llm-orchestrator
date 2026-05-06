@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
+	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/workflow"
@@ -24,6 +27,7 @@ import (
 const (
 	launcherStatusDone  = "done"
 	launcherResultReady = "ready"
+	launcherCodeStep    = "code"
 )
 
 func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
@@ -44,7 +48,7 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 		t.Fatal("Launched = false, want true")
 	}
 	if result.Attempt.State != runstore.AttemptStateMissingReport ||
-		result.Attempt.Status != "failed" ||
+		result.Attempt.Status != reportStatusFailed ||
 		result.Attempt.Result != "missing_report" {
 		t.Fatalf("attempt = %+v, want failed/missing_report", result.Attempt)
 	}
@@ -68,6 +72,245 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	}
 	if got := len(loaded.Status.Attempts); got != 1 {
 		t.Fatalf("attempt history len = %d, want 1", got)
+	}
+}
+
+func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Argv: []string{"sh", "-c", "printf stdout-$ORC_TEST; printf stderr >&2"},
+		Env:  map[string]string{"ORC_TEST": "override"},
+	})
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if !result.Launched {
+		t.Fatal("Launched = false, want true")
+	}
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != launcherStatusDone || result.Attempt.Result != resultCommandPassed {
+		t.Fatalf("attempt = %+v, want reported done/passed", result.Attempt)
+	}
+	if result.Attempt.Report == nil || !strings.Contains(result.Attempt.Report.Summary, "command step finished with done/passed") {
+		t.Fatalf("report = %+v, want system command report", result.Attempt.Report)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "stdout-override")
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stderr", "stderr")
+}
+
+func TestLaunchNextResolvesCommandStepFromConfiguredPATH(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Argv: []string{"orc-test-command"},
+		Env:  map[string]string{"PATH": "tools"},
+	})
+	writeLauncherExecutable(t, filepath.Join(root, "tools", "orc-test-command"), "#!/bin/sh\nprintf command-path-override\n")
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != launcherStatusDone || result.Attempt.Result != resultCommandPassed {
+		t.Fatalf("attempt = %+v, want reported done/passed", result.Attempt)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "command-path-override")
+}
+
+func TestLaunchNextExecutesScriptStep(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Kind:       config.StepKindScript,
+		ScriptPath: "scripts/check.sh",
+		ScriptArgs: []string{"alpha"},
+		Env:        map[string]string{"ORC_TEST": "script-env"},
+	})
+	writeLauncherExecutable(t, filepath.Join(root, "scripts", "check.sh"), "#!/bin/sh\nprintf 'script-%s-%s' \"$1\" \"$ORC_TEST\"\n")
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != launcherStatusDone || result.Attempt.Result != resultCommandPassed {
+		t.Fatalf("attempt = %+v, want reported done/passed", result.Attempt)
+	}
+	if result.Attempt.Report == nil || !strings.Contains(result.Attempt.Report.Summary, "script step finished with done/passed") {
+		t.Fatalf("report = %+v, want system script report", result.Attempt.Report)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "script-alpha-script-env")
+}
+
+func TestLaunchNextRejectsScriptSymlinkEscape(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Kind:       config.StepKindScript,
+		ScriptPath: "scripts/escape.sh",
+	})
+	outsideDir := t.TempDir()
+	outsideScript := filepath.Join(outsideDir, "escape.sh")
+	writeLauncherExecutable(t, outsideScript, "#!/bin/sh\ntrue\n")
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o750); err != nil {
+		t.Fatalf("create scripts dir: %v", err)
+	}
+	if err := os.Symlink(outsideScript, filepath.Join(root, "scripts", "escape.sh")); err != nil {
+		t.Fatalf("create escaping script symlink: %v", err)
+	}
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err == nil || !strings.Contains(err.Error(), `path "scripts/escape.sh" escapes repository root`) {
+		t.Fatalf("LaunchNext error = %v, want script escape error", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateReported ||
+		result.Attempt.Status != reportStatusFailed ||
+		result.Attempt.Result != resultProcessError ||
+		result.Attempt.ExitState != exitStateStartFailed {
+		t.Fatalf("attempt = %+v, want reported failed/process_error start_failed", result.Attempt)
+	}
+}
+
+func TestLaunchNextRoutesFailingCommandStepBackToCode(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Argv: []string{"sh", "-c", "echo nope >&2; exit 7"},
+	})
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if result.Attempt.Status != "done" || result.Attempt.Result != "failed" {
+		t.Fatalf("attempt outcome = %s/%s, want done/failed", result.Attempt.Status, result.Attempt.Result)
+	}
+	if result.Attempt.ExitCode == nil || *result.Attempt.ExitCode != 7 || result.Attempt.ExitState != exitStateExited {
+		t.Fatalf("attempt exit = code %+v state %q, want 7/exited", result.Attempt.ExitCode, result.Attempt.ExitState)
+	}
+	if result.Attempt.Report == nil || !strings.Contains(result.Attempt.Report.Summary, "stderr tail:\nnope") {
+		t.Fatalf("summary = %q, want stderr tail", result.Attempt.Report.Summary)
+	}
+	loaded, err := runcontext.Load(root, runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	decision, err := workflow.Evaluate(loaded.Workflow, runstate.WorkflowState(loaded.Run.Status))
+	if err != nil {
+		t.Fatalf("Evaluate returned error: %v", err)
+	}
+	if decision.Kind != workflow.DecisionSelectStep || decision.Step != launcherCodeStep {
+		t.Fatalf("decision = %+v, want select code", decision)
+	}
+	reloaded := loadLauncherRun(t, root, runID)
+	got := reloaded.Status.Attempts[len(reloaded.Status.Attempts)-1]
+	if got.ExitCode == nil || *got.ExitCode != 7 || got.ExitState != exitStateExited {
+		t.Fatalf("reloaded attempt exit = code %+v state %q, want 7/exited", got.ExitCode, got.ExitState)
+	}
+}
+
+func TestLaunchNextUndeclaredCommandOutcomePersistsOriginalConfigError(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Argv: []string{"sh", "-c", "echo nope >&2; exit 7"},
+		AllowedResults: `    allowed_results:
+      done: [passed]
+      failed: [timeout, process_error]
+`,
+		On: `    on:
+      done/passed: ready_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+`,
+	})
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err == nil || !strings.Contains(err.Error(), `step generated outcome "done/failed" is not declared in allowed_results`) {
+		t.Fatalf("LaunchNext error = %v, want undeclared generated outcome", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateReported ||
+		result.Attempt.Status != reportStatusDone ||
+		result.Attempt.Result != resultCommandFailed {
+		t.Fatalf("attempt = %+v, want original reported done/failed", result.Attempt)
+	}
+	if result.Attempt.Report == nil || !strings.Contains(result.Attempt.Report.Summary, "command step finished with done/failed") {
+		t.Fatalf("report = %+v, want original generated outcome report", result.Attempt.Report)
+	}
+	loaded, err := runcontext.Load(root, runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if _, err := workflow.Evaluate(loaded.Workflow, runstate.WorkflowState(loaded.Run.Status)); err == nil ||
+		!strings.Contains(err.Error(), `step "check" outcome "done/failed" is not declared in allowed_results`) {
+		t.Fatalf("Evaluate error = %v, want undeclared original outcome config error", err)
+	}
+}
+
+func TestLaunchNextRecordsSystemReportForCommandSpawnError(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Argv: []string{"/definitely-missing-orc-command"},
+	})
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "definitely-missing-orc-command") {
+		t.Fatalf("LaunchNext error = %v, want missing command error", err)
+	}
+	if result.Launched {
+		t.Fatal("Launched = true, want false for spawn error")
+	}
+	if result.Attempt.State != runstore.AttemptStateReported ||
+		result.Attempt.Status != reportStatusFailed ||
+		result.Attempt.Result != resultProcessError ||
+		result.Attempt.ExitState != exitStateStartFailed {
+		t.Fatalf("attempt = %+v, want reported failed/process_error start_failed", result.Attempt)
+	}
+	if result.Attempt.Report == nil || !strings.Contains(result.Attempt.Report.Summary, "command step finished with failed/process_error") {
+		t.Fatalf("report = %+v, want system process_error report", result.Attempt.Report)
+	}
+	reloaded := loadLauncherRun(t, root, runID)
+	got := reloaded.Status.Attempts[len(reloaded.Status.Attempts)-1]
+	if got.Report == nil || got.ExitState != exitStateStartFailed {
+		t.Fatalf("reloaded attempt = %+v, want persisted report and exit state", got)
+	}
+}
+
+func TestLaunchNextMapsCommandTimeout(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Timeout: "20ms",
+		Argv:    []string{"sh", "-c", "sleep 1"},
+	})
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != reportStatusFailed || result.Attempt.Result != resultTimeout {
+		t.Fatalf("attempt = %+v, want reported failed/timeout", result.Attempt)
 	}
 }
 
@@ -1321,6 +1564,43 @@ type launcherRunOptions struct {
 	ReportExitGrace string
 }
 
+type commandWorkflowOptions struct {
+	Timeout        string
+	Kind           string
+	Argv           []string
+	ScriptPath     string
+	ScriptArgs     []string
+	Env            map[string]string
+	AllowedResults string
+	On             string
+}
+
+func createCommandLauncherRun(t *testing.T, opts commandWorkflowOptions) (string, string) {
+	t.Helper()
+	if opts.Timeout == "" {
+		opts.Timeout = "200ms"
+	}
+	if opts.Kind == "" {
+		opts.Kind = config.StepKindCommand
+	}
+	if opts.Kind == config.StepKindCommand && len(opts.Argv) == 0 {
+		opts.Argv = []string{"sh", "-c", "true"}
+	}
+	root := t.TempDir()
+	writeCommandLauncherProject(t, root, opts)
+	store := openLauncherStore(t, root)
+	run, err := store.Create(runstore.CreateRunRequest{
+		RunID:        "launcher-run",
+		Workflow:     "implementation",
+		InitialState: "check",
+		Time:         fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	return root, run.ID
+}
+
 func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRunOptions) (string, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -1382,23 +1662,23 @@ func writeLoopCapLauncherProject(t *testing.T, root, defaultCaps, workflowCaps s
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
-	var config strings.Builder
-	config.WriteString("version: 1\n")
+	var configYAML strings.Builder
+	configYAML.WriteString("version: 1\n")
 	if strings.TrimSpace(defaultCaps) != "" {
-		config.WriteString("defaults:\n  loop_caps:\n")
+		configYAML.WriteString("defaults:\n  loop_caps:\n")
 		for line := range strings.SplitSeq(strings.TrimRight(defaultCaps, "\n"), "\n") {
-			config.WriteString("    " + line + "\n")
+			configYAML.WriteString("    " + line + "\n")
 		}
 	}
-	config.WriteString("workflows:\n  implementation:\n    path: workflows/implementation.yaml\n")
+	configYAML.WriteString("workflows:\n  implementation:\n    path: workflows/implementation.yaml\n")
 	if strings.TrimSpace(workflowCaps) != "" {
-		config.WriteString("    loop_caps:\n")
+		configYAML.WriteString("    loop_caps:\n")
 		for line := range strings.SplitSeq(strings.TrimRight(workflowCaps, "\n"), "\n") {
-			config.WriteString("      " + line + "\n")
+			configYAML.WriteString("      " + line + "\n")
 		}
 	}
-	config.WriteString("agents:\n  planner: agents/planner.md\n")
-	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), config.String())
+	configYAML.WriteString("agents:\n  planner: agents/planner.md\n")
+	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), configYAML.String())
 	writeLauncherFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
 	writeLauncherFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
 start: plan
@@ -1514,6 +1794,85 @@ func writeLauncherProject(t *testing.T, root, timeout string, opts launcherRunOp
 		TwoStep:          opts.TwoStep,
 		Retries:          opts.Retries,
 	})
+}
+
+func writeCommandLauncherProject(t *testing.T, root string, opts commandWorkflowOptions) {
+	t.Helper()
+	orcDir := filepath.Join(root, ".orc")
+	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
+		t.Fatalf("create workflows dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
+		t.Fatalf("create agents dir: %v", err)
+	}
+	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  coder: agents/coder.md\n")
+	writeLauncherFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
+	var workflowYAML strings.Builder
+	workflowYAML.WriteString("name: implementation\nstart: check\nexecution:\n  mode: sequential\ntask_context:\n  beads: optional\n  markdown_fallback: true\ndefaults:\n  timeout: " + opts.Timeout + "\n  report_exit_grace: 30ms\n  retries: {}\nsteps:\n  check:\n    kind: " + opts.Kind + "\n")
+	switch opts.Kind {
+	case config.StepKindScript:
+		workflowYAML.WriteString("    script:\n      path: " + strconv.Quote(opts.ScriptPath) + "\n")
+		if len(opts.ScriptArgs) > 0 {
+			workflowYAML.WriteString("      args: [")
+			for i, arg := range opts.ScriptArgs {
+				if i > 0 {
+					workflowYAML.WriteString(", ")
+				}
+				workflowYAML.WriteString(strconv.Quote(arg))
+			}
+			workflowYAML.WriteString("]\n")
+		}
+	default:
+		workflowYAML.WriteString("    command:\n      argv: [")
+		for i, arg := range opts.Argv {
+			if i > 0 {
+				workflowYAML.WriteString(", ")
+			}
+			workflowYAML.WriteString(strconv.Quote(arg))
+		}
+		workflowYAML.WriteString("]\n")
+	}
+	if len(opts.Env) > 0 {
+		workflowYAML.WriteString("    env:\n")
+		keys := make([]string, 0, len(opts.Env))
+		for key := range opts.Env {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			workflowYAML.WriteString("      " + key + ": " + strconv.Quote(opts.Env[key]) + "\n")
+		}
+	}
+	if opts.AllowedResults != "" {
+		workflowYAML.WriteString(opts.AllowedResults)
+	} else {
+		workflowYAML.WriteString(`    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+`)
+	}
+	if opts.On != "" {
+		workflowYAML.WriteString(opts.On)
+	} else {
+		workflowYAML.WriteString(`    on:
+      done/passed: ready_for_human
+      done/failed: code
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+`)
+	}
+	workflowYAML.WriteString(`  code:
+    agent: coder
+    allowed_results:
+      done: [ready]
+      failed: [missing_report, process_error, timeout]
+    on:
+      done/ready: ready_for_human
+      failed/missing_report: blocked_for_human
+      failed/process_error: blocked_for_human
+      failed/timeout: blocked_for_human
+`)
+	writeLauncherFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), workflowYAML.String())
 }
 
 func openLauncherStore(t *testing.T, root string) *runstore.Store {
@@ -1854,6 +2213,21 @@ func readLauncherArtifact(t *testing.T, root, runID string, ref runstore.Artifac
 	return content
 }
 
+func assertLogArtifactContains(t *testing.T, root string, run *runstore.Run, attemptID, stream, want string) {
+	t.Helper()
+	for _, ref := range run.Status.Artifacts {
+		if ref.Kind != runstore.KindLog || !strings.Contains(ref.Name, attemptID+"-"+stream) {
+			continue
+		}
+		content := readLauncherArtifact(t, root, run.ID, ref)
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("%s log %s = %q, want %q", stream, ref.Path, content, want)
+		}
+		return
+	}
+	t.Fatalf("no %s log artifact found for attempt %s in %+v", stream, attemptID, run.Status.Artifacts)
+}
+
 func allLauncherLogs(t *testing.T, root, runID string) string {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(root, ".orc", "runs", runID, "logs", "*.log"))
@@ -1872,6 +2246,16 @@ func writeLauncherFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func writeLauncherExecutable(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("create executable dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o750); err != nil {
+		t.Fatalf("write executable %s: %v", path, err)
 	}
 }
 

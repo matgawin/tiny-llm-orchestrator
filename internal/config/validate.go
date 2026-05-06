@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 )
 
 const (
@@ -87,11 +89,8 @@ func validateWorkflowShape(workflow Workflow) error {
 }
 
 func validateStep(stepName string, step Step, steps map[string]Step, agents map[string]Agent) (resultPairSet, error) {
-	if step.Agent == "" {
-		return nil, fmt.Errorf("step %q agent is required", stepName)
-	}
-	if _, ok := agents[step.Agent]; !ok {
-		return nil, fmt.Errorf("step %q references missing agent %q", stepName, step.Agent)
+	if err := validateStepKind(stepName, step, agents); err != nil {
+		return nil, err
 	}
 	if len(step.AllowedResults) == 0 {
 		return nil, fmt.Errorf("step %q allowed_results are required", stepName)
@@ -106,6 +105,83 @@ func validateStep(stepName string, step Step, steps map[string]Step, agents map[
 	}
 
 	return stepPairs, nil
+}
+
+func validateStepKind(stepName string, step Step, agents map[string]Agent) error {
+	kind := step.EffectiveKind()
+	if step.Script.Body != "" {
+		return fmt.Errorf("step %q script.body is not supported in v1", stepName)
+	}
+	switch kind {
+	case StepKindAgent:
+		if step.Agent == "" {
+			return fmt.Errorf("step %q agent is required", stepName)
+		}
+		if len(step.Command.Argv) > 0 {
+			return fmt.Errorf("step %q kind agent must not set command", stepName)
+		}
+		if step.Script.Path != "" || len(step.Script.Args) > 0 {
+			return fmt.Errorf("step %q kind agent must not set script", stepName)
+		}
+		if _, ok := agents[step.Agent]; !ok {
+			return fmt.Errorf("step %q references missing agent %q", stepName, step.Agent)
+		}
+	case StepKindCommand:
+		if step.Agent != "" {
+			return fmt.Errorf("step %q kind command must not set agent", stepName)
+		}
+		if len(step.Command.Argv) == 0 {
+			return fmt.Errorf("step %q command.argv must declare at least one argument", stepName)
+		}
+		for i, arg := range step.Command.Argv {
+			if arg == "" {
+				return fmt.Errorf("step %q command.argv[%d] is empty", stepName, i)
+			}
+		}
+		if step.Script.Path != "" || len(step.Script.Args) > 0 {
+			return fmt.Errorf("step %q kind command must not set script", stepName)
+		}
+	case StepKindScript:
+		if step.Agent != "" {
+			return fmt.Errorf("step %q kind script must not set agent", stepName)
+		}
+		if len(step.Command.Argv) > 0 {
+			return fmt.Errorf("step %q kind script must not set command", stepName)
+		}
+		if step.Script.Path == "" {
+			return fmt.Errorf("step %q script.path is required", stepName)
+		}
+		if err := validateRepoRelativePath("step "+stepName+" script.path", step.Script.Path); err != nil {
+			return err
+		}
+		for i, arg := range step.Script.Args {
+			if arg == "" {
+				return fmt.Errorf("step %q script.args[%d] is empty", stepName, i)
+			}
+		}
+	default:
+		return fmt.Errorf("step %q has unsupported kind %q; allowed: agent, command, script", stepName, step.Kind)
+	}
+	if step.CWD != "" {
+		if err := validateRepoRelativePath("step "+stepName+" cwd", step.CWD); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRepoRelativePath(name, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if filepath.IsAbs(value) {
+		return fmt.Errorf("%s %q must be repo-relative", name, value)
+	}
+	clean := filepath.Clean(value)
+	if clean != value || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s %q must be clean and stay under repository root", name, value)
+	}
+	return nil
 }
 
 func validateAllowedResults(stepName string, allowedResults map[string][]string) (resultPairSet, error) {
@@ -266,6 +342,9 @@ func applyLoopCapsConfig(effective EffectiveLoopCaps, caps LoopCapsConfig) Effec
 func workflowAgentRefs(workflow Workflow, agentPaths map[string]string) map[string]AgentRef {
 	refs := map[string]AgentRef{}
 	for _, step := range workflow.Steps {
+		if step.EffectiveKind() != StepKindAgent {
+			continue
+		}
 		refs[step.Agent] = AgentRef{
 			ID:   step.Agent,
 			Path: agentPaths[step.Agent],
