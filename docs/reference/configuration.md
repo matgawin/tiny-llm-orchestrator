@@ -100,11 +100,46 @@ subagents when the active worker runtime exposes those capabilities.
 Required fields:
 
 - `version`: currently `1`
-- `workflows`: map of workflow name to `.orc`-relative workflow file path
+- `workflows`: map of workflow name to either a legacy `.orc`-relative
+  workflow file path scalar or an object with `path` and optional `loop_caps`
 - `agents`: map of agent id to `.orc`-relative descriptor file path
 
 The `workflows` and `agents` maps must each contain at least one entry.
 Referenced paths must be relative to `.orc`; absolute paths, traversal outside `.orc`, and symlink escapes are rejected.
+
+Project config also supports workflow loop cap defaults:
+
+```yaml
+defaults:
+  loop_caps:
+    enabled: true
+    soft: 2
+    hard: 4
+```
+
+`defaults.loop_caps` may be omitted for older configs. Missing loop cap config
+resolves to the built-in default `enabled: true`, `soft: 2`, and `hard: 4`.
+New scaffolded configs include those values explicitly.
+
+Workflow-level loop cap overrides use the expanded workflow object form:
+
+```yaml
+workflows:
+  implementation:
+    path: workflows/implementation.yaml
+    loop_caps:
+      hard: 6
+```
+
+Workflow overrides merge with `defaults.loop_caps`, so partial overrides inherit
+omitted fields. `enabled: false` is the only supported disable signal. When the
+effective value is disabled, `soft` and `hard` may be omitted and are ignored if
+present. When the effective value is enabled, `soft` and `hard` must resolve to
+positive integers, and `hard` must be greater than `soft`. Negative caps are
+always invalid; zero caps are invalid when the effective value is enabled. Loop
+caps apply only to workflow routing loops. They do not change agent execution
+retry caps, report validation retries, or the `defaults.retries` workflow
+outcome retry policy.
 
 ## Workflow Files
 

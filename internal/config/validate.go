@@ -5,6 +5,12 @@ import (
 	"fmt"
 )
 
+const (
+	defaultLoopCapsEnabled = true
+	defaultLoopCapsSoft    = 2
+	defaultLoopCapsHard    = 4
+)
+
 func validateProjectConfig(cfg ProjectConfig) error {
 	if cfg.Version != schemaVersion {
 		return fmt.Errorf("config version = %d, want %d", cfg.Version, schemaVersion)
@@ -14,6 +20,21 @@ func validateProjectConfig(cfg ProjectConfig) error {
 	}
 	if len(cfg.Agents) == 0 {
 		return errors.New("config must declare at least one agent")
+	}
+	if err := validateLoopCapsConfig("defaults.loop_caps", cfg.Defaults.LoopCaps); err != nil {
+		return err
+	}
+	for name, ref := range cfg.Workflows {
+		if ref.Path == "" {
+			return fmt.Errorf("workflow %q path is required", name)
+		}
+		if err := validateLoopCapsConfig(fmt.Sprintf("workflows.%s.loop_caps", name), ref.LoopCaps); err != nil {
+			return err
+		}
+		effective := resolveLoopCaps(cfg.Defaults.LoopCaps, ref.LoopCaps)
+		if err := validateEffectiveLoopCaps(fmt.Sprintf("workflows.%s.loop_caps", name), effective); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -190,6 +211,56 @@ func validatePositiveDuration(name string, value Duration) error {
 		return fmt.Errorf("%s must be > 0, got %s", name, value.Duration)
 	}
 	return nil
+}
+
+func validateLoopCapsConfig(name string, caps LoopCapsConfig) error {
+	if caps.Soft.Set && caps.Soft.Value < 0 {
+		return fmt.Errorf("%s.soft must be >= 0, got %d", name, caps.Soft.Value)
+	}
+	if caps.Hard.Set && caps.Hard.Value < 0 {
+		return fmt.Errorf("%s.hard must be >= 0, got %d", name, caps.Hard.Value)
+	}
+	return nil
+}
+
+func validateEffectiveLoopCaps(name string, caps EffectiveLoopCaps) error {
+	if !caps.Enabled {
+		return nil
+	}
+	if caps.Soft <= 0 {
+		return fmt.Errorf("%s.soft must be > 0 when enabled, got %d", name, caps.Soft)
+	}
+	if caps.Hard <= 0 {
+		return fmt.Errorf("%s.hard must be > 0 when enabled, got %d", name, caps.Hard)
+	}
+	if caps.Hard <= caps.Soft {
+		return fmt.Errorf("%s.hard must be greater than soft when enabled, got hard=%d soft=%d", name, caps.Hard, caps.Soft)
+	}
+	return nil
+}
+
+func resolveLoopCaps(defaults, workflow LoopCapsConfig) EffectiveLoopCaps {
+	effective := EffectiveLoopCaps{
+		Enabled: defaultLoopCapsEnabled,
+		Soft:    defaultLoopCapsSoft,
+		Hard:    defaultLoopCapsHard,
+	}
+	effective = applyLoopCapsConfig(effective, defaults)
+	effective = applyLoopCapsConfig(effective, workflow)
+	return effective
+}
+
+func applyLoopCapsConfig(effective EffectiveLoopCaps, caps LoopCapsConfig) EffectiveLoopCaps {
+	if caps.Enabled.Set {
+		effective.Enabled = caps.Enabled.Value
+	}
+	if caps.Soft.Set {
+		effective.Soft = caps.Soft.Value
+	}
+	if caps.Hard.Set {
+		effective.Hard = caps.Hard.Value
+	}
+	return effective
 }
 
 func workflowAgentRefs(workflow Workflow, agentPaths map[string]string) map[string]AgentRef {

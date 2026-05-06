@@ -37,7 +37,7 @@ func Load(projectRoot string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	workflows, err := loadWorkflows(orcDir, realOrcDir, cfg.Workflows, cfg.Agents, agents)
+	workflows, err := loadWorkflows(orcDir, realOrcDir, cfg.Defaults.LoopCaps, cfg.Workflows, cfg.Agents, agents)
 	if err != nil {
 		return nil, err
 	}
@@ -71,10 +71,10 @@ func loadAgents(orcDir, realOrcDir string, refs map[string]string) (map[string]A
 	return agents, nil
 }
 
-func loadWorkflows(orcDir, realOrcDir string, workflowPaths, agentPaths map[string]string, agents map[string]Agent) (map[string]Workflow, error) {
-	workflows := make(map[string]Workflow, len(workflowPaths))
-	for name, relPath := range workflowPaths {
-		path, err := resolveConfigRef(orcDir, realOrcDir, "workflow", name, relPath)
+func loadWorkflows(orcDir, realOrcDir string, defaults LoopCapsConfig, workflowRefs map[string]WorkflowReference, agentPaths map[string]string, agents map[string]Agent) (map[string]Workflow, error) {
+	workflows := make(map[string]Workflow, len(workflowRefs))
+	for name, ref := range workflowRefs {
+		path, err := resolveConfigRef(orcDir, realOrcDir, "workflow", name, ref.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -88,6 +88,7 @@ func loadWorkflows(orcDir, realOrcDir string, workflowPaths, agentPaths map[stri
 		if err := validateWorkflow(workflow, agents); err != nil {
 			return nil, fmt.Errorf("workflow %q: %w", name, err)
 		}
+		workflow.LoopCaps = resolveLoopCaps(defaults, ref.LoopCaps)
 		workflow.ReferencedAgents = workflowAgentRefs(workflow, agentPaths)
 		workflows[name] = workflow
 	}

@@ -51,6 +51,7 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 		t.Fatalf("generated config did not validate: %v", err)
 	}
 	assertGeneratedScaffoldMatchesFixture(t, root)
+	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4")
 	assertFileContains(t, filepath.Join(root, ".gitignore"), runsIgnoreEntry)
 	if info, err := os.Stat(filepath.Join(root, ".orc", "runs")); err != nil {
 		t.Fatalf(".orc/runs stat err = %v, want directory", err)

@@ -63,9 +63,52 @@ type Project struct {
 
 // ProjectConfig is the schema stored in .orc/config.yaml.
 type ProjectConfig struct {
-	Version   int               `yaml:"version"`
-	Workflows map[string]string `yaml:"workflows"`
-	Agents    map[string]string `yaml:"agents"`
+	Version   int                          `yaml:"version"`
+	Defaults  ProjectDefaults              `yaml:"defaults"`
+	Workflows map[string]WorkflowReference `yaml:"workflows"`
+	Agents    map[string]string            `yaml:"agents"`
+}
+
+// ProjectDefaults contains project-wide config defaults.
+type ProjectDefaults struct {
+	LoopCaps LoopCapsConfig `yaml:"loop_caps"`
+}
+
+// WorkflowReference points to a workflow file and optional per-workflow config.
+type WorkflowReference struct {
+	Path     string         `yaml:"path"`
+	LoopCaps LoopCapsConfig `yaml:"loop_caps"`
+}
+
+// UnmarshalYAML accepts both the legacy scalar workflow path and the expanded
+// object form used for workflow-level overrides.
+func (r *WorkflowReference) UnmarshalYAML(data []byte) error {
+	var path string
+	if err := yaml.Unmarshal(data, &path); err == nil {
+		r.Path = path
+		return nil
+	}
+	type workflowReference WorkflowReference
+	var expanded workflowReference
+	if err := yaml.Unmarshal(data, &expanded); err != nil {
+		return err
+	}
+	*r = WorkflowReference(expanded)
+	return nil
+}
+
+// LoopCapsConfig stores optional loop-cap fields from project config.
+type LoopCapsConfig struct {
+	Enabled RequiredBool `yaml:"enabled"`
+	Soft    OptionalInt  `yaml:"soft"`
+	Hard    OptionalInt  `yaml:"hard"`
+}
+
+// EffectiveLoopCaps is the resolved workflow loop-cap policy.
+type EffectiveLoopCaps struct {
+	Enabled bool
+	Soft    int
+	Hard    int
 }
 
 // Workflow is a validated workflow definition.
@@ -76,6 +119,7 @@ type Workflow struct {
 	TaskContext      TaskContext         `yaml:"task_context"`
 	VCS              VCSPolicy           `yaml:"vcs"`
 	Defaults         Defaults            `yaml:"defaults"`
+	LoopCaps         EffectiveLoopCaps   `yaml:"-"`
 	Steps            map[string]Step     `yaml:"steps"`
 	StepOrder        []string            `yaml:"-"`
 	SourcePath       string              `yaml:"-"`
@@ -175,6 +219,27 @@ func (b RequiredBool) MarshalYAML() (any, error) {
 		return nil, nil
 	}
 	return b.Value, nil
+}
+
+// OptionalInt tracks whether a YAML integer field was explicitly present.
+type OptionalInt struct {
+	Value int
+	Set   bool
+}
+
+// UnmarshalYAML parses an integer and records field presence.
+func (i *OptionalInt) UnmarshalYAML(data []byte) error {
+	i.Set = true
+	return yaml.Unmarshal(data, &i.Value)
+}
+
+// MarshalYAML emits the public integer scalar instead of internal presence
+// tracking fields.
+func (i OptionalInt) MarshalYAML() (any, error) {
+	if !i.Set {
+		return nil, nil
+	}
+	return i.Value, nil
 }
 
 // Step is a named workflow step after validation.
