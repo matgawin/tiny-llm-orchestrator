@@ -93,9 +93,13 @@ orc report --run <run-id> --step <step-id> --agent <agent-id> --attempt <attempt
 `status/result` pairs from workflow config. Reserved system-owned outcomes such
 as `failed/invalid_report`, `failed/missing_report`, `failed/timeout`,
 `failed/process_error`, and `failed/error` are not shown in the prompt because
-workers cannot submit them through `orc report`. Workers may also provide
-repeatable `--changed-path`, `--command`, `--test`, `--risk`, and `--follow-up`
-flags, or `--report-file <path>` for Markdown details. The command validates
+workers cannot submit them through `orc report`.
+
+Rendered prompts also list optional structured report fields: repeatable
+`--changed-path`, `--command`, `--test`, `--risk`, and `--follow-up` flags,
+`--report-file <path>` for Markdown details, and the alternative `orc report
+--json-file <path>` form for richer structured reports. The prompt tells workers
+not to combine `--json-file` with report field flags. The command validates
 required identity fields against the current `active_attempt` in attempt state
 `active` before persisting the structured report through the Run Store.
 

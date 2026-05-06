@@ -557,10 +557,24 @@ func scaffoldPaths() []string {
 	return []string{
 		".orc/config.yaml",
 		".orc/workflows/implementation.yaml",
+		".orc/workflows/bugfix.yaml",
+		".orc/workflows/mechanical-change.yaml",
+		".orc/workflows/test-only.yaml",
+		".orc/workflows/review-mechanical.yaml",
+		".orc/workflows/review-readability.yaml",
+		".orc/workflows/review-redundancy.yaml",
+		".orc/workflows/review-docs.yaml",
 		".orc/agents/planner.md",
 		".orc/agents/coder.md",
+		".orc/agents/mechanical-coder.md",
+		".orc/agents/bug-reproducer.md",
 		".orc/agents/tester.md",
+		".orc/agents/test-designer.md",
 		".orc/agents/reviewer.md",
+		".orc/agents/mechanical-reviewer.md",
+		".orc/agents/readability-reviewer.md",
+		".orc/agents/redundancy-reviewer.md",
+		".orc/agents/docs-reviewer.md",
 	}
 }
 

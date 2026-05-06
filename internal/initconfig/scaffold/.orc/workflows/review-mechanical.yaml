@@ -1,0 +1,35 @@
+name: review-mechanical
+start: mechanical-review
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+vcs:
+  dirty_start: allow
+  no_vcs: allow
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries:
+    failed/missing_report: 1
+    failed/timeout: 0
+    failed/invalid_report: 0
+    failed/process_error: 1
+    failed/error: 0
+steps:
+  mechanical-review:
+    agent: mechanical-reviewer
+    allowed_results:
+      done: [approved, changes_requested]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/approved: ready_for_human
+      done/changes_requested: ready_for_human
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human

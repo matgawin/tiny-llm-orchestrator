@@ -64,6 +64,15 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"`done/ready`",
 		"`blocked/blocked`",
 		"orc report --run prompt-run --step plan --agent planner --attempt attempt-001 --status <status> --result <result> --summary \"<summary>\"",
+		"Optional structured report fields:",
+		"`--changed-path <path>`",
+		"`--command <command>`",
+		"`--test <test>`",
+		"`--risk <risk>`",
+		"`--follow-up <title>`",
+		"`--report-file <path>`",
+		"`orc report --json-file <path>`",
+		"Do not combine `--json-file` with report field flags.",
 	})
 	for _, reserved := range []string{"failed/error", "failed/invalid_report", "failed/missing_report", "failed/timeout", "failed/process_error"} {
 		if strings.Contains(prompt, "`"+reserved+"`") {

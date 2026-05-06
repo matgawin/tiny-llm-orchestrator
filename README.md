@@ -27,6 +27,10 @@ runs from explicit bead or Markdown task context, evaluates deterministic
 workflow transitions, records local follow-up work, exposes read-only run
 inspection, renders internal worker prompts, launches workflow-selected worker
 processes, and provides durable run-store primitives.
+The default scaffold is intended to be usable immediately in a new project: it
+includes detailed role prompts and workflows for implementation, bugfix,
+mechanical changes, test-only work, and focused mechanical, readability,
+redundancy, and documentation reviews.
 
 In Tiny Orc docs and command output, "orchestrator" means the supervising
 caller that drives the `orc` CLI. In normal Codex use, that is the main Codex

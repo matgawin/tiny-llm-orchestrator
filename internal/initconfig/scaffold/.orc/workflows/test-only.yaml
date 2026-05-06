@@ -1,4 +1,4 @@
-name: implementation
+name: test-only
 start: plan
 execution:
   mode: sequential
@@ -25,28 +25,42 @@ steps:
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
-      done/ready: code
+      done/ready: test-design
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
       failed/missing_report: blocked_for_human
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
-  code:
+  test-design:
+    agent: test-designer
+    allowed_results:
+      done: [ready]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/ready: test-code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  test-code:
     agent: coder
     allowed_results:
       done: [ready]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
-      done/ready: test
+      done/ready: test-run
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
       failed/missing_report: blocked_for_human
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
-  test:
+  test-run:
     agent: tester
     allowed_results:
       done: [passed, failed]
@@ -54,7 +68,7 @@ steps:
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/passed: review
-      done/failed: code
+      done/failed: test-code
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
@@ -69,7 +83,7 @@ steps:
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/approved: ready_for_human
-      done/changes_requested: code
+      done/changes_requested: test-code
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human

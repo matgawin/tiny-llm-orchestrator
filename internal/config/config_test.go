@@ -19,6 +19,37 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+	for _, name := range []string{
+		"implementation",
+		"bugfix",
+		"mechanical-change",
+		"test-only",
+		"review-mechanical",
+		"review-readability",
+		"review-redundancy",
+		"review-docs",
+	} {
+		if _, ok := project.Workflows[name]; !ok {
+			t.Fatalf("workflow %q was not loaded", name)
+		}
+	}
+	for _, name := range []string{
+		"planner",
+		"coder",
+		"mechanical-coder",
+		"bug-reproducer",
+		"tester",
+		"test-designer",
+		"reviewer",
+		"mechanical-reviewer",
+		"readability-reviewer",
+		"redundancy-reviewer",
+		"docs-reviewer",
+	} {
+		if _, ok := project.Agents[name]; !ok {
+			t.Fatalf("agent %q was not loaded", name)
+		}
+	}
 
 	workflow := project.Workflows["implementation"]
 	if workflow.Name != "implementation" {
@@ -41,9 +72,6 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	}
 	if got, want := workflow.Defaults.Timeout.Duration, 30*time.Minute; got != want {
 		t.Fatalf("timeout = %s, want %s", got, want)
-	}
-	if _, ok := project.Agents["planner"]; !ok {
-		t.Fatal("planner agent was not loaded")
 	}
 	if got := project.Agents["planner"].Role; got != "planner" {
 		t.Fatalf("planner role = %q, want planner", got)

@@ -1,8 +1,22 @@
 version: 1
 workflows:
   implementation: workflows/implementation.yaml
+  bugfix: workflows/bugfix.yaml
+  mechanical-change: workflows/mechanical-change.yaml
+  test-only: workflows/test-only.yaml
+  review-mechanical: workflows/review-mechanical.yaml
+  review-readability: workflows/review-readability.yaml
+  review-redundancy: workflows/review-redundancy.yaml
+  review-docs: workflows/review-docs.yaml
 agents:
   planner: agents/planner.md
   coder: agents/coder.md
+  mechanical-coder: agents/mechanical-coder.md
+  bug-reproducer: agents/bug-reproducer.md
   tester: agents/tester.md
+  test-designer: agents/test-designer.md
   reviewer: agents/reviewer.md
+  mechanical-reviewer: agents/mechanical-reviewer.md
+  readability-reviewer: agents/readability-reviewer.md
+  redundancy-reviewer: agents/redundancy-reviewer.md
+  docs-reviewer: agents/docs-reviewer.md

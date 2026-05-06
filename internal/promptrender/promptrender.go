@@ -199,6 +199,7 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	out.WriteString(reportCommandIntro)
 	fmt.Fprintf(&out, "orc report --run %s --step %s --agent %s --attempt %s --status <status> --result <result> --summary \"<summary>\"\n", shellQuote(opts.RunID), shellQuote(opts.StepID), shellQuote(opts.AgentID), shellQuote(opts.AttemptID))
 	out.WriteString("```\n")
+	out.WriteString(reportOptionalFields)
 	return out.Bytes(), nil
 }
 
@@ -217,6 +218,20 @@ Allowed status/result pairs for this step:
 Use this command shape with one allowed status/result pair:
 
 ` + "```bash\n"
+
+	reportOptionalFields = `
+Optional structured report fields:
+
+- ` + "`--changed-path <path>`" + `: changed path; repeatable.
+- ` + "`--command <command>`" + `: command run; repeatable.
+- ` + "`--test <test>`" + `: test or verification result; repeatable.
+- ` + "`--risk <risk>`" + `: risk, caveat, or unverified area; repeatable.
+- ` + "`--follow-up <title>`" + `: follow-up suggestion title; repeatable.
+- ` + "`--report-file <path>`" + `: Markdown detail file to copy into the run store.
+
+For richer structured reports, you may instead write a JSON report file and use
+` + "`orc report --json-file <path>`" + `. Do not combine ` + "`--json-file`" + ` with report field flags.
+`
 )
 
 func renderPriorReports(reports []reportContext) string {

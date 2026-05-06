@@ -34,7 +34,6 @@ These features are useful, but are not required for the first useful version:
 - native Codex subagent execution
 - symlinks into Codex custom agent directories
 - automatic jj workspace creation
-- multiple built-in workflows, such as planning and documentation workflows
 - localhost HTTP report server
 - report delivery fallback from HTTP to direct file persistence
 - expected-path enforcement beyond recording observed changed paths
