@@ -23,6 +23,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 
 - Run start, task context capture, and dirty-start VCS policy: [run-start.md](run-start.md)
 - Run inspection commands: [run-inspection.md](run-inspection.md)
+- Summary context rendering: [summary-context.md](summary-context.md)
 - Follow-up recording: [follow-up-recording.md](follow-up-recording.md)
 - Worker report command and report persistence: [../PRD.md](../PRD.md#report-model)
 - Worker prompt rendering: [worker-prompt-rendering.md](worker-prompt-rendering.md)

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+
+	"github.com/goccy/go-yaml"
 )
 
 // Load reads .orc/config.yaml, all referenced workflows, and all referenced
@@ -101,10 +103,70 @@ func resolveConfigRef(orcDir, realOrcDir, kind, id, relPath string) (string, err
 }
 
 func loadWorkflow(realOrcDir, path string) (Workflow, error) {
-	var workflow Workflow
-	if err := readYAML(realOrcDir, path, &workflow); err != nil {
+	content, err := readConfigFile(realOrcDir, path)
+	if err != nil {
+		return Workflow{}, err
+	}
+	workflow, err := decodeWorkflow(content, path)
+	if err != nil {
 		return Workflow{}, err
 	}
 	workflow.SourcePath = path
 	return workflow, nil
+}
+
+type workflowConfigYAML struct {
+	Name        string        `yaml:"name"`
+	Start       string        `yaml:"start"`
+	Execution   Execution     `yaml:"execution"`
+	TaskContext TaskContext   `yaml:"task_context"`
+	VCS         VCSPolicy     `yaml:"vcs"`
+	Defaults    Defaults      `yaml:"defaults"`
+	Steps       yaml.MapSlice `yaml:"steps"`
+}
+
+func decodeWorkflow(content []byte, path string) (Workflow, error) {
+	var raw workflowConfigYAML
+	if err := yaml.Unmarshal(content, &raw); err != nil {
+		return Workflow{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	steps, stepOrder, err := decodeWorkflowSteps(raw.Steps, path)
+	if err != nil {
+		return Workflow{}, err
+	}
+	return Workflow{
+		Name:        raw.Name,
+		Start:       raw.Start,
+		Execution:   raw.Execution,
+		TaskContext: raw.TaskContext,
+		VCS:         raw.VCS,
+		Defaults:    raw.Defaults,
+		Steps:       steps,
+		StepOrder:   stepOrder,
+	}, nil
+}
+
+func decodeWorkflowSteps(rawSteps yaml.MapSlice, path string) (map[string]Step, []string, error) {
+	steps := make(map[string]Step, len(rawSteps))
+	order := make([]string, 0, len(rawSteps))
+	for _, item := range rawSteps {
+		stepID, ok := item.Key.(string)
+		if !ok {
+			continue
+		}
+		if _, exists := steps[stepID]; exists {
+			return nil, nil, fmt.Errorf("parse %s: duplicate step %q", path, stepID)
+		}
+		content, err := yaml.Marshal(item.Value)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse %s step %q: %w", path, stepID, err)
+		}
+		var step Step
+		if err := yaml.Unmarshal(content, &step); err != nil {
+			return nil, nil, fmt.Errorf("parse %s step %q: %w", path, stepID, err)
+		}
+		steps[stepID] = step
+		order = append(order, stepID)
+	}
+	return steps, order, nil
 }

@@ -57,6 +57,7 @@ Entrypoints:
 - run start, task context capture, and dirty-start VCS policy: `internal/runstart`, `internal/vcs`, and [docs/features/run-start.md](docs/features/run-start.md)
 - follow-up recording: [docs/features/follow-up-recording.md](docs/features/follow-up-recording.md)
 - run inspection behavior: [docs/features/run-inspection.md](docs/features/run-inspection.md)
+- summary context rendering: [docs/features/summary-context.md](docs/features/summary-context.md)
 - worker prompt rendering: `internal/promptrender` and [docs/features/worker-prompt-rendering.md](docs/features/worker-prompt-rendering.md)
 - worker launching and process supervision: `internal/launcher` and [docs/features/worker-launching.md](docs/features/worker-launching.md)
 - project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md)

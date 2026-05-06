@@ -241,6 +241,8 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return executeRunInspect("status", args[1:], stdout, stderr, runinspect.Status)
 	case "next":
 		return executeRunInspect("next", args[1:], stdout, stderr, runinspect.Next)
+	case "summary-context":
+		return executeRunInspect("summary-context", args[1:], stdout, stderr, runinspect.SummaryContext)
 	default:
 		if _, err := fmt.Fprintf(stderr, "%s run: unknown command %q\n\n", appName, args[0]); err != nil {
 			return err
@@ -476,10 +478,11 @@ Usage:
   %s run [command]
 
 Available Commands:
-  add-followup Record out-of-scope follow-up work
-  next         Inspect the next workflow action without launching it
-  start        Start a run from explicit task context
-  status       Show persisted run state
+  add-followup     Record out-of-scope follow-up work
+  next             Inspect the next workflow action without launching it
+  start            Start a run from explicit task context
+  status           Show persisted run state
+  summary-context  Render persisted review context
 
 Flags:
   -h, --help  Show command help

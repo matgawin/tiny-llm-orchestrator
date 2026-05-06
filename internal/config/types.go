@@ -77,6 +77,7 @@ type Workflow struct {
 	VCS              VCSPolicy           `yaml:"vcs"`
 	Defaults         Defaults            `yaml:"defaults"`
 	Steps            map[string]Step     `yaml:"steps"`
+	StepOrder        []string            `yaml:"-"`
 	SourcePath       string              `yaml:"-"`
 	ReferencedAgents map[string]AgentRef `yaml:"-"`
 }

@@ -248,6 +248,11 @@ func TestExecuteRunInspectCommands(t *testing.T) {
 			args: func(runID string) []string { return []string{"run", "next", runID} },
 			want: "decision: select_step",
 		},
+		{
+			name: "summary-context",
+			args: func(runID string) []string { return []string{"run", "summary-context", runID} },
+			want: "# Summary Context",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
@@ -270,6 +275,7 @@ func TestExecuteRunInspectUnknownRunFailsClearly(t *testing.T) {
 	}{
 		{name: "status", args: []string{"run", "status", "missing-run"}, want: `orc run status: run "missing-run" not found`},
 		{name: "next", args: []string{"run", "next", "missing-run"}, want: `orc run next: run "missing-run" not found`},
+		{name: "summary-context", args: []string{"run", "summary-context", "missing-run"}, want: `orc run summary-context: run "missing-run" not found`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)

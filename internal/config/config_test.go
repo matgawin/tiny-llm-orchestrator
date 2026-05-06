@@ -3,12 +3,15 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/goccy/go-yaml"
+
+	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
 func TestLoadValidImplementationWorkflow(t *testing.T) {
@@ -47,6 +50,23 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	}
 	if got := workflow.ReferencedAgents["planner"].Path; got != "agents/planner.md" {
 		t.Fatalf("planner workflow agent path = %q, want agents/planner.md", got)
+	}
+}
+
+func TestLoadWorkflowPreservesStepDeclarationOrder(t *testing.T) {
+	root := t.TempDir()
+	testutil.WriteProject(t, root, testutil.ProjectOptions{
+		MarkdownFallback: true,
+		TwoStep:          true,
+	})
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if got, want := project.Workflows["implementation"].StepOrder, []string{"plan", "code"}; !slices.Equal(got, want) {
+		t.Fatalf("workflow step order = %v, want %v", got, want)
 	}
 }
 

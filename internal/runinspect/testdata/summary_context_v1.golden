@@ -1,0 +1,129 @@
+# Summary Context
+
+## Run
+- run_id: "inspect-run"
+- workflow: "implementation"
+- persisted_state: "ready_for_human"
+- effective_state: "ready_for_human"
+- terminal_state: "ready_for_human"
+- last_sequence: 20
+
+## Task Context
+
+```md
+# Task
+
+Implement summary context.
+```
+
+## Workflow Path
+- step:
+  id: "plan"
+  agent: "planner"
+  attempts: 1
+- step:
+  id: "code"
+  agent: "coder"
+  attempts: 1
+- decision: "terminal"
+- terminal_reason: "ready_for_human"
+
+## Worker Reports
+### Report
+- step: "plan"
+- attempt: "attempt-plan"
+- agent: "planner"
+- outcome_status: "done"
+- outcome_result: "ready"
+- summary: "Plan approved."
+- report_artifact: "reports/000017-plan.md"
+### Report
+- step: "code"
+- attempt: "attempt-code"
+- agent: "coder"
+- outcome_status: "done"
+- outcome_result: "ready"
+- summary: "Code changed."
+- report_artifact: none
+
+## Changes
+### Worker Reported
+- "docs/features/summary-context.md"
+- "internal/runinspect/runinspect.go"
+### VCS Post-Run
+- "docs/features/summary-context.md"
+- "internal/runinspect/runinspect.go"
+- "preexisting.md"
+### VCS Pre-Existing
+- "preexisting.md"
+### VCS Newly Observed
+- "docs/features/summary-context.md"
+- "internal/runinspect/runinspect.go"
+### Combined
+- "docs/features/summary-context.md"
+- "internal/runinspect/runinspect.go"
+- "preexisting.md"
+
+## Commands And Tests
+### Commands
+- "go test ./internal/cli"
+- "go test ./internal/runinspect"
+### Tests
+- "go test ./internal/cli"
+- "go test ./internal/runinspect"
+
+## Risks
+- "format needs human approval"
+
+## Follow-Ups
+### Structured Report Follow-Ups
+- title: "Update release note"
+  details: "Mention summary-context."
+
+### Recorded Follow-Ups
+```md
+## Update release note
+
+Source: report
+Step: code
+Agent: coder
+Attempt: attempt-code
+Recorded-At: 2026-05-03T12:02:00Z
+
+Mention summary-context.
+
+## Create manual follow-up
+
+Source: orchestrator
+Recorded-At: 2026-05-03T12:04:00Z
+
+Human decides whether this becomes a bead.
+```
+
+## VCS
+### Pre-Run
+- artifact: "snapshots/000003-vcs-pre-run.json"
+- kind: "jj"
+- dirty: true
+- summary:
+```md
+Pre-existing dirty file: preexisting.md
+```
+#### Changed Paths
+- "preexisting.md"
+### Post-Run
+- artifact: "snapshots/000019-vcs-post-run.json"
+- kind: "jj"
+- dirty: true
+- summary:
+```md
+Modified files: docs/features/summary-context.md internal/runinspect/runinspect.go
+```
+#### Changed Paths
+- "docs/features/summary-context.md"
+- "internal/runinspect/runinspect.go"
+- "preexisting.md"
+
+## Suggested Human Review Focus
+- Review reported risks and caveats.
+- Review recorded follow-ups before final handoff.
