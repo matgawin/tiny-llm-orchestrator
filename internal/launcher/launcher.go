@@ -16,11 +16,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/loopcap"
+	"tiny-llm-orchestrator/orc/internal/progress"
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
@@ -75,12 +77,13 @@ func init() {
 
 // Options describes a worker launch request.
 type Options struct {
-	Root    string
-	RunID   string
-	Command []string
-	Env     []string
-	Time    time.Time
-	Stdout  io.Writer
+	Root     string
+	RunID    string
+	Command  []string
+	Env      []string
+	Time     time.Time
+	Stdout   io.Writer
+	Progress io.Writer
 }
 
 // Result describes the persisted launch outcome.
@@ -199,16 +202,25 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		}
 		softCap = &loopCap
 	}
-	if err := ctx.Err(); err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
+	progressDisplay, err := startLiveProgress(opts, attempt)
+	if err != nil {
+		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateStartFailed, runstore.ArtifactRef{}, at, err)
 		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
+	defer func() {
+		_ = progressDisplay.Close()
+	}()
+	if err := ctx.Err(); err != nil {
+		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
+		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
+	}
 	if step.EffectiveKind() == config.StepKindCommand || step.EffectiveKind() == config.StepKindScript {
-		attempt, stdoutRef, stderrRef, launched, err := runDeterministicStep(ctx, loaded, opts, attempt, step, at)
+		attempt, stdoutRef, stderrRef, launched, err := runDeterministicStep(ctx, loaded, opts, attempt, step, at, progressDisplay.Env())
 		result := Result{RunID: opts.RunID, Attempt: attempt, Log: stderrRef, Launched: launched, SoftCap: softCap}
 		if stdoutRef.Path != "" {
 			result.Log = stdoutRef
 		}
+		_ = progressDisplay.Close()
 		if err != nil {
 			if result.Attempt.AttemptID != "" {
 				printLaunchResult(opts.Stdout, result)
@@ -233,7 +245,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 			exitState = exitStateCanceled
 		}
 		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitState, runstore.ArtifactRef{}, at, err)
-		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
+		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
 	attempt, _, err = loaded.Store.RecordAttemptPrompt(opts.RunID, runstore.AttemptPromptRequest{
 		AttemptID: attempt.AttemptID,
@@ -242,11 +254,12 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	})
 	if err != nil {
 		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
-		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, Prompt: prompt.Ref, SoftCap: softCap}, finishErr)
+		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, Prompt: prompt.Ref, SoftCap: softCap}, finishErr)
 	}
 
-	attempt, logRef, launched, err := runProcess(ctx, loaded, opts, attempt, prompt.Content, at)
+	attempt, logRef, launched, err := runProcess(ctx, loaded, opts, attempt, prompt.Content, at, progressDisplay.Env())
 	result := Result{RunID: opts.RunID, Attempt: attempt, Prompt: prompt.Ref, Log: logRef, Launched: launched, SoftCap: softCap}
+	_ = progressDisplay.Close()
 	if err != nil {
 		if result.Attempt.AttemptID != "" {
 			printLaunchResult(opts.Stdout, result)
@@ -282,6 +295,92 @@ func terminalLaunchResult(stdout io.Writer, result Result, err error) (Result, e
 		printLaunchResult(stdout, result)
 	}
 	return result, err
+}
+
+func terminalLaunchResultWithProgress(stdout io.Writer, display *liveProgressDisplay, result Result, err error) (Result, error) {
+	_ = display.Close()
+	return terminalLaunchResult(stdout, result, err)
+}
+
+type liveProgressDisplay struct {
+	listener  *progress.Listener
+	runID     string
+	stepID    string
+	attemptID string
+	token     string
+	done      chan struct{}
+	once      sync.Once
+	err       error
+}
+
+func startLiveProgress(opts Options, attempt runstore.Attempt) (*liveProgressDisplay, error) {
+	token, err := progress.GenerateToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate progress token: %w", err)
+	}
+	listener, err := progress.NewListener()
+	if err != nil {
+		return nil, fmt.Errorf("start progress listener: %w", err)
+	}
+	if err := listener.Register(progress.Registration{
+		RunID:     opts.RunID,
+		StepID:    attempt.StepID,
+		AttemptID: attempt.AttemptID,
+		Token:     token,
+	}); err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("register progress attempt: %w", err)
+	}
+	display := &liveProgressDisplay{
+		listener:  listener,
+		runID:     opts.RunID,
+		stepID:    attempt.StepID,
+		attemptID: attempt.AttemptID,
+		token:     token,
+		done:      make(chan struct{}),
+	}
+	writer := opts.Progress
+	if writer == nil {
+		writer = opts.Stdout
+	}
+	if writer == nil {
+		writer = io.Discard
+	}
+	go func() {
+		defer close(display.done)
+		for msg := range listener.Accepted() {
+			_, _ = fmt.Fprintf(writer, "[%s %s] %s\n", msg.StepID, msg.AttemptID, msg.Message)
+		}
+	}()
+	return display, nil
+}
+
+func (d *liveProgressDisplay) Env() map[string]string {
+	if d == nil || d.listener == nil {
+		return nil
+	}
+	return map[string]string{
+		"ORC_PROGRESS_SOCKET": d.listener.SocketPath(),
+		"ORC_PROGRESS_TOKEN":  d.token,
+		"ORC_RUN_ID":          d.runID,
+		"ORC_STEP_ID":         d.stepID,
+		"ORC_ATTEMPT_ID":      d.attemptID,
+	}
+}
+
+func (d *liveProgressDisplay) Close() error {
+	if d == nil {
+		return nil
+	}
+	d.once.Do(func() {
+		if d.listener != nil {
+			d.err = d.listener.Close()
+		}
+		if d.done != nil {
+			<-d.done
+		}
+	})
+	return d.err
 }
 
 func isContextError(err error) bool {
@@ -432,19 +531,20 @@ func workflowLoopHardCapOverrideMatches(override *runstore.WorkflowLoopHardCapOv
 		override.Reason == runstore.WorkflowLoopHardCapReason
 }
 
-func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt []byte, at time.Time) (runstore.Attempt, runstore.ArtifactRef, bool, error) {
+func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt []byte, at time.Time, progressEnv map[string]string) (runstore.Attempt, runstore.ArtifactRef, bool, error) {
 	runner := workerRunner{
-		ctx:     ctx,
-		loaded:  loaded,
-		opts:    opts,
-		attempt: attempt,
-		prompt:  prompt,
-		at:      at,
+		ctx:         ctx,
+		loaded:      loaded,
+		opts:        opts,
+		attempt:     attempt,
+		prompt:      prompt,
+		at:          at,
+		progressEnv: progressEnv,
 	}
 	return runner.run()
 }
 
-func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, step config.Step, at time.Time) (runstore.Attempt, runstore.ArtifactRef, runstore.ArtifactRef, bool, error) {
+func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, step config.Step, at time.Time, progressEnv map[string]string) (runstore.Attempt, runstore.ArtifactRef, runstore.ArtifactRef, bool, error) {
 	if err := ctx.Err(); err != nil {
 		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
@@ -492,6 +592,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, nil, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+	env = mergeEnv(env, progressEnv)
 	execPath, err := deterministicCommandPath(command, env, cwd)
 	if err != nil {
 		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
@@ -889,6 +990,7 @@ type workerRunner struct {
 	attempt     runstore.Attempt
 	prompt      []byte
 	at          time.Time
+	progressEnv map[string]string
 	command     []string
 	workerEnv   []string
 	logRef      runstore.ArtifactRef
@@ -966,6 +1068,7 @@ func (r *workerRunner) prepareWorkerCommand() (runstore.Attempt, error) {
 	if r.opts.Env != nil {
 		r.workerEnv = r.opts.Env
 	}
+	r.workerEnv = mergeEnv(r.workerEnv, r.progressEnv)
 	cmd, releaseExec, err := newWorkerCommand(r.command, r.workerEnv, r.loaded.Project.Root)
 	if err != nil {
 		return r.finishLoggedStartFailure(exitStateStartFailed, err)

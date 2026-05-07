@@ -127,6 +127,11 @@ func cliCodexShimWorkerReport() {
 	if summary == "" {
 		summary = "Worker report is ready."
 	}
+	if message := os.Getenv("ORC_CLI_CODEX_PROGRESS"); message != "" {
+		if err := Execute([]string{"progress", message}, os.Stdout, os.Stderr); err != nil {
+			os.Exit(1)
+		}
+	}
 	args := []string{
 		"report",
 		"--run", promptValue(prompt, "run_id"),
@@ -172,6 +177,21 @@ func installCLICodexShim(t *testing.T, root string) cliCodexShim {
 		argsPath:  filepath.Join(root, "codex-args.txt"),
 		stdinPath: filepath.Join(root, "codex-stdin.md"),
 	}
+}
+
+func installCLIOrcExecutable(t *testing.T, root string) string {
+	t.Helper()
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	orcPath := filepath.Join(binDir, "orc")
+	if err := os.Symlink(os.Args[0], orcPath); err != nil {
+		t.Fatalf("symlink orc executable: %v", err)
+	}
+	t.Setenv("ORC_CLI_EXECUTE", "1")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return orcPath
 }
 
 func (s cliCodexShim) setDefaultEnv(t *testing.T) {
@@ -1040,6 +1060,28 @@ func TestWorkerLaunchNextAcceptsWorkerReportBeforeExit(t *testing.T) {
 	}
 }
 
+func TestWorkerLaunchNextDisplaysLiveProgressFromAgent(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	t.Setenv("PATH", shim.binDir)
+	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
+	t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
+	t.Setenv("ORC_CLI_CODEX_PROGRESS", "analyzing code paths")
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	loaded := loadCLIRun(t, root, result.runID)
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	progressLine := fmt.Sprintf("[%s %s] analyzing code paths", attempt.StepID, attempt.AttemptID)
+	if !strings.Contains(output, progressLine) {
+		t.Fatalf("output = %q, want progress line %q", output, progressLine)
+	}
+	if progressIndex, resultIndex := strings.Index(output, progressLine), strings.Index(output, "launched attempt "+attempt.AttemptID); progressIndex < 0 || resultIndex < 0 || progressIndex > resultIndex {
+		t.Fatalf("output = %q, want progress before final launch result", output)
+	}
+}
+
 func TestWorkerLaunchNextRoutesImplementationWorkflowReportsEndToEnd(t *testing.T) {
 	run := startCLIImplementationReportRun(t)
 
@@ -1192,6 +1234,86 @@ func TestRunAdvanceCommandWorkflowReachesReadyForHuman(t *testing.T) {
 	}
 	if got := len(loaded.Status.Attempts); got != 4 {
 		t.Fatalf("attempt count = %d, want 4", got)
+	}
+}
+
+func TestRunAdvanceJSONRoutesLiveProgressToStderr(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	t.Setenv("PATH", shim.binDir)
+	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
+	t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
+	t.Setenv("ORC_CLI_CODEX_PROGRESS", "analyzing code paths")
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"run", "advance", result.runID, "--once", "--json"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+	var payload struct {
+		RunID            string                    `json:"run_id"`
+		LaunchedAttempts []launcher.AdvanceAttempt `json:"launched_attempts"`
+		StopReason       string                    `json:"stop_reason"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("stdout = %q, want one final JSON object: %v", stdout.String(), err)
+	}
+	loaded := loadCLIRun(t, root, result.runID)
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	progressLine := fmt.Sprintf("[%s %s] analyzing code paths", attempt.StepID, attempt.AttemptID)
+	if strings.Contains(stdout.String(), "analyzing code paths") {
+		t.Fatalf("stdout = %q, want no live progress in JSON output", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), progressLine) {
+		t.Fatalf("stderr = %q, want progress line %q", stderr.String(), progressLine)
+	}
+	if payload.RunID != result.runID || len(payload.LaunchedAttempts) != 1 || payload.StopReason != "once" {
+		t.Fatalf("json payload = %+v, want once result", payload)
+	}
+}
+
+func TestRunAdvanceCommandStepDisplaysLiveProgressWithoutDedicatedPersistence(t *testing.T) {
+	root := withTempCwd(t)
+	const message = "deterministic progress update"
+	installCLIOrcExecutable(t, root)
+	writeCLIAdvanceCommandProject(t, root, "", "")
+	configPath := filepath.Join(root, ".orc", "workflows", "implementation.yaml")
+	config := string(readCLIFile(t, configPath))
+	config = strings.Replace(config, `argv: ["sh", "-c", "exit 0"]`, `argv: ["sh", "-c", "printf %s \"$ORC_PROGRESS_SOCKET\" > progress-socket.txt; orc progress \"$LIVE_MSG\"; exit 0"]
+    env:
+      LIVE_MSG: "`+message+`"`, 1)
+	writeCLIFile(t, configPath, config)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+	output := executeCLICommand(t, []string{"run", "advance", result.runID, "--once"})
+	loaded := loadCLIRun(t, root, result.runID)
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	progressLine := fmt.Sprintf("[%s %s] %s", attempt.StepID, attempt.AttemptID, message)
+	if !strings.Contains(output, progressLine) {
+		t.Fatalf("output = %q, want progress line %q", output, progressLine)
+	}
+	socketPath := strings.TrimSpace(string(readCLIFile(t, filepath.Join(root, "progress-socket.txt"))))
+	if socketPath == "" {
+		t.Fatal("progress socket path file is empty")
+	}
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("progress socket stat error = %v, want listener cleanup to remove socket", err)
+	}
+	statusContent := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "status.json")))
+	eventsContent := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "events.jsonl")))
+	var summaryStdout, summaryStderr bytes.Buffer
+	if err := Execute([]string{"run", "summary-context", result.runID}, &summaryStdout, &summaryStderr); err != nil {
+		t.Fatalf("summary-context returned error: %v\nstderr: %s", err, summaryStderr.String())
+	}
+	for name, content := range map[string]string{
+		"status.json":     statusContent,
+		"events.jsonl":    eventsContent,
+		"summary-context": summaryStdout.String(),
+	} {
+		if strings.Contains(content, message) {
+			t.Fatalf("%s contains live progress message %q", name, message)
+		}
 	}
 }
 

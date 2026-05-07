@@ -263,12 +263,13 @@ func terminalizeAdvanceOutcome(eval advanceEvaluation, at time.Time) (runstore.S
 
 func launchOptions(opts AdvanceOptions) Options {
 	return Options{
-		Root:    opts.Root,
-		RunID:   opts.RunID,
-		Command: opts.Command,
-		Env:     opts.Env,
-		Time:    opts.Time,
-		Stdout:  opts.Stdout,
+		Root:     opts.Root,
+		RunID:    opts.RunID,
+		Command:  opts.Command,
+		Env:      opts.Env,
+		Time:     opts.Time,
+		Stdout:   opts.Stdout,
+		Progress: opts.Progress,
 	}
 }
 
