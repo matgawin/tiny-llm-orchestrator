@@ -31,6 +31,22 @@ orc worker launch-next <run-id>
 The v1 public command has no flags. `orc run next` remains read-only inspection
 and never launches a worker.
 
+## Sandbox Inheritance
+
+Workers are sandboxed by process inheritance when the top-level
+Codex/orchestrator session was started with `orc sandbox run`. In that flow,
+`orc sandbox run` starts the configured command inside bubblewrap, and child
+`orc worker launch-next <run-id>` processes remain inside the same sandbox.
+
+Repositories may opt in to an enforcement guard with
+`sandbox.require_for_workers: true`. When enabled, `orc worker launch-next`
+refuses to launch unless `ORC_SANDBOX=1` is present and `ORC_SANDBOX_ROOT`
+matches the current repository root. This guard is useful for repositories that
+expect Codex yolo mode to be used only inside the Orc bubblewrap wrapper. It is
+disabled by default so existing non-sandbox worker workflows remain usable.
+Failure messages tell the operator to restart the orchestrator with
+`orc sandbox run`.
+
 ## Launch Contract
 
 The launcher loads project config, loads the run, and asks the workflow engine

@@ -25,3 +25,17 @@ agents:
   readability-reviewer: agents/readability-reviewer.md
   redundancy-reviewer: agents/redundancy-reviewer.md
   docs-reviewer: agents/docs-reviewer.md
+
+# Optional sandbox runner for Codex yolo mode.
+# See docs/features/sandbox-run.md for the full policy. Existing configs are
+# user-owned and are not auto-migrated.
+# sandbox:
+#   command:
+#     argv:
+#       - codex
+#       - --dangerously-bypass-approvals-and-sandbox
+#       - exec
+#       - --skip-git-repo-check
+#   require_for_workers: true
+#   bubblewrap:
+#     network: true

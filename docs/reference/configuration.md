@@ -148,6 +148,7 @@ sandbox:
   command:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   cwd: "."
+  require_for_workers: true
   bubblewrap:
     enabled: true
     network: true
@@ -183,6 +184,12 @@ interpreted relative to the repository root and must be an existing directory
 that is not absolute, traversing outside the repository, or escaping through a
 symlink.
 
+`sandbox.require_for_workers` is optional and defaults to `false`. When set to
+`true`, `orc worker launch-next` refuses to run unless the process has
+`ORC_SANDBOX=1` and `ORC_SANDBOX_ROOT` matches the current repository root.
+Enable it for projects that expect workers to be launched only by a top-level
+Codex/orchestrator session started through `orc sandbox run`.
+
 `sandbox.bubblewrap.enabled` is reserved for bubblewrap policy selection; v1
 `orc sandbox run` always shells out to `bwrap` and never treats this field as
 permission to run unsandboxed. `sandbox.bubblewrap.network` accepts `true` or
@@ -201,6 +208,12 @@ Repository-relative writable host paths must resolve inside the repository.
 `target` must be a clean absolute sandbox path that passes the protected-target
 validation used by `orc sandbox run`. Missing required mounts are validation
 errors; missing mounts with `optional: true` are skipped.
+
+New `orc init` scaffolds include a commented sandbox example with explicit Codex
+yolo-mode argv and `network: true`. The example is commented because Orc does
+not enable yolo mode or sandboxing by default. Existing `.orc/config.yaml` files
+are user-owned and are not automatically migrated or rewritten when scaffold
+examples change.
 
 ## Workflow Files
 

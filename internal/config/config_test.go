@@ -439,6 +439,9 @@ sandbox:
 	if got := project.Config.Sandbox.Bubblewrap.Network; !got.Set || !got.Value {
 		t.Fatalf("sandbox bubblewrap network = %+v, want default true", got)
 	}
+	if project.Config.Sandbox.RequireForWorkers {
+		t.Fatal("sandbox require_for_workers = true, want default false")
+	}
 }
 
 func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
@@ -451,6 +454,7 @@ sandbox:
   command:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   cwd: tools
+  require_for_workers: true
   bubblewrap:
     enabled: true
     network: false
@@ -492,6 +496,9 @@ sandbox:
 	}
 	if !sandbox.Bubblewrap.Enabled {
 		t.Fatal("sandbox bubblewrap enabled = false, want true")
+	}
+	if !sandbox.RequireForWorkers {
+		t.Fatal("sandbox require_for_workers = false, want true")
 	}
 	if got := sandbox.Bubblewrap.Network; !got.Set || got.Value {
 		t.Fatalf("sandbox bubblewrap network = %+v, want explicit false", got)

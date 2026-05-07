@@ -48,6 +48,17 @@ Orc sets these marker variables in the sandboxed environment:
 - `ORC_SANDBOX=1`
 - `ORC_SANDBOX_ROOT=<repo>`
 
+Worker launches inherit sandboxing through normal process inheritance. Start the
+top-level Codex/orchestrator session with `orc sandbox run`; any child
+`orc worker launch-next <run-id>` processes launched from that session run in
+the same bubblewrap environment and see the marker variables above.
+
+Set `sandbox.require_for_workers: true` when a repository should refuse worker
+launches unless those markers prove the launcher is already inside the
+repository's sandbox. The guard is opt-in so existing non-sandbox workflows keep
+working. Guard failures tell the operator to restart the orchestrator with
+`orc sandbox run`.
+
 ## Bubblewrap Defaults
 
 The v1 runner constructs a pragmatic default bubblewrap invocation for Codex
@@ -104,6 +115,11 @@ synthetic-home config paths.
 v1 does not bind the whole real home, pass the whole host environment, mount
 writable host caches by default, mount `/nix/store` writable, expose SSH agents,
 Git credentials, browser profiles, or unrelated user files by default, deny
-network access by default, implement worker launch refusal outside the sandbox,
-add diagnostic helper subcommands such as `sandbox check` or
-`sandbox print-bwrap`, or add scaffold examples.
+network access by default, add diagnostic helper subcommands such as
+`sandbox check` or `sandbox print-bwrap`, or enable yolo mode by default.
+
+The generated `.orc/config.yaml` scaffold includes a commented Codex yolo-mode
+sandbox example. The example is not active until the user uncomments it because
+yolo mode is a deliberate operator choice, even when bubblewrap is configured.
+Existing `.orc/config.yaml` files are user-owned and are not automatically
+migrated or rewritten when scaffold examples change.

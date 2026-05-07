@@ -114,11 +114,12 @@ type LoopCapsConfig struct {
 // Process execution and bubblewrap argv construction are owned by
 // internal/sandbox.
 type SandboxConfig struct {
-	Command    SandboxCommand   `yaml:"command"`
-	CWD        string           `yaml:"cwd"`
-	Bubblewrap BubblewrapConfig `yaml:"bubblewrap"`
-	Env        SandboxEnvConfig `yaml:"env"`
-	Mounts     []SandboxMount   `yaml:"mounts"`
+	Command           SandboxCommand   `yaml:"command"`
+	CWD               string           `yaml:"cwd"`
+	RequireForWorkers bool             `yaml:"require_for_workers"`
+	Bubblewrap        BubblewrapConfig `yaml:"bubblewrap"`
+	Env               SandboxEnvConfig `yaml:"env"`
+	Mounts            []SandboxMount   `yaml:"mounts"`
 }
 
 // SandboxCommand declares the argv-only command launched by orc sandbox run.

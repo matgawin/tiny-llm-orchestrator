@@ -4,6 +4,16 @@ defaults:
     enabled: true
     soft: 4
     hard: 8
+# sandbox:
+#   command:
+#     argv:
+#       - codex
+#       - --dangerously-bypass-approvals-and-sandbox
+#       - exec
+#       - --skip-git-repo-check
+#   require_for_workers: true
+#   bubblewrap:
+#     network: true
 workflows:
   implementation: workflows/implementation.yaml
   bugfix: workflows/bugfix.yaml

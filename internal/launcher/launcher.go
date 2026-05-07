@@ -60,6 +60,8 @@ const (
 	failureTailBytes     = 12 * 1024
 )
 
+const sandboxWorkerGuardGuidance = "sandbox.require_for_workers is enabled; start the orchestrator with `orc sandbox run` so worker launches inherit the sandbox"
+
 var defaultCommand = []string{"codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check", "-"}
 
 func init() {
@@ -106,6 +108,9 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 
 	loaded, err := loadLaunchContext(opts.Root, opts.RunID)
 	if err != nil {
+		return Result{}, err
+	}
+	if err := enforceWorkerSandboxGuard(loaded.Project.Root, loaded.Project.Config.Sandbox); err != nil {
 		return Result{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -282,6 +287,39 @@ func isContextError(err error) bool {
 
 func loadLaunchContext(root, runID string) (runcontext.Context, error) {
 	return runcontext.Load(root, runID)
+}
+
+func enforceWorkerSandboxGuard(root string, sandboxConfig *config.SandboxConfig) error {
+	if sandboxConfig == nil || !sandboxConfig.RequireForWorkers {
+		return nil
+	}
+	if os.Getenv("ORC_SANDBOX") != "1" {
+		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX=1)")
+	}
+	markerRoot := os.Getenv("ORC_SANDBOX_ROOT")
+	if markerRoot == "" {
+		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX_ROOT)")
+	}
+	currentRoot, err := canonicalPath(root)
+	if err != nil {
+		return fmt.Errorf("resolve current repo root for sandbox worker guard: %w", err)
+	}
+	sandboxRoot, err := canonicalPath(markerRoot)
+	if err != nil {
+		return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q is invalid: %w", sandboxWorkerGuardGuidance, markerRoot, err)
+	}
+	if sandboxRoot != currentRoot {
+		return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q does not match current repo root %q", sandboxWorkerGuardGuidance, sandboxRoot, currentRoot)
+	}
+	return nil
+}
+
+func canonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 type startRouting struct {

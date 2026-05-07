@@ -1573,6 +1573,84 @@ func TestExecuteWorkerLaunchNextUsesDefaultCodexCommand(t *testing.T) {
 	})
 }
 
+func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardMissingMarker(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+  require_for_workers: true
+`)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	t.Setenv("ORC_SANDBOX", "")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+	var stdout, stderr bytes.Buffer
+
+	err := Execute([]string{"worker", "launch-next", result.runID}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want sandbox guard refusal")
+	}
+	assertCLIOutputContainsAll(t, stderr.String(), []string{
+		"sandbox.require_for_workers is enabled",
+		"start the orchestrator with `orc sandbox run`",
+		"missing ORC_SANDBOX=1",
+	})
+	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if loaded.Status.ActiveAttempt != nil {
+		t.Fatalf("active attempt = %+v, want none after guard refusal", loaded.Status.ActiveAttempt)
+	}
+}
+
+func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardRootMismatches(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+  require_for_workers: true
+`)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", t.TempDir())
+	var stdout, stderr bytes.Buffer
+
+	err := Execute([]string{"worker", "launch-next", result.runID}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want sandbox root mismatch refusal")
+	}
+	assertCLIOutputContainsAll(t, stderr.String(), []string{
+		"sandbox.require_for_workers is enabled",
+		"ORC_SANDBOX_ROOT",
+		"does not match current repo root",
+		"start the orchestrator with `orc sandbox run`",
+	})
+	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	if loaded.Status.ActiveAttempt != nil {
+		t.Fatalf("active attempt = %+v, want none after guard refusal", loaded.Status.ActiveAttempt)
+	}
+}
+
+func TestExecuteWorkerLaunchNextAllowsMatchingSandboxGuard(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+  require_for_workers: true
+`)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	shim.setDefaultEnv(t)
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+}
+
 func TestConcurrentWorkerLaunchNextOnlyStartsOneWorker(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)

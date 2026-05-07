@@ -52,6 +52,9 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 	}
 	assertGeneratedScaffoldMatchesFixture(t, root)
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4")
+	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "# Optional sandbox runner for Codex yolo mode.")
+	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "#   require_for_workers: true")
+	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "#     network: true")
 	assertFileContains(t, filepath.Join(root, ".gitignore"), runsIgnoreEntry)
 	if info, err := os.Stat(filepath.Join(root, ".orc", "runs")); err != nil {
 		t.Fatalf(".orc/runs stat err = %v, want directory", err)
