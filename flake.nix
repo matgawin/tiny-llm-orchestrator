@@ -13,78 +13,27 @@
   }: let
     system = "x86_64-linux";
     pkgs = import nixpkgs {inherit system;};
-    codexWithBeads = pkgs.writeShellScriptBin "codex" ''
-      export BEADS_DIR="''${BEADS_DIR:-$PWD/../.beads}"
-
-      real_codex="''${CODEX_BIN:-$HOME/.bun/bin/codex}"
-      if [ ! -x "$real_codex" ]; then
-        echo "codex: set CODEX_BIN to the underlying codex executable" >&2
-        exit 127
-      fi
-
-      exec "$real_codex" --add-dir "$BEADS_DIR" "$@"
-    '';
-    orc = pkgs.buildGoModule {
-      pname = "orc";
-      version = "1.0.0";
+    orc = import ./nix/orc.nix {
+      inherit pkgs;
       src = ./.;
-      vendorHash = "sha256-/jAJ1jeLiRsFxfflj8sqD85rluauepXODoEeGK4l8FQ=";
-      subPackages = ["cmd/orc"];
-
-      ldflags = [
-        "-s"
-        "-w"
-        "-X tiny-llm-orchestrator/orc/internal/cli.version=1.0.0"
-      ];
     };
-
-    packages = with pkgs;
-      [
-        codexWithBeads
-        bubblewrap
-        go
-        gofumpt
-        golangci-lint
-        go-tools
-        gotools
-        go-task
-        jq
-        jujutsu
-      ]
-      ++ [beads.packages.${system}.default];
-
-    shellHook = ''
-      export BEADS_DIR="$PWD/../.beads"
-      export PATH="$PATH:$HOME/.bun/bin"
-    '';
+    shells = import ./nix/shell.nix {
+      inherit pkgs system beads;
+    };
   in {
     packages.${system} = {
-      default = orc;
-      orc = orc;
+      default = orc.package;
+      orc = orc.package;
     };
 
     apps.${system} = {
       default = self.apps.${system}.orc;
-      orc = {
-        type = "app";
-        program = "${orc}/bin/orc";
-      };
+      orc = orc.app;
     };
 
     devShells.${system} = {
-      default = pkgs.mkShell {
-        inherit packages shellHook;
-      };
-      sandboxCodex = pkgs.mkShell {
-        inherit packages;
-        shellHook =
-          shellHook
-          + ''
-            if [ "''${ORC_SANDBOX}" == "1" ]; then
-              exec codex --dangerously-bypass-approvals-and-sandbox
-            fi
-          '';
-      };
+      default = shells.default;
+      sandboxCodex = shells.sandboxCodex;
     };
   };
 }

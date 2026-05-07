@@ -30,7 +30,7 @@ Contributors navigating the codebase or deciding where new code and docs should 
 - `internal/launcher`: worker process launcher and supervision code.
 - `docs`: durable repository documentation.
 - `.agents`: Codex guidance and repo-local workflow skills.
-- `nix`, `flake.nix`, `flake.lock`: reproducible development shell and package definition.
+- `nix`, `flake.nix`, `flake.lock`: flake composition plus reusable Nix modules for the development shell and Orc package/app outputs.
 
 ## Documentation Placement
 

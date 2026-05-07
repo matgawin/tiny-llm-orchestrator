@@ -60,5 +60,5 @@ nix develop -c task tests
 ## When The Local Stack Does Not Start
 
 - If `task` resolves to a non-go-task binary, enter `nix develop`.
-- If `codex` inside the Nix shell cannot start, set `CODEX_BIN` to the underlying Codex executable as described by the wrapper in `flake.nix`.
+- If `codex` inside the Nix shell cannot start, set `CODEX_BIN` to the underlying Codex executable as described by the wrapper in `nix/shell.nix`.
 - If config loading fails, inspect `.orc/config.yaml` and ensure all referenced files stay under `.orc`.

@@ -2,6 +2,7 @@
 .agent/reports/
 .agent/task-*.json
 .codex
+.cache
 *.exe
 *.exe~
 *.dll

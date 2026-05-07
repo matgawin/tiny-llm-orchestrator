@@ -26,7 +26,7 @@ Contributors running the repo locally for development, debugging, or test verifi
 - The go-task `task` binary
 - `golangci-lint`, `gofumpt`, and `goimports` for the standard check workflow
 
-The repository includes a Nix development shell in `flake.nix` with the expected toolchain. Use it when your host machine is missing tools or maps `task` to a different program.
+The repository's Nix flake exposes a development shell with the expected toolchain. Use it when your host machine is missing tools or maps `task` to a different program.
 
 ```bash
 nix develop
