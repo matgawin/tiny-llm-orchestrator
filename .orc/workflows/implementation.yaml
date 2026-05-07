@@ -49,7 +49,7 @@ steps:
   test:
     kind: command
     command:
-      argv: ["task", "check"]
+      argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:
       done: [passed, failed]
       blocked: [blocked]
@@ -107,7 +107,7 @@ steps:
   test-redundancy:
     kind: command
     command:
-      argv: ["task", "check"]
+      argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:
       done: [passed, failed]
       blocked: [blocked]
@@ -150,7 +150,7 @@ steps:
   test-readability:
     kind: command
     command:
-      argv: ["task", "check"]
+      argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:
       done: [passed, failed]
       blocked: [blocked]

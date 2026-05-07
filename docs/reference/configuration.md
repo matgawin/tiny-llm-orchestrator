@@ -316,7 +316,7 @@ steps:
   check:
     kind: command
     command:
-      argv: ["task", "check"]
+      argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:
       done: [passed, failed]
       failed: [timeout, process_error]
@@ -330,6 +330,11 @@ steps:
 `command.argv` must contain at least one non-empty argument. Shell-string
 commands are not supported in v1; argv entries are passed directly to process
 execution without shell parsing, expansion, or interpolation.
+
+The bundled implementation, bugfix, mechanical-change, and test-only workflows
+run `task check` through GNU `timeout` with a 5-minute wall-clock limit and a
+10-second forced-kill grace. This keeps hung package tests from occupying a run
+until the broader workflow attempt timeout expires.
 
 Script steps declare a repository-relative executable path plus optional args:
 

@@ -63,7 +63,7 @@ steps:
   test-run:
     kind: command
     command:
-      argv: ["task", "check"]
+      argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:
       done: [passed, failed]
       failed: [timeout, process_error]
