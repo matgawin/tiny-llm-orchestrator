@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstart"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/runsummary"
+	"tiny-llm-orchestrator/orc/internal/sandbox"
 )
 
 const (
@@ -52,6 +54,8 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return executeInit(args[1:], stdin, stdout, stderr)
 	case "run":
 		return executeRun(args[1:], stdin, stdout, stderr)
+	case "sandbox":
+		return executeSandbox(args[1:], stdin, stdout, stderr)
 	case "worker":
 		return executeWorker(args[1:], stdout, stderr)
 	case "report":
@@ -65,6 +69,73 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		}
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
+}
+
+// ExitCode returns the process exit code represented by err.
+func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var sandboxExit sandbox.ExitError
+	if errors.As(err, &sandboxExit) {
+		return sandboxExit.Code
+	}
+	return 1
+}
+
+func executeSandbox(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return printSandboxHelp(stdout)
+	}
+	switch args[0] {
+	case "-h", helpFlag, helpCommand:
+		return printSandboxHelp(stdout)
+	case "run":
+		return executeSandboxRun(args[1:], stdin, stdout, stderr)
+	default:
+		if _, err := fmt.Fprintf(stderr, "%s sandbox: unknown command %q\n\n", appName, args[0]); err != nil {
+			return err
+		}
+		if err := printSandboxHelp(stderr); err != nil {
+			return err
+		}
+		return fmt.Errorf("unknown sandbox command: %s", args[0])
+	}
+}
+
+func executeSandboxRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if len(args) > 0 {
+		if args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand {
+			return printSandboxRunHelp(stdout)
+		}
+		if _, err := fmt.Fprintf(stderr, "%s sandbox run: unexpected argument %q\n\n", appName, args[0]); err != nil {
+			return err
+		}
+		if err := printSandboxRunHelp(stderr); err != nil {
+			return err
+		}
+		return fmt.Errorf("unexpected sandbox run argument: %s", args[0])
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	restoreSignals := context.AfterFunc(ctx, stop)
+	defer restoreSignals()
+	if err := sandbox.Run(ctx, sandbox.Options{
+		Root:   root,
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+	}); err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s sandbox run: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	return nil
 }
 
 func executeReport(args []string, stdout, stderr io.Writer) error {
@@ -615,11 +686,41 @@ Available Commands:
   init        Scaffold project-local Tiny Orc config
   report      Validate and persist a worker report
   run         Manage orchestration runs
+  sandbox     Run configured commands through bubblewrap
   worker      Launch and supervise worker attempts
   version     Print version information
 
 Flags:
   -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printSandboxHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s sandbox runs configured commands through bubblewrap.
+
+Usage:
+  %s sandbox [command]
+
+Available Commands:
+  run  Run sandbox.command.argv from .orc/config.yaml through bwrap
+
+Flags:
+  -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printSandboxRunHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s sandbox run launches the configured sandbox command through the system bwrap binary.
+
+Usage:
+  %s sandbox run
+
+The sandbox command must be declared as sandbox.command.argv in .orc/config.yaml.
+orc sandbox run is Linux-only, requires bubblewrap on PATH, and refuses to run the command unsandboxed.
 `, appName, appName)
 
 	return err

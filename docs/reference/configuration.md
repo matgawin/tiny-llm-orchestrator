@@ -166,12 +166,10 @@ sandbox:
       optional: true
 ```
 
-The sandbox section is schema and validation only in v1. It does not add an
-`orc sandbox run` command, execute `bwrap`, construct bubblewrap arguments,
-change worker launch guardrails, or add scaffold defaults. Later runner work
-owns process execution. Bubblewrap sandbox execution is expected to be
-Linux-only for v1, although the configuration schema can be loaded on any
-platform.
+The sandbox section configures `orc sandbox run`; see
+[../features/sandbox-run.md](../features/sandbox-run.md) for the executable CLI
+behavior. Bubblewrap sandbox execution is Linux-only for v1, although the
+configuration schema can be loaded on any platform.
 
 `sandbox.command.argv` is required whenever `sandbox` is present. It must be a
 non-empty argv list with no empty entries. Shell-string command declarations
@@ -183,11 +181,13 @@ interpreted relative to the repository root and must be an existing directory
 that is not absolute, traversing outside the repository, or escaping through a
 symlink.
 
-`sandbox.bubblewrap.enabled` records whether future sandbox runner work should
-use bubblewrap. `sandbox.bubblewrap.network` accepts `true` or `false` and
-defaults to `true`, which is the recommended setting for Codex orchestration
-because model and tool workflows normally need network access. Preset
-`sandbox.bubblewrap.mounts` reserve named mount policies for later runner work:
+`sandbox.bubblewrap.enabled` is reserved for bubblewrap policy selection; v1
+`orc sandbox run` always shells out to `bwrap` and never treats this field as
+permission to run unsandboxed. `sandbox.bubblewrap.network` accepts `true` or
+`false` and defaults to `true`, which is the recommended setting for Codex
+orchestration because model and tool workflows normally need network access.
+Preset
+`sandbox.bubblewrap.mounts` reserve named mount policies for later policy work:
 `repo`, `codex_home`, and `tmp` accept `ro` or `rw`; `beads` accepts `auto`,
 `ro`, or `rw`.
 
@@ -202,9 +202,10 @@ Extra `sandbox.mounts` entries reserve project-specific host mounts. Relative
 must not traverse outside the repository or escape it through symlinks.
 
 Sandbox v1 deliberately excludes shell command strings, automatic yolo-mode
-defaults, whole-home passthrough by default, whole-host environment passthrough
-by default, network denial by default, non-Linux execution, embedding
-bubblewrap, and replacing bubblewrap with a Go implementation.
+defaults, unsandboxed fallback execution, whole-home passthrough by default,
+whole-host environment passthrough by default, network denial by default,
+non-Linux execution, embedding bubblewrap, and replacing bubblewrap with a Go
+implementation.
 
 ## Workflow Files
 

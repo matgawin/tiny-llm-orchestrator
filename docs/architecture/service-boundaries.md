@@ -44,6 +44,8 @@ Contributors changing package structure, config validation, CLI behavior, or fut
   and CLI callers cannot drift.
 - `internal/workflow` owns deterministic workflow transitions for validated workflow definitions and in-memory run state.
 - `internal/launcher` owns worker process launch and supervision.
+- `internal/sandbox` owns `orc sandbox run` bubblewrap argv construction and
+  sandboxed process supervision.
 
 ## Boundary Rules
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/sandbox"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
@@ -197,7 +199,7 @@ func TestExecuteHelp(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, want := range []string{"Usage:", "Available Commands:", "init", "run", "worker", "version"} {
+	for _, want := range []string{"Usage:", "Available Commands:", "init", "run", "sandbox", "worker", "version"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)
 		}
@@ -239,6 +241,62 @@ func TestExecuteUnknownCommand(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, `unknown command "nope"`) {
 		t.Fatalf("stderr = %q, want unknown command message", got)
+	}
+}
+
+func TestExecuteSandboxHelp(t *testing.T) {
+	output := executeCLICommand(t, []string{"sandbox", "--help"})
+	for _, want := range []string{"Usage:", "Available Commands:", "run"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("sandbox help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestExecuteSandboxRunRequiresConfig(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	var stdout, stderr bytes.Buffer
+
+	err := Execute([]string{"sandbox", "run"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want missing sandbox config error")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "sandbox config is required") {
+		t.Fatalf("stderr = %q, want missing sandbox config", got)
+	}
+}
+
+func TestExecuteSandboxRunMissingBwrapDoesNotRunConfiguredCommand(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["sh", "-c", "touch should-not-run"]
+  bubblewrap:
+    enabled: true
+`)
+	t.Setenv("PATH", t.TempDir())
+	var stdout, stderr bytes.Buffer
+
+	err := Execute([]string{"sandbox", "run"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want missing bwrap error")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "should-not-run")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("configured command marker stat error = %v, want not exist", statErr)
+	}
+	if got := stderr.String(); !strings.Contains(got, "install bubblewrap") {
+		t.Fatalf("stderr = %q, want install guidance", got)
+	}
+}
+
+func TestExitCodeUsesSandboxChildExitStatus(t *testing.T) {
+	err := sandbox.ExitError{Code: 7, Err: errors.New("exit status 7")}
+	if got := ExitCode(err); got != 7 {
+		t.Fatalf("ExitCode = %d, want 7", got)
 	}
 }
 
@@ -1807,6 +1865,14 @@ func writeCLIProject(t *testing.T, root, beads string, markdownFallback bool) {
 		Beads:            beads,
 		MarkdownFallback: markdownFallback,
 	})
+}
+
+func writeCLIProjectWithSandbox(t *testing.T, root, sandboxConfig string) {
+	t.Helper()
+	writeCLIProject(t, root, "optional", true)
+	configPath := filepath.Join(root, ".orc", "config.yaml")
+	content := string(readCLIFile(t, configPath))
+	writeCLIFile(t, configPath, content+sandboxConfig)
 }
 
 func writeCLIImplementationProject(t *testing.T, root string) {

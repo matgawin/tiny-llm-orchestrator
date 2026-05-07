@@ -30,6 +30,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
   [../reference/run-store.md](../reference/run-store.md)
 - Worker prompt rendering: [worker-prompt-rendering.md](worker-prompt-rendering.md)
 - Worker launching: [worker-launching.md](worker-launching.md)
+- Sandbox command execution: [sandbox-run.md](sandbox-run.md)
 - Run-store behavior: currently documented in [../reference/run-store.md](../reference/run-store.md)
 - CLI command behavior: [../../README.md](../../README.md) and `internal/cli`
 - `.orc` config schema and validation: [../reference/configuration.md](../reference/configuration.md)

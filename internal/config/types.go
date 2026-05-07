@@ -111,8 +111,8 @@ type LoopCapsConfig struct {
 }
 
 // SandboxConfig stores the durable Orc-managed sandbox configuration contract.
-// Process execution and bubblewrap argv construction are intentionally owned by
-// later sandbox runner work.
+// Process execution and bubblewrap argv construction are owned by
+// internal/sandbox.
 type SandboxConfig struct {
 	Command    SandboxCommand   `yaml:"command"`
 	CWD        string           `yaml:"cwd"`
@@ -121,8 +121,7 @@ type SandboxConfig struct {
 	Mounts     []SandboxMount   `yaml:"mounts"`
 }
 
-// SandboxCommand declares the argv-only command launched by future sandbox
-// runner work.
+// SandboxCommand declares the argv-only command launched by orc sandbox run.
 type SandboxCommand struct {
 	Argv []string `yaml:"argv"`
 }
@@ -143,7 +142,8 @@ func (c *SandboxCommand) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
-// BubblewrapConfig reserves sandbox runner bubblewrap options.
+// BubblewrapConfig stores bubblewrap options used by sandbox execution and
+// later policy expansion.
 type BubblewrapConfig struct {
 	Enabled bool                  `yaml:"enabled"`
 	Network RequiredBool          `yaml:"network"`
@@ -151,7 +151,7 @@ type BubblewrapConfig struct {
 }
 
 // BubblewrapMountConfig stores named preset mount policies. Detailed policy
-// translation to bwrap args is deferred to the sandbox runner and policy work.
+// translation to bwrap args is deferred to later sandbox policy work.
 type BubblewrapMountConfig struct {
 	Repo      string `yaml:"repo"`
 	Beads     string `yaml:"beads"`
@@ -166,7 +166,7 @@ type SandboxEnvConfig struct {
 	Set  map[string]string `yaml:"set"`
 }
 
-// SandboxMount declares an extra host mount for future sandbox runner work.
+// SandboxMount declares an extra host mount for later sandbox policy work.
 type SandboxMount struct {
 	Host     string       `yaml:"host"`
 	Target   string       `yaml:"target"`
