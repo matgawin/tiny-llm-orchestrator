@@ -442,6 +442,12 @@ sandbox:
 	if project.Config.Sandbox.RequireForWorkers {
 		t.Fatal("sandbox require_for_workers = true, want default false")
 	}
+	if got := project.Config.Sandbox.Home.Mode; got != SandboxHomeModeSynthetic {
+		t.Fatalf("sandbox home mode = %q, want %q", got, SandboxHomeModeSynthetic)
+	}
+	if got := project.Config.Sandbox.Path.Mode; got != SandboxPathModeNone {
+		t.Fatalf("sandbox path mode = %q, want %q", got, SandboxPathModeNone)
+	}
 }
 
 func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
@@ -455,6 +461,10 @@ sandbox:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   cwd: tools
   require_for_workers: true
+  home:
+    mode: host_path
+  path:
+    mode: host_entries
   bubblewrap:
     enabled: true
     network: false
@@ -500,6 +510,12 @@ sandbox:
 	if !sandbox.RequireForWorkers {
 		t.Fatal("sandbox require_for_workers = false, want true")
 	}
+	if got := sandbox.Home.Mode; got != SandboxHomeModeHostPath {
+		t.Fatalf("sandbox home mode = %q, want host_path", got)
+	}
+	if got := sandbox.Path.Mode; got != SandboxPathModeHostEntries {
+		t.Fatalf("sandbox path mode = %q, want host_entries", got)
+	}
 	if got := sandbox.Bubblewrap.Network; !got.Set || got.Value {
 		t.Fatalf("sandbox bubblewrap network = %+v, want explicit false", got)
 	}
@@ -542,6 +558,24 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
 			config: `sandbox:
   command: "codex --dangerously-bypass-approvals-and-sandbox"`,
 			contains: []string{"sandbox.command must use argv", "shell-string commands are not supported"},
+		},
+		{
+			name: "invalid home mode",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  home:
+    mode: real_home`,
+			contains: []string{`sandbox.home.mode "real_home" is invalid; allowed: synthetic, host_path`},
+		},
+		{
+			name: "invalid path mode",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  path:
+    mode: all_host`,
+			contains: []string{`sandbox.path.mode "all_host" is invalid; allowed: none, host_entries`},
 		},
 		{
 			name: "absolute cwd",
@@ -697,6 +731,55 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
 			contains: []string{`sandbox.mounts[0].target "workspace": must be an absolute sandbox path`},
 		},
 		{
+			name: "literal dollar home extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: $HOME/.bun
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].target "$HOME/.bun": must be an absolute sandbox path`},
+		},
+		{
+			name: "literal braced home extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: ${HOME}/.bun
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].target "${HOME}/.bun": must be an absolute sandbox path`},
+		},
+		{
+			name: "literal tilde extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: ~/.bun
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].target "~/.bun": must be an absolute sandbox path`},
+		},
+		{
+			name: "literal command substitution extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: $(which codex)
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].target "$(which codex)": must be an absolute sandbox path`},
+		},
+		{
+			name:     "literal backtick extra mount target",
+			config:   "sandbox:\n  command:\n    argv: [\"codex\"]\n  mounts:\n    - host: .\n      target: '`which codex`'\n      mode: ro",
+			contains: []string{"sandbox.mounts[0].target \"`which codex`\": must be an absolute sandbox path"},
+		},
+		{
 			name: "critical extra mount target",
 			config: `sandbox:
   command:
@@ -728,6 +811,19 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       target: /home/orc
       mode: rw`,
 			contains: []string{`sandbox.mounts[0].target "/home/orc": must not override critical sandbox path /home/orc`},
+		},
+		{
+			name: "synthetic mode rejects other home target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  home:
+    mode: synthetic
+  mounts:
+    - host: .
+      target: /home/user/.bun
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].target "/home/user/.bun": must not override critical sandbox path /home`},
 		},
 		{
 			name: "repo extra mount target",
@@ -783,6 +879,25 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
 			}
 			assertLoadErrorContains(t, root, tt.contains...)
 		})
+	}
+}
+
+func TestLoadAcceptsHostPathHomeSandboxMount(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{config: configWithSandbox(`sandbox:
+  command:
+    argv: ["codex"]
+  home:
+    mode: host_path
+  mounts:
+    - host: data
+      target: /home/user/.bun
+      mode: rw`)})
+	if err := os.Mkdir(filepath.Join(root, "data"), 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+
+	if _, err := Load(root); err != nil {
+		t.Fatalf("Load returned error: %v", err)
 	}
 }
 

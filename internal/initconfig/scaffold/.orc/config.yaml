@@ -34,8 +34,17 @@ agents:
 #     argv:
 #       - codex
 #       - --dangerously-bypass-approvals-and-sandbox
-#       - exec
-#       - --skip-git-repo-check
 #   require_for_workers: true
+#   # HOME defaults to synthetic /home/orc. To preserve the host HOME path
+#   # without binding the whole host home directory, set:
+#   # home:
+#   #   mode: host_path
+#   # Then explicitly mount concrete home subpaths such as /home/user/.bun when
+#   # a tool path like CODEX_BIN needs them; $HOME, ~, and command substitution
+#   # are not expanded in config values.
+#   # To make existing absolute PATH entries available as narrow read-only
+#   # mounts without binding the whole host home, set:
+#   # path:
+#   #   mode: host_entries
 #   bubblewrap:
 #     network: true

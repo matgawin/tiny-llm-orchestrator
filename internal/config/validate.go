@@ -19,6 +19,12 @@ const (
 	sandboxMountModeAuto = "auto"
 
 	sandboxSyntheticHome = "/home/orc"
+
+	SandboxHomeModeSynthetic = "synthetic"
+	SandboxHomeModeHostPath  = "host_path"
+
+	SandboxPathModeNone        = "none"
+	SandboxPathModeHostEntries = "host_entries"
 )
 
 var sandboxEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -71,6 +77,18 @@ func validateSandboxConfig(projectRoot string, sandbox *SandboxConfig) error {
 	if err := validateSandboxCWD(projectRoot, sandbox.CWD); err != nil {
 		return err
 	}
+	if sandbox.Home.Mode == "" {
+		sandbox.Home.Mode = SandboxHomeModeSynthetic
+	}
+	if err := validateSandboxHomeConfig(sandbox.Home); err != nil {
+		return err
+	}
+	if sandbox.Path.Mode == "" {
+		sandbox.Path.Mode = SandboxPathModeNone
+	}
+	if err := validateSandboxPathConfig(sandbox.Path); err != nil {
+		return err
+	}
 	if !sandbox.Bubblewrap.Network.Set {
 		sandbox.Bubblewrap.Network = RequiredBool{Value: true, Set: true}
 	}
@@ -81,11 +99,25 @@ func validateSandboxConfig(projectRoot string, sandbox *SandboxConfig) error {
 		return err
 	}
 	for i, mount := range sandbox.Mounts {
-		if err := validateSandboxMount(projectRoot, i, mount); err != nil {
+		if err := validateSandboxMount(projectRoot, sandbox.Home.Mode, i, mount); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func validateSandboxHomeConfig(home SandboxHomeConfig) error {
+	if home.Mode == SandboxHomeModeSynthetic || home.Mode == SandboxHomeModeHostPath {
+		return nil
+	}
+	return fmt.Errorf("sandbox.home.mode %q is invalid; allowed: synthetic, host_path", home.Mode)
+}
+
+func validateSandboxPathConfig(path SandboxPathConfig) error {
+	if path.Mode == SandboxPathModeNone || path.Mode == SandboxPathModeHostEntries {
+		return nil
+	}
+	return fmt.Errorf("sandbox.path.mode %q is invalid; allowed: none, host_entries", path.Mode)
 }
 
 func validateSandboxCWD(projectRoot, cwd string) error {
@@ -171,7 +203,7 @@ func validateSandboxEnvName(name string) error {
 	return nil
 }
 
-func validateSandboxMount(projectRoot string, index int, mount SandboxMount) error {
+func validateSandboxMount(projectRoot, homeMode string, index int, mount SandboxMount) error {
 	name := fmt.Sprintf("sandbox.mounts[%d]", index)
 	if mount.Host == "" {
 		return fmt.Errorf("%s.host is required", name)
@@ -179,7 +211,7 @@ func validateSandboxMount(projectRoot string, index int, mount SandboxMount) err
 	if mount.Target == "" {
 		return fmt.Errorf("%s.target is required", name)
 	}
-	if err := validateSandboxMountTarget(projectRoot, mount.Target); err != nil {
+	if err := validateSandboxMountTarget(projectRoot, homeMode, mount.Target); err != nil {
 		return fmt.Errorf("%s.target %q: %w", name, mount.Target, err)
 	}
 	if mount.Mode != sandboxMountModeRO && mount.Mode != sandboxMountModeRW {
@@ -223,7 +255,7 @@ func validateSandboxMount(projectRoot string, index int, mount SandboxMount) err
 	return nil
 }
 
-func validateSandboxMountTarget(projectRoot, target string) error {
+func validateSandboxMountTarget(projectRoot, homeMode, target string) error {
 	if !filepath.IsAbs(target) {
 		return errors.New("must be an absolute sandbox path")
 	}
@@ -240,10 +272,10 @@ func validateSandboxMountTarget(projectRoot, target string) error {
 			return errors.New("must not override the repository mount")
 		}
 	}
-	if clean == "/home" || clean == sandboxSyntheticHome {
+	if clean == "/home" || (homeMode == SandboxHomeModeSynthetic && clean == sandboxSyntheticHome) {
 		return fmt.Errorf("must not override critical sandbox path %s", clean)
 	}
-	if strings.HasPrefix(clean, "/home/") && !strings.HasPrefix(clean, sandboxSyntheticHome+string(filepath.Separator)) {
+	if homeMode == SandboxHomeModeSynthetic && strings.HasPrefix(clean, "/home/") && !strings.HasPrefix(clean, sandboxSyntheticHome+string(filepath.Separator)) {
 		return errors.New("must not override critical sandbox path /home")
 	}
 	criticalTargets := []string{

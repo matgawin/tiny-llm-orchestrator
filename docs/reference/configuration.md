@@ -149,6 +149,10 @@ sandbox:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   cwd: "."
   require_for_workers: true
+  home:
+    mode: synthetic
+  path:
+    mode: none
   bubblewrap:
     enabled: true
     network: true
@@ -190,6 +194,30 @@ symlink.
 Enable it for projects that expect workers to be launched only by a top-level
 Codex/orchestrator session started through `orc sandbox run`.
 
+`sandbox.home.mode` is optional and defaults to `synthetic`. Allowed values are
+exactly `synthetic` and `host_path`. `synthetic` keeps sandbox `HOME` at
+`/home/orc` and maps the default host `.codex` directory to
+`/home/orc/.codex`. `host_path` sets sandbox `HOME` to the resolved absolute
+host HOME path without binding the whole host home directory, and maps default
+host `$HOME/.codex` to that same absolute path inside the sandbox. When host
+`CODEX_HOME` is set, it must be absolute and is mounted read-write at the same
+absolute path in both modes. See [../features/sandbox-run.md](../features/sandbox-run.md)
+for runtime HOME resolution, automatic `.codex` handling, and host-home subpath
+mount rules.
+
+`sandbox.path.mode` is optional and defaults to `none`. Allowed values are
+exactly `none` and `host_entries`. `none` preserves the existing PATH and mount
+behavior. `host_entries` uses the effective sandbox PATH, meaning
+`sandbox.env.set.PATH` when configured and otherwise the original host process
+`PATH`, and mounts existing absolute PATH directories read-only at their
+original sandbox paths. Empty, relative, missing, unresolvable, non-directory,
+and already mounted repository, Beads, or first-class system subtree entries
+are preserved in PATH but not mounted. Host-dependent safety checks happen
+while building the sandbox spec, not during static config load. See
+[../features/sandbox-run.md](../features/sandbox-run.md) for symlink
+resolution, dangerous-entry errors, dedupe, and explicit mount conflict
+behavior.
+
 `sandbox.bubblewrap.enabled` is reserved for bubblewrap policy selection; v1
 `orc sandbox run` always shells out to `bwrap` and never treats this field as
 permission to run unsandboxed. `sandbox.bubblewrap.network` accepts `true` or
@@ -207,7 +235,16 @@ be exactly `ro` or `rw`. `host` may be absolute or repository-relative.
 Repository-relative writable host paths must resolve inside the repository.
 `target` must be a clean absolute sandbox path that passes the protected-target
 validation used by `orc sandbox run`. Missing required mounts are validation
-errors; missing mounts with `optional: true` are skipped.
+errors; missing mounts with `optional: true` are skipped. In `host_path` mode,
+home-local tool directories such as `/home/user/.bun` or
+`/home/user/.cache/tool` must be mounted explicitly with concrete absolute
+targets strictly under the active sandbox HOME path; the active HOME itself and
+its ancestors are rejected.
+
+Sandbox config values are not shell-expanded or interpolated. `$HOME`,
+`${HOME}`, `~`, `$(which codex)`, and backtick command substitutions are
+literal YAML values, not expansion syntax. Orc does not run commands or perform
+shell, tilde, or environment expansion while loading config.
 
 New `orc init` scaffolds include a commented sandbox example with explicit Codex
 yolo-mode argv and `network: true`. The example is commented because Orc does

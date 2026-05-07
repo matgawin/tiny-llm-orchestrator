@@ -18,11 +18,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 )
 
-const (
-	markerSandbox     = "ORC_SANDBOX=1"
-	markerSandboxRoot = "ORC_SANDBOX_ROOT="
-)
-
 // ExitError reports the sandboxed command exit status.
 type ExitError struct {
 	Code int
@@ -47,12 +42,14 @@ type Options struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	RuntimeGOOS string
-	LookPath    func(string) (string, error)
-	PathExists  func(string) bool
-	Environ     func() []string
-	UserHomeDir func() (string, error)
-	MkdirAll    func(string, os.FileMode) error
+	RuntimeGOOS  string
+	LookPath     func(string) (string, error)
+	PathExists   func(string) bool
+	Stat         func(string) (os.FileInfo, error)
+	EvalSymlinks func(string) (string, error)
+	Environ      func() []string
+	UserHomeDir  func() (string, error)
+	MkdirAll     func(string, os.FileMode) error
 }
 
 // BwrapSpec is the resolved bubblewrap process invocation.
@@ -105,7 +102,15 @@ func BuildSpec(project *config.Project, opts Options) (BwrapSpec, error) {
 	if pathExists == nil {
 		pathExists = hostPathExists
 	}
-	policy, err := resolvePolicy(project.Root, sandboxConfig, opts, pathExists)
+	stat := opts.Stat
+	if stat == nil {
+		stat = os.Stat
+	}
+	evalSymlinks := opts.EvalSymlinks
+	if evalSymlinks == nil {
+		evalSymlinks = filepath.EvalSymlinks
+	}
+	policy, err := resolvePolicy(project.Root, sandboxConfig, opts, pathExists, stat, evalSymlinks)
 	if err != nil {
 		return BwrapSpec{}, err
 	}
@@ -122,11 +127,15 @@ func BuildSpec(project *config.Project, opts Options) (BwrapSpec, error) {
 func buildBwrapArgs(root, cwd string, sandboxConfig *config.SandboxConfig, policy sandboxPolicy, pathExists func(string) bool) []string {
 	args := []string{
 		"--die-with-parent",
-		"--unshare-pid",
-		"--unshare-ipc",
-		"--unshare-uts",
+		"--unshare-all",
+		"--dir", "/var",
+		"--dir", "/run",
+		"--dir", "/usr/bin",
+		"--dir", "/bin",
 	}
-	if !sandboxConfig.Bubblewrap.Network.Value {
+	if sandboxConfig.Bubblewrap.Network.Value {
+		args = append(args, "--share-net")
+	} else {
 		args = append(args, "--unshare-net")
 	}
 	args = append(args, "--clearenv", "--tmpfs", "/tmp")
@@ -142,6 +151,9 @@ func buildBwrapArgs(root, cwd string, sandboxConfig *config.SandboxConfig, polic
 		if pathExists(path) {
 			args = append(args, "--ro-bind", path, path)
 		}
+	}
+	for _, mount := range policy.pathMounts {
+		args = append(args, "--ro-bind", mount.host, mount.target)
 	}
 	for _, mount := range policy.extraMounts {
 		flag := "--ro-bind"
@@ -161,8 +173,10 @@ func buildBwrapArgs(root, cwd string, sandboxConfig *config.SandboxConfig, polic
 
 type sandboxPolicy struct {
 	beadsPath       string
+	homePath        string
 	codexHostPath   string
 	codexTargetPath string
+	pathMounts      []resolvedMount
 	extraMounts     []resolvedMount
 	env             map[string]string
 }
@@ -174,9 +188,8 @@ type resolvedMount struct {
 }
 
 const (
-	syntheticHomeParent = "/home"
-	syntheticHome       = "/home/orc"
-	defaultCodexTarget  = syntheticHome + "/.codex"
+	syntheticHome      = "/home/orc"
+	defaultCodexTarget = syntheticHome + "/.codex"
 )
 
 var defaultEnvAllowlist = []string{
@@ -200,19 +213,40 @@ var minimalExecutableHostPaths = []string{
 	"/nix/store",
 }
 
-func resolvePolicy(root string, sandboxConfig *config.SandboxConfig, opts Options, pathExists func(string) bool) (sandboxPolicy, error) {
+func resolvePolicy(root string, sandboxConfig *config.SandboxConfig, opts Options, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (sandboxPolicy, error) {
 	hostEnv := hostEnvMap(opts)
-	codexHost, codexTarget, err := resolveCodexHome(hostEnv, opts, pathExists)
+	home, err := resolveSandboxHome(sandboxConfig.Home.Mode, hostEnv, opts)
+	if err != nil {
+		return sandboxPolicy{}, err
+	}
+	hostHome := ""
+	if sandboxConfig.Path.Mode == config.SandboxPathModeHostEntries {
+		hostHome, err = resolveHostHome(hostEnv, opts)
+		if err != nil {
+			return sandboxPolicy{}, fmt.Errorf("resolve host HOME for sandbox path policy: %w", err)
+		}
+	}
+	codexHost, codexTarget, err := resolveCodexHome(sandboxConfig.Home.Mode, home, hostEnv, opts, pathExists)
+	if err != nil {
+		return sandboxPolicy{}, err
+	}
+	beadsPath := filepath.Clean(filepath.Join(root, "..", ".beads"))
+	extraMounts, err := resolveExtraMounts(root, home, sandboxConfig.Mounts, pathExists)
+	if err != nil {
+		return sandboxPolicy{}, err
+	}
+	pathMounts, err := resolvePathMounts(root, beadsPath, home, hostHome, effectiveSandboxPath(hostEnv, sandboxConfig.Env), sandboxConfig.Path.Mode, extraMounts, stat, evalSymlinks)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
 	policy := sandboxPolicy{
+		homePath:        home,
 		codexHostPath:   codexHost,
 		codexTargetPath: codexTarget,
-		extraMounts:     resolveExtraMounts(root, sandboxConfig.Mounts, pathExists),
-		env:             resolveEnv(hostEnv, sandboxConfig.Env, codexTarget, root),
+		pathMounts:      pathMounts,
+		extraMounts:     extraMounts,
+		env:             resolveEnv(hostEnv, sandboxConfig.Env, home, codexTarget, root),
 	}
-	beadsPath := filepath.Clean(filepath.Join(root, "..", ".beads"))
 	if pathExists(beadsPath) {
 		policy.beadsPath = beadsPath
 	}
@@ -234,13 +268,18 @@ func hostEnvMap(opts Options) map[string]string {
 	return env
 }
 
-func resolveCodexHome(hostEnv map[string]string, opts Options, pathExists func(string) bool) (string, string, error) {
-	if codexHome := hostEnv["CODEX_HOME"]; codexHome != "" {
-		if !filepath.IsAbs(codexHome) {
-			return "", "", fmt.Errorf("CODEX_HOME %q must be absolute for sandbox mounting", codexHome)
+func resolveSandboxHome(mode string, hostEnv map[string]string, opts Options) (string, error) {
+	if mode == config.SandboxHomeModeHostPath {
+		home, err := resolveHostHome(hostEnv, opts)
+		if err != nil {
+			return "", fmt.Errorf("resolve host HOME for sandbox home mode host_path: %w", err)
 		}
-		return filepath.Clean(codexHome), filepath.Clean(codexHome), nil
+		return home, nil
 	}
+	return syntheticHome, nil
+}
+
+func resolveHostHome(hostEnv map[string]string, opts Options) (string, error) {
 	home := hostEnv["HOME"]
 	if home == "" {
 		userHomeDir := os.UserHomeDir
@@ -249,12 +288,26 @@ func resolveCodexHome(hostEnv map[string]string, opts Options, pathExists func(s
 		}
 		resolvedHome, err := userHomeDir()
 		if err != nil {
-			return "", "", fmt.Errorf("resolve home for default CODEX_HOME: %w", err)
+			return "", fmt.Errorf("resolve host HOME: %w", err)
 		}
 		home = resolvedHome
 	}
 	if home == "" || !filepath.IsAbs(home) {
-		return "", "", fmt.Errorf("home %q must be absolute for default CODEX_HOME", home)
+		return "", fmt.Errorf("host HOME %q must resolve to an absolute path", home)
+	}
+	return filepath.Clean(home), nil
+}
+
+func resolveCodexHome(mode, sandboxHome string, hostEnv map[string]string, opts Options, pathExists func(string) bool) (string, string, error) {
+	if codexHome := hostEnv["CODEX_HOME"]; codexHome != "" {
+		if !filepath.IsAbs(codexHome) {
+			return "", "", fmt.Errorf("CODEX_HOME %q must be absolute for sandbox mounting", codexHome)
+		}
+		return filepath.Clean(codexHome), filepath.Clean(codexHome), nil
+	}
+	home, err := resolveHostHome(hostEnv, opts)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve home for default CODEX_HOME: %w", err)
 	}
 	codexHome := filepath.Join(home, ".codex")
 	if !pathExists(codexHome) {
@@ -266,12 +319,25 @@ func resolveCodexHome(hostEnv map[string]string, opts Options, pathExists func(s
 			return "", "", fmt.Errorf("create default CODEX_HOME %q: %w", codexHome, err)
 		}
 	}
-	return filepath.Clean(codexHome), defaultCodexTarget, nil
+	target := defaultCodexTarget
+	if mode == config.SandboxHomeModeHostPath {
+		target = filepath.Join(sandboxHome, ".codex")
+	}
+	return filepath.Clean(codexHome), filepath.Clean(target), nil
 }
 
-func resolveExtraMounts(root string, mounts []config.SandboxMount, pathExists func(string) bool) []resolvedMount {
+func effectiveSandboxPath(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig) string {
+	if sandboxEnv.Set != nil {
+		if path, ok := sandboxEnv.Set["PATH"]; ok {
+			return path
+		}
+	}
+	return hostEnv["PATH"]
+}
+
+func resolveExtraMounts(root, sandboxHome string, mounts []config.SandboxMount, pathExists func(string) bool) ([]resolvedMount, error) {
 	resolved := make([]resolvedMount, 0, len(mounts))
-	for _, mount := range mounts {
+	for i, mount := range mounts {
 		host := mount.Host
 		if !filepath.IsAbs(host) {
 			host = filepath.Join(root, host)
@@ -280,16 +346,153 @@ func resolveExtraMounts(root string, mounts []config.SandboxMount, pathExists fu
 		if mount.Optional.Value && !pathExists(host) {
 			continue
 		}
+		target := filepath.Clean(mount.Target)
+		if err := validateActiveHomeMountTarget(i, sandboxHome, target); err != nil {
+			return nil, err
+		}
 		resolved = append(resolved, resolvedMount{
 			host:   host,
-			target: filepath.Clean(mount.Target),
+			target: target,
 			mode:   mount.Mode,
 		})
 	}
-	return resolved
+	return resolved, nil
 }
 
-func resolveEnv(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig, codexTarget, root string) map[string]string {
+func resolvePathMounts(root, beadsPath, sandboxHome, hostHome, pathValue, mode string, explicitMounts []resolvedMount, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, error) {
+	if mode == "" || mode == config.SandboxPathModeNone {
+		return nil, nil
+	}
+	pathMounts := make([]resolvedMount, 0)
+	seenTargets := make(map[string]struct{})
+	seenPairs := make(map[string]struct{})
+	for _, entry := range filepath.SplitList(pathValue) {
+		if entry == "" || !filepath.IsAbs(entry) {
+			continue
+		}
+		target := filepath.Clean(entry)
+		info, err := stat(target)
+		if err != nil {
+			continue
+		}
+		resolvedSource, err := evalSymlinks(target)
+		if err != nil {
+			continue
+		}
+		resolvedInfo, err := stat(resolvedSource)
+		if err != nil || !resolvedInfo.IsDir() || !info.IsDir() {
+			continue
+		}
+		if pathUnderExistingMount(target, root) || pathUnderExistingMount(target, beadsPath) || pathUnderMinimalExecutableMount(target, stat) {
+			continue
+		}
+		if err := validatePathMountTarget(root, beadsPath, sandboxHome, hostHome, target); err != nil {
+			return nil, err
+		}
+		for _, explicit := range explicitMounts {
+			if explicit.target == target {
+				return nil, fmt.Errorf("sandbox.path.mode host_entries generated mount target %q conflicts with explicit sandbox mount target %q; explicit mounts cannot override automatic PATH mounts", target, explicit.target)
+			}
+		}
+		pairKey := filepath.Clean(resolvedSource) + "\x00" + target
+		if _, ok := seenTargets[target]; ok {
+			continue
+		}
+		if _, ok := seenPairs[pairKey]; ok {
+			continue
+		}
+		seenTargets[target] = struct{}{}
+		seenPairs[pairKey] = struct{}{}
+		pathMounts = append(pathMounts, resolvedMount{
+			host:   filepath.Clean(resolvedSource),
+			target: target,
+			mode:   "ro",
+		})
+	}
+	return pathMounts, nil
+}
+
+func pathUnderExistingMount(target, mountRoot string) bool {
+	if mountRoot == "" || !filepath.IsAbs(mountRoot) {
+		return false
+	}
+	return isStrictPathAncestor(filepath.Clean(mountRoot), target)
+}
+
+func pathUnderMinimalExecutableMount(target string, stat func(string) (os.FileInfo, error)) bool {
+	for _, mountRoot := range minimalExecutableHostPaths {
+		if !isStrictPathAncestor(mountRoot, target) {
+			continue
+		}
+		if _, err := stat(mountRoot); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func validatePathMountTarget(root, beadsPath, sandboxHome, hostHome, target string) error {
+	if target == sandboxHome {
+		return fmt.Errorf("unsafe PATH entry %q: must not mount active sandbox HOME %s", target, sandboxHome)
+	}
+	if isStrictPathAncestor(target, sandboxHome) {
+		return fmt.Errorf("unsafe PATH entry %q: must not mount ancestor of active sandbox HOME %s", target, sandboxHome)
+	}
+	if target == hostHome {
+		return fmt.Errorf("unsafe PATH entry %q: must not mount resolved host HOME %s", target, hostHome)
+	}
+	if isStrictPathAncestor(target, hostHome) {
+		return fmt.Errorf("unsafe PATH entry %q: must not mount ancestor of resolved host HOME %s", target, hostHome)
+	}
+	if filepath.IsAbs(root) && pathIntersects(target, filepath.Clean(root)) {
+		return fmt.Errorf("unsafe PATH entry %q: must not override the repository mount %s", target, filepath.Clean(root))
+	}
+	if beadsPath != "" && pathIntersects(target, filepath.Clean(beadsPath)) {
+		return fmt.Errorf("unsafe PATH entry %q: must not override the Beads mount %s", target, filepath.Clean(beadsPath))
+	}
+	for _, protected := range []string{"/proc", "/dev", "/tmp"} {
+		if target == protected || strings.HasPrefix(target, protected+string(filepath.Separator)) || isStrictPathAncestor(target, protected) {
+			return fmt.Errorf("unsafe PATH entry %q: must not override protected sandbox path %s", target, protected)
+		}
+	}
+	for _, protected := range []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/nix/store"} {
+		if target == protected || isStrictPathAncestor(target, protected) {
+			return fmt.Errorf("unsafe PATH entry %q: must not override protected sandbox path %s", target, protected)
+		}
+	}
+	return nil
+}
+
+func pathIntersects(a, b string) bool {
+	return a == b || isStrictPathAncestor(a, b) || isStrictPathAncestor(b, a)
+}
+
+func validateActiveHomeMountTarget(index int, sandboxHome, target string) error {
+	name := fmt.Sprintf("sandbox.mounts[%d].target %q", index, target)
+	if target == sandboxHome {
+		return fmt.Errorf("%s: must not override active sandbox HOME %s", name, sandboxHome)
+	}
+	if isStrictPathAncestor(target, sandboxHome) {
+		return fmt.Errorf("%s: must not override ancestor of active sandbox HOME %s", name, sandboxHome)
+	}
+	if isStrictPathAncestor(sandboxHome, target) {
+		return nil
+	}
+	if strings.HasPrefix(target, "/home/") || target == "/home" {
+		return fmt.Errorf("%s: must not override critical sandbox path /home", name)
+	}
+	return nil
+}
+
+func isStrictPathAncestor(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func resolveEnv(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig, home, codexTarget, root string) map[string]string {
 	env := make(map[string]string)
 	for _, name := range defaultEnvAllowlist {
 		if value, ok := hostEnv[name]; ok {
@@ -307,7 +510,7 @@ func resolveEnv(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig, c
 		}
 	}
 	maps.Copy(env, sandboxEnv.Set)
-	env["HOME"] = syntheticHome
+	env["HOME"] = home
 	env["CODEX_HOME"] = codexTarget
 	env["ORC_SANDBOX"] = "1"
 	env["ORC_SANDBOX_ROOT"] = root
@@ -317,20 +520,15 @@ func resolveEnv(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig, c
 func (p sandboxPolicy) setupDirs(root string) []string {
 	dirs := make([]string, 0)
 	seen := map[string]bool{"/": true, "/tmp": true}
-	appendDir := func(path string) {
-		if path == "" || path == "." || seen[path] {
-			return
-		}
-		seen[path] = true
-		dirs = append(dirs, path)
-	}
-	appendDir(syntheticHomeParent)
-	appendDir(syntheticHome)
+	appendAbsPathDirs(&dirs, seen, p.homePath, true)
 	appendAbsPathDirs(&dirs, seen, root, true)
 	if p.beadsPath != "" {
 		appendAbsPathDirs(&dirs, seen, p.beadsPath, true)
 	}
 	appendAbsPathDirs(&dirs, seen, p.codexTargetPath, true)
+	for _, mount := range p.pathMounts {
+		appendAbsPathDirs(&dirs, seen, mount.target, false)
+	}
 	for _, mount := range p.extraMounts {
 		appendAbsPathDirs(&dirs, seen, filepath.Dir(mount.target), true)
 	}
@@ -387,7 +585,6 @@ func runSpec(ctx context.Context, spec BwrapSpec, opts Options) error {
 	cmd.Stdin = opts.Stdin
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start bwrap: %w", err)
 	}
@@ -430,8 +627,8 @@ func forwardTermination(pid int) {
 	if pid <= 0 {
 		return
 	}
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err == nil {
+	if err := syscall.Kill(pid, syscall.SIGTERM); err == nil {
 		time.Sleep(25 * time.Millisecond)
 	}
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }

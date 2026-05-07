@@ -4,16 +4,29 @@ defaults:
     enabled: true
     soft: 4
     hard: 8
-# sandbox:
-#   command:
-#     argv:
-#       - codex
-#       - --dangerously-bypass-approvals-and-sandbox
-#       - exec
-#       - --skip-git-repo-check
-#   require_for_workers: true
-#   bubblewrap:
-#     network: true
+sandbox:
+  command:
+    argv:
+      - /usr/bin/env
+      - bash
+      - -norc
+      - -i
+      - -c
+      - 'nix develop .#sandboxCodex'
+  require_for_workers: true
+  home:
+    mode: host_path
+  path:
+    mode: host_entries
+  bubblewrap:
+    network: true
+  mounts:
+    - host: /home/matt/.bun
+      target: /home/matt/.bun
+      mode: ro
+    - host: /nix/var/nix
+      target: /nix/var/nix
+      mode: ro
 workflows:
   implementation: workflows/implementation.yaml
   bugfix: workflows/bugfix.yaml

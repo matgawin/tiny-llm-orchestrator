@@ -37,6 +37,26 @@
         "-X tiny-llm-orchestrator/orc/internal/cli.version=1.0.0"
       ];
     };
+
+    packages = with pkgs;
+      [
+        codexWithBeads
+        bubblewrap
+        go
+        gofumpt
+        golangci-lint
+        go-tools
+        gotools
+        go-task
+        jq
+        jujutsu
+      ]
+      ++ [beads.packages.${system}.default];
+
+    shellHook = ''
+      export BEADS_DIR="$PWD/../.beads"
+      export PATH="$PATH:$HOME/.bun/bin"
+    '';
   in {
     packages.${system} = {
       default = orc;
@@ -51,29 +71,20 @@
       };
     };
 
-    devShells.${system}.default = pkgs.mkShell {
-      packages = with pkgs;
-        [
-          codexWithBeads
-
-          bubblewrap
-
-          go
-          gofumpt
-          golangci-lint
-          go-tools
-          gotools
-          go-task
-
-          jq
-          jujutsu
-        ]
-        ++ [beads.packages.${system}.default];
-
-      shellHook = ''
-        export BEADS_DIR="$PWD/../.beads"
-        export PATH="$PATH:$HOME/.bun/bin"
-      '';
+    devShells.${system} = {
+      default = pkgs.mkShell {
+        inherit packages shellHook;
+      };
+      sandboxCodex = pkgs.mkShell {
+        inherit packages;
+        shellHook =
+          shellHook
+          + ''
+            if [ "''${ORC_SANDBOX}" == "1" ]; then
+              exec codex --dangerously-bypass-approvals-and-sandbox
+            fi
+          '';
+      };
     };
   };
 }
