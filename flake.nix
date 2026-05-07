@@ -56,6 +56,8 @@
         [
           codexWithBeads
 
+          bubblewrap
+
           go
           gofumpt
           golangci-lint
@@ -65,7 +67,6 @@
 
           jq
           jujutsu
-          zellij
         ]
         ++ [beads.packages.${system}.default];
 

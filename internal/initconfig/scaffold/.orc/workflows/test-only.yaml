@@ -61,19 +61,16 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   test-run:
-    agent: tester
+    kind: command
+    command:
+      argv: ["task", "check"]
     allowed_results:
       done: [passed, failed]
-      blocked: [blocked]
-      failed: [error, timeout, missing_report, invalid_report, process_error]
+      failed: [timeout, process_error]
     on:
       done/passed: review
       done/failed: test-code
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
       failed/timeout: blocked_for_human
-      failed/missing_report: blocked_for_human
-      failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   review:
     agent: reviewer
