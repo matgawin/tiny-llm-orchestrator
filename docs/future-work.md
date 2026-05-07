@@ -53,9 +53,6 @@ These features are useful, but are not required for the first useful version:
 
 ## Deferred Policy Questions
 
-- Whether `orc run next` should remain inspect-only forever, or whether a later
-  convenience command such as `orc run advance` should inspect and launch in one
-  step.
 - Whether a later version should support explicit bead note writing. V1 keeps
   beads read-only and leaves note writing and closure to humans after review.
 - Whether workflow or agent configuration should ever be edited automatically

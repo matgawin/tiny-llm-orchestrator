@@ -50,8 +50,9 @@ Orc sets these marker variables in the sandboxed environment:
 
 Worker launches inherit sandboxing through normal process inheritance. Start the
 top-level Codex/orchestrator session with `orc sandbox run`; any child
-`orc worker launch-next <run-id>` processes launched from that session run in
-the same bubblewrap environment and see the marker variables above.
+worker processes launched through `orc run advance <run-id>` or `orc worker
+launch-next <run-id>` from that session run in the same bubblewrap environment
+and see the marker variables above.
 
 Agent worker launches use the normal Codex default outside a verified Orc
 sandbox:

@@ -21,7 +21,9 @@ not implement code changes directly.
 
 - The main thread is the orchestrator, not the worker.
 - Do not edit task files directly while orchestrating.
-- Let Orc select steps and launch only the selected step.
+- Let Orc select steps. Prefer `orc run advance` for normal sequential
+  execution, and use `orc worker launch-next` only when intentionally
+  supervising one selected attempt at a time.
 - Inspect repo state, Beads, Orc run state, prompts, logs, and reports as needed
   to make executive decisions, but not preemptively.
 - If a worker makes changes, review status and reports, but do not repair the
@@ -101,30 +103,40 @@ Use these when their triggers apply:
    If start fails because project config is invalid, inspect the cited workflow
    and report the blocker. Do not patch config unless the user explicitly asks.
 
-5. Route by Orc state, not intuition.
+5. Advance by Orc state, not intuition.
 
-   Before launching each step:
+   Inspect the current state before advancing when needed:
 
    ```bash
    orc run status <run-id>
    orc run next <run-id>
    ```
 
-   Launch only when `run next` says a step is selected and not launched:
+   For normal sequential execution, let Orc conservatively launch selected
+   workers until it reaches a stop condition:
+
+   ```bash
+   orc run advance <run-id>
+   ```
+
+   Use the one-step primitive only when you need manual control over exactly one
+   selected attempt:
 
    ```bash
    orc worker launch-next <run-id>
    ```
 
-   If worker launch fails because Codex session files or similar setup need
-   writes outside the sandbox, rerun the same launch with escalated permission.
+   If worker launch or advance fails because Codex session files or similar
+   setup need writes outside the sandbox, rerun the same command with escalated
+   permission.
 
-6. Poll long-running workers.
+6. Supervise long-running advancement.
 
-   Keep the launch command session open and poll until it exits. While a worker
-   is active:
+   Keep the `orc run advance` command session open and poll until it exits.
+   While a worker is active:
 
-   - Do not start another worker in the same sequential run.
+   - Do not start another worker or a second advance command in the same
+     sequential run.
    - Do not edit files.
    - You may inspect `run status` and `jj status` to understand progress.
    - Avoid reading active diffs unless needed for routing; the worker owns them
@@ -132,22 +144,25 @@ Use these when their triggers apply:
 
 7. Handle outcomes.
 
-   After each worker exits:
+   After `advance` exits:
 
    ```bash
    orc run status <run-id>
    orc run next <run-id>
    ```
 
-   Continue launching selected steps until Orc reports a terminal state:
+   Stop when Orc reports a terminal state or an attention stop:
 
    - `ready_for_human`: stop launching; prepare handoff.
    - `blocked_for_human`: inspect logs/reports and summarize the blocker.
+   - `worker_blocked`, `worker_failed`, loop-cap stops, or
+     `max_steps_reached`: inspect the reported stop reason and summarize the
+     state.
    - `cancelled` or another terminal state: stop and summarize.
 
    If a report is `done/changes_requested`, `done/failed`, or equivalent, do
-   not intervene manually. Let the workflow route to the configured coder/fixer
-   step.
+   not intervene manually while `advance` can continue. Let the workflow route
+   to the configured coder/fixer step.
 
 8. Inspect logs when needed.
 
@@ -204,9 +219,10 @@ Use these when their triggers apply:
 BEADS_DIR=$PWD/../.beads bd ready --json
 BEADS_DIR=$PWD/../.beads bd update <issue-id> --claim
 BEADS_DIR=$PWD/../.beads orc run start --workflow implementation --bead <issue-id>
-orc run next <run-id>
-orc worker launch-next <run-id>
+orc run advance <run-id>
 orc run status <run-id>
 ```
 
-Repeat `run next` and `worker launch-next` until terminal.
+Use `orc run next <run-id>` before `advance` when you need an inspect-only
+preview. Use `orc worker launch-next <run-id>` instead of `advance` only for
+manual one-attempt supervision.

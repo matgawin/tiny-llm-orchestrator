@@ -2,11 +2,13 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -76,11 +78,31 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
+	var cliExit exitError
+	if errors.As(err, &cliExit) {
+		return cliExit.Code
+	}
 	var sandboxExit sandbox.ExitError
 	if errors.As(err, &sandboxExit) {
 		return sandboxExit.Code
 	}
 	return 1
+}
+
+type exitError struct {
+	Code int
+	Err  error
+}
+
+func (e exitError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("exit code %d", e.Code)
+}
+
+func (e exitError) Unwrap() error {
+	return e.Err
 }
 
 func executeSandbox(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -308,6 +330,8 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return printRunHelp(stdout)
 	case "add-followup":
 		return executeRunAddFollowup(args[1:], stdout, stderr)
+	case "advance":
+		return executeRunAdvance(args[1:], stdout, stderr)
 	case "continue":
 		return executeRunContinue(args[1:], stdout, stderr)
 	case "start":
@@ -331,6 +355,91 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		}
 		return fmt.Errorf("unknown run command: %s", args[0])
 	}
+}
+
+func executeRunAdvance(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return runAdvanceFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	if args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand {
+		return printRunAdvanceHelp(stdout)
+	}
+	runID := args[0]
+	if runID == "" {
+		return runAdvanceFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	opts := launcher.AdvanceOptions{
+		RunID:    runID,
+		MaxSteps: launcher.DefaultAdvanceMaxSteps,
+	}
+	jsonOutput := false
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--once":
+			opts.Once = true
+		case "--json":
+			jsonOutput = true
+		case "--max-steps":
+			var raw string
+			if !assignFlagValue(args, &i, &raw) {
+				return runAdvanceFlagError(stderr, fmt.Errorf("--max-steps requires a value"))
+			}
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 {
+				return runAdvanceFlagError(stderr, fmt.Errorf("--max-steps must be a positive integer"))
+			}
+			opts.MaxSteps = value
+		case "-h", helpFlag, helpCommand:
+			return printRunAdvanceHelp(stdout)
+		default:
+			if value, ok := strings.CutPrefix(arg, "--max-steps="); ok {
+				parsed, err := strconv.Atoi(value)
+				if err != nil || parsed < 1 {
+					return runAdvanceFlagError(stderr, fmt.Errorf("--max-steps must be a positive integer"))
+				}
+				opts.MaxSteps = parsed
+				continue
+			}
+			return runAdvanceFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
+		}
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	restoreSignals := context.AfterFunc(ctx, stop)
+	defer restoreSignals()
+	opts.Root = root
+	if jsonOutput {
+		opts.Stdout = stderr
+		opts.Progress = stderr
+	} else {
+		opts.Stdout = stdout
+		opts.Progress = stdout
+	}
+	result, err := launcher.Advance(ctx, opts)
+	if jsonOutput {
+		if encodeErr := json.NewEncoder(stdout).Encode(advanceJSON(result)); encodeErr != nil {
+			return encodeErr
+		}
+	} else {
+		if writeErr := printAdvanceResult(stdout, result); writeErr != nil {
+			return writeErr
+		}
+	}
+	if err != nil && result.ExitCode == 1 {
+		if _, writeErr := fmt.Fprintf(stderr, "%s run advance: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	if result.ExitCode != 0 {
+		return exitError{Code: result.ExitCode, Err: err}
+	}
+	return nil
 }
 
 func executeRunContinue(args []string, stdout, stderr io.Writer) error {
@@ -645,6 +754,16 @@ func runStartFlagError(stderr io.Writer, err error) error {
 	return err
 }
 
+func runAdvanceFlagError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s run advance: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	if helpErr := printRunAdvanceHelp(stderr); helpErr != nil {
+		return helpErr
+	}
+	return err
+}
+
 func runAddFollowupFlagError(stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s run add-followup: %v\n\n", appName, err); writeErr != nil {
 		return writeErr
@@ -673,6 +792,54 @@ func runRecordSummaryFlagError(stderr io.Writer, err error) error {
 		return helpErr
 	}
 	return err
+}
+
+type advanceJSONResult struct {
+	RunID            string                    `json:"run_id"`
+	LaunchedAttempts []launcher.AdvanceAttempt `json:"launched_attempts"`
+	FinalStatus      string                    `json:"final_status"`
+	FinalDecision    string                    `json:"final_decision"`
+	StopReason       string                    `json:"stop_reason"`
+	ExitCode         int                       `json:"exit_code"`
+	Error            string                    `json:"error,omitempty"`
+}
+
+func advanceJSON(result launcher.AdvanceResult) advanceJSONResult {
+	return advanceJSONResult{
+		RunID:            result.RunID,
+		LaunchedAttempts: result.LaunchedAttempts,
+		FinalStatus:      result.FinalStatus,
+		FinalDecision:    result.FinalDecision,
+		StopReason:       result.StopReason,
+		ExitCode:         result.ExitCode,
+		Error:            result.Error,
+	}
+}
+
+func printAdvanceResult(w io.Writer, result launcher.AdvanceResult) error {
+	if _, err := fmt.Fprintf(w, "advanced run %s\n", result.RunID); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "launched attempts: %d\n", len(result.LaunchedAttempts)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "final status: %s\n", result.FinalStatus); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "final decision: %s\n", result.FinalDecision); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "stop reason: %s\n", result.StopReason); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "exit code: %d\n", result.ExitCode); err != nil {
+		return err
+	}
+	if result.Error != "" {
+		_, err := fmt.Fprintf(w, "error: %s\n", result.Error)
+		return err
+	}
+	return nil
 }
 
 func printHelp(w io.Writer) error {
@@ -750,6 +917,7 @@ Usage:
 
 Available Commands:
   add-followup     Record out-of-scope follow-up work
+  advance          Launch workflow-selected workers until a conservative stop
   continue         Continue after an explicit human-reviewed stop
   next             Inspect the next workflow action without launching it
   record-summary   Record a final ready-for-review summary
@@ -760,6 +928,40 @@ Available Commands:
 
 Flags:
   -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printRunAdvanceHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run advance launches workflow-selected worker attempts until the run reaches a normal completion point or needs operator attention.
+
+Usage:
+  %s run advance <run-id> [--max-steps N] [--once] [--json]
+
+Flags:
+      --max-steps N  Stop before launching another worker after N launched attempts (default 20; must be positive)
+      --once         Launch at most one selected worker attempt, then report the resulting state
+      --json         Emit one JSON result object on stdout after the command stops
+  -h, --help         Show command help
+
+Stop reasons:
+  ready_for_human        normal completion
+  blocked_for_human      workflow terminal human handoff
+  worker_blocked         launched worker reported blocked/*
+  worker_failed          launched worker reported failed/*
+  loop_soft_cap          workflow soft loop cap reached before launch
+  loop_hard_cap          workflow hard loop cap blocked the run before launch
+  max_steps_reached      max-step guard stopped before another launch
+  active_attempt_exists  command started while a worker attempt was active
+  error                  invalid state, config, launcher, or persistence error
+
+Exit codes:
+  0  ready_for_human or max_steps_reached
+  1  worker_failed, active_attempt_exists, invalid state, config, launcher, or persistence error
+  2  blocked_for_human, worker_blocked, loop_soft_cap, or loop_hard_cap
+
+Existing worker diagnostics are preserved. With --json, progress and launcher diagnostics are written to stderr so stdout contains only the final JSON object.
 `, appName, appName)
 
 	return err

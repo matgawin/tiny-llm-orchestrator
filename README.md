@@ -36,9 +36,11 @@ In Tiny Orc docs and command output, "orchestrator" means the supervising
 caller that drives the `orc` CLI. In normal Codex use, that is the main Codex
 thread started by the user before any worker launch. When `orc` is run manually,
 the human operator is effectively filling the same orchestrator role. The
-default workflow does not launch an orchestrator worker; `orc worker
-launch-next` starts the workflow-selected role-specific worker, such as planner,
-coder, tester, or reviewer.
+default workflow does not launch an orchestrator worker. Operators normally use
+`orc run advance` to drive workflow-selected role-specific workers, such as
+planner, coder, tester, or reviewer, until the run reaches a conservative stop.
+Use `orc worker launch-next` when intentionally launching exactly one selected
+attempt.
 
 Runtime entrypoint:
 

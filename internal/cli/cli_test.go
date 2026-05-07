@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/launcher"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/sandbox"
 	"tiny-llm-orchestrator/orc/internal/testutil"
@@ -1013,6 +1014,196 @@ func TestWorkerLaunchNextRoutesImplementationBlockedReportsToHuman(t *testing.T)
 			terminalizeCLIWorkflow(t, run.root, run.runID, "blocked_for_human", attemptsBeforeBlockedTerminal+1, tt.blockSummary)
 		})
 	}
+}
+
+func TestRunAdvanceCommandWorkflowReachesReadyForHuman(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIAdvanceCommandProject(t, root, "", "")
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+	output := executeCLICommand(t, []string{"run", "advance", result.runID})
+	assertCLIOutputContainsAll(t, output, []string{
+		"launched attempts: 4",
+		"final status: ready_for_human",
+		"final decision: terminal",
+		"stop reason: ready_for_human",
+		"exit code: 0",
+	})
+	loaded := loadCLIRun(t, root, result.runID)
+	if loaded.Status.State != "ready_for_human" {
+		t.Fatalf("run state = %q, want ready_for_human", loaded.Status.State)
+	}
+	if got := len(loaded.Status.Attempts); got != 4 {
+		t.Fatalf("attempt count = %d, want 4", got)
+	}
+}
+
+func TestRunAdvanceContinuesAfterReviewChangesRequestedRoute(t *testing.T) {
+	root := withTempCwd(t)
+	reviewScript := filepath.Join(root, "review-once.sh")
+	writeCLIFile(t, reviewScript, "#!/bin/sh\nif [ ! -f review-count ]; then touch review-count; exit 1; fi\nexit 0\n")
+	if err := os.Chmod(reviewScript, 0o755); err != nil {
+		t.Fatalf("chmod review script: %v", err)
+	}
+	writeCLIAdvanceCommandProject(t, root, `    kind: script
+    script:
+      path: review-once.sh
+`, "")
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+	output := executeCLICommand(t, []string{"run", "advance", result.runID, "--max-steps", "8"})
+	assertCLIOutputContainsAll(t, output, []string{
+		"launched attempts: 7",
+		"final status: ready_for_human",
+		"stop reason: ready_for_human",
+	})
+	loaded := loadCLIRun(t, root, result.runID)
+	if got := len(loaded.Status.Attempts); got != 7 {
+		t.Fatalf("attempt count = %d, want review changes loop to produce 7 attempts", got)
+	}
+}
+
+func TestRunAdvanceStopsOnWorkerBlockedAndFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     string
+		result     string
+		wantReason string
+		wantCode   int
+	}{
+		{name: "blocked", status: "blocked", result: "blocked", wantReason: "worker_blocked", wantCode: 2},
+		{name: "failed", status: "failed", result: "error", wantReason: "worker_failed", wantCode: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIImplementationProject(t, root)
+			run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			shim := installCLICodexShim(t, root)
+			t.Setenv("PATH", shim.binDir)
+			t.Setenv("ORC_CLI_CODEX_SHIM", "1")
+			t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
+			t.Setenv("ORC_CLI_CODEX_REPORT_STATUS", tc.status)
+			t.Setenv("ORC_CLI_CODEX_REPORT_RESULT", tc.result)
+
+			var stdout, stderr bytes.Buffer
+			err := Execute([]string{"run", "advance", run.runID}, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want stop error")
+			}
+			if got := ExitCode(err); got != tc.wantCode {
+				t.Fatalf("ExitCode = %d, want %d", got, tc.wantCode)
+			}
+			assertCLIOutputContainsAll(t, stdout.String(), []string{"stop reason: " + tc.wantReason, fmt.Sprintf("exit code: %d", tc.wantCode)})
+		})
+	}
+}
+
+func TestRunAdvanceStopsOnLoopCapsAndMaxSteps(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		caps       string
+		maxSteps   string
+		wantReason string
+		wantCode   int
+	}{
+		{name: "soft cap", caps: "enabled: true\nsoft: 1\nhard: 4\n", maxSteps: "5", wantReason: "loop_soft_cap", wantCode: 2},
+		{name: "hard cap", caps: "enabled: true\nsoft: 1\nhard: 2\n", maxSteps: "5", wantReason: "loop_hard_cap", wantCode: 2},
+		{name: "max steps", caps: "enabled: false\nsoft: 1\nhard: 2\n", maxSteps: "1", wantReason: "max_steps_reached", wantCode: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIAdvanceLoopProject(t, root, tc.caps)
+			run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			if tc.wantReason == "loop_hard_cap" {
+				executeCLICommand(t, []string{"worker", "launch-next", run.runID})
+				executeCLICommand(t, []string{"worker", "launch-next", run.runID})
+				executeCLICommand(t, []string{"worker", "launch-next", run.runID})
+			}
+
+			var stdout, stderr bytes.Buffer
+			err := Execute([]string{"run", "advance", run.runID, "--max-steps", tc.maxSteps}, &stdout, &stderr)
+			if tc.wantCode == 0 && err != nil {
+				t.Fatalf("Execute returned error: %v", err)
+			}
+			if tc.wantCode != 0 {
+				if err == nil {
+					t.Fatal("Execute returned nil error, want attention stop")
+				}
+				if got := ExitCode(err); got != tc.wantCode {
+					t.Fatalf("ExitCode = %d, want %d", got, tc.wantCode)
+				}
+			}
+			assertCLIOutputContainsAll(t, stdout.String(), []string{"stop reason: " + tc.wantReason, fmt.Sprintf("exit code: %d", tc.wantCode)})
+		})
+	}
+}
+
+func TestRunAdvanceOnceJSONActiveAttemptAndInvalidMaxSteps(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIAdvanceCommandProject(t, root, "", "")
+	run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"run", "advance", run.runID, "--once", "--json"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+	var payload struct {
+		RunID            string                    `json:"run_id"`
+		LaunchedAttempts []launcher.AdvanceAttempt `json:"launched_attempts"`
+		FinalStatus      string                    `json:"final_status"`
+		FinalDecision    string                    `json:"final_decision"`
+		StopReason       string                    `json:"stop_reason"`
+		ExitCode         int                       `json:"exit_code"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json output = %q, decode error: %v", stdout.String(), err)
+	}
+	if payload.RunID != run.runID || len(payload.LaunchedAttempts) != 1 || payload.StopReason != "once" || payload.ExitCode != 0 || payload.FinalDecision != "select_step" {
+		t.Fatalf("json payload = %+v, want once result after one launch", payload)
+	}
+
+	activeRoot := withTempCwd(t)
+	writeCLIProject(t, activeRoot, "optional", true)
+	activeRun := executeCLIRunStart(t, activeRoot, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, activeRoot, activeRun.runID, "attempt-001")
+	stdout.Reset()
+	stderr.Reset()
+	err := Execute([]string{"run", "advance", activeRun.runID}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want active attempt refusal")
+	}
+	if got := ExitCode(err); got != 1 {
+		t.Fatalf("ExitCode = %d, want 1", got)
+	}
+	assertCLIOutputContainsAll(t, stdout.String(), []string{"stop reason: active_attempt_exists", "exit code: 1"})
+
+	stdout.Reset()
+	stderr.Reset()
+	err = Execute([]string{"run", "advance", activeRun.runID, "--max-steps", "0"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want invalid max steps")
+	}
+	assertCLIOutputContainsAll(t, stderr.String(), []string{"--max-steps must be a positive integer", "run advance"})
+}
+
+func TestRunAdvanceStopsOnInvalidRunState(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIAdvanceCommandProject(t, root, "", "")
+	run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	if _, _, err := openCLIStore(t, root).UpdateStatus(run.runID, runstore.StatusUpdate{State: "unknown_run_state"}); err != nil {
+		t.Fatalf("UpdateStatus returned error: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := Execute([]string{"run", "advance", run.runID}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want invalid state error")
+	}
+	if got := ExitCode(err); got != 1 {
+		t.Fatalf("ExitCode = %d, want 1", got)
+	}
+	assertCLIOutputContainsAll(t, stdout.String(), []string{"stop reason: error", "exit code: 1"})
+	assertCLIOutputContainsAll(t, stderr.String(), []string{`unsupported run status "unknown_run_state"`})
 }
 
 func TestExecuteReportRejectsReservedSystemOutcomes(t *testing.T) {
@@ -2125,6 +2316,104 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
 `)
+}
+
+func writeCLIAdvanceCommandProject(t *testing.T, root, reviewStep, loopCaps string) {
+	t.Helper()
+	orcDir := filepath.Join(root, ".orc")
+	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
+		t.Fatalf("mkdir workflows: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  reviewer: agents/reviewer.md
+`)
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), cliAgentDescriptor("reviewer", "Reviews completed work."))
+	if strings.TrimSpace(reviewStep) == "" {
+		reviewStep = `    kind: command
+    command:
+      argv: ["sh", "-c", "exit 0"]
+`
+	}
+	var caps strings.Builder
+	if strings.TrimSpace(loopCaps) != "" {
+		caps.WriteString("  loop_caps:\n")
+		for line := range strings.SplitSeq(strings.TrimRight(loopCaps, "\n"), "\n") {
+			caps.WriteString("    " + line + "\n")
+		}
+	}
+	writeCLIFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 5s
+  report_exit_grace: 30ms
+  retries: {}
+`+caps.String()+`steps:
+  plan:
+    kind: command
+    command:
+      argv: ["sh", "-c", "exit 0"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: code
+      done/failed: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+  code:
+    kind: command
+    command:
+      argv: ["sh", "-c", "exit 0"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: test
+      done/failed: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+  test:
+    kind: command
+    command:
+      argv: ["sh", "-c", "exit 0"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: review
+      done/failed: code
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+  review:
+`+reviewStep+`    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: ready_for_human
+      done/failed: code
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+`)
+}
+
+func writeCLIAdvanceLoopProject(t *testing.T, root, loopCaps string) {
+	t.Helper()
+	writeCLIAdvanceCommandProject(t, root, "", loopCaps)
+	workflowPath := filepath.Join(root, ".orc", "workflows", "implementation.yaml")
+	content := string(readCLIFile(t, workflowPath))
+	content = strings.Replace(content, "      done/passed: code", "      done/passed: plan", 1)
+	writeCLIFile(t, workflowPath, content)
 }
 
 func cliAgentDescriptor(id, description string) string {

@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define how `orc worker launch-next <run-id>` starts and tracks a workflow-selected worker attempt.
+Define how `orc run advance <run-id>` and `orc worker launch-next <run-id>`
+start and track workflow-selected worker attempts.
 
 ## Audience
 
@@ -10,7 +11,7 @@ Contributors changing worker process launch, active-attempt state, no-report out
 
 ## Read This When
 
-- You are changing `orc worker launch-next`.
+- You are changing `orc run advance` or `orc worker launch-next`.
 - You need to know how launcher state is persisted.
 - You are wiring report validation or retry routing to active attempts.
 
@@ -25,26 +26,50 @@ Contributors changing worker process launch, active-attempt state, no-report out
 ## Command Shape
 
 ```bash
+orc run advance <run-id> [--max-steps N] [--once] [--json]
 orc worker launch-next <run-id>
 ```
 
-The v1 public command has no flags. `orc run next` remains read-only inspection
-and never launches a worker.
+For normal operator-driven execution, prefer `orc run advance <run-id>`. It is
+a conservative loop around the same launcher path as `launch-next`: it
+evaluates the next workflow action, launches the selected worker attempt, waits
+for the launcher to finish supervising that attempt, records the resulting
+outcome through the normal launcher/report path, and repeats until a stop
+condition is reached. `orc worker launch-next <run-id>` remains the one-step
+primitive with no flags; use it for deliberate manual routing or debugging one
+attempt at a time. `orc run next` remains read-only inspection and never
+launches a worker.
+
+`orc run advance` defaults to `--max-steps 20`. The value must be a positive
+integer, and the guard stops before launching another worker with stop reason
+`max_steps_reached`. `--once` may be combined with `--max-steps`, but it still
+limits the command to one launched worker attempt. No dry-run mode exists for
+`advance` in v1; use `orc run next <run-id>` for inspection.
+
+By default, `advance` prints concise human-readable progress and a final
+summary. With `--json`, stdout contains one final JSON object with `run_id`,
+`launched_attempts`, `final_status`, `final_decision`, `stop_reason`,
+`exit_code`, and optional `error`; each launched attempt includes `step_id`,
+`agent_id`, `attempt_id`, `status`, `result`, and `state` when known. Progress
+and launcher diagnostics are written to stderr in JSON mode so stdout remains
+machine-readable.
 
 ## Sandbox Inheritance
 
 Workers are sandboxed by process inheritance when the top-level
 Codex/orchestrator session was started with `orc sandbox run`. In that flow,
-`orc sandbox run` starts the configured command inside bubblewrap, and child
-`orc worker launch-next <run-id>` processes remain inside the same sandbox.
+`orc sandbox run` starts the configured command inside bubblewrap, and worker
+processes launched by `orc run advance <run-id>` or `orc worker launch-next
+<run-id>` remain inside the same sandbox.
 
 Repositories may opt in to an enforcement guard with
-`sandbox.require_for_workers: true`. When enabled, `orc worker launch-next`
-refuses to launch unless `ORC_SANDBOX=1` is present and `ORC_SANDBOX_ROOT`
-matches the current repository root. This guard is useful for repositories that
-expect Codex yolo mode to be used only inside the Orc bubblewrap wrapper. It is
-disabled by default so existing non-sandbox worker workflows remain usable.
-Failure messages tell the operator to restart the orchestrator with
+`sandbox.require_for_workers: true`. When enabled, both `orc run advance` and
+`orc worker launch-next` refuse to launch unless `ORC_SANDBOX=1` is present and
+`ORC_SANDBOX_ROOT` matches the current repository root. This guard is useful
+for repositories that expect Codex yolo mode to be used only inside the Orc
+bubblewrap wrapper. It is disabled by default so existing non-sandbox worker
+workflows remain usable. Failure messages tell the operator to restart the
+orchestrator with
 `orc sandbox run`.
 
 ## Launch Contract
@@ -76,13 +101,37 @@ blocker was resolved outside Orc and returns the same run to `running`. This
 mode retries the same step that produced the blocked terminal outcome. It does
 not skip the step, select an arbitrary next step, prove the blocker is fixed,
 create a new run, clear retry lineage, or reset workflow-loop counters. The
-next `orc worker launch-next <run-id>` starts a new attempt for that blocked
-step and clears the continuation marker so the old blocked outcome is not
-re-consumed. The retry still records the normal workflow-loop entry and count
-for selecting that step again, with the resolved blocked attempt as the trigger.
+next `orc run advance <run-id>` or `orc worker launch-next <run-id>` starts a
+new attempt for that blocked step and clears the continuation marker so the old
+blocked outcome is not re-consumed. The retry still records the normal
+workflow-loop entry and count for selecting that step again, with the resolved
+blocked attempt as the trigger.
 Use `--allow-loop-cap`, not `--resolve-block`, when the run has an active
 workflow-loop hard-cap block. Start a separate workflow when the run is not in
 `blocked_for_human` or no terminal blocked attempt can be resolved.
+
+`orc run advance` stops conservatively:
+
+- `ready_for_human`: normal successful stop, exit code 0.
+- `blocked_for_human`: workflow terminal human handoff, exit code 2.
+- `worker_blocked`: a launched worker reported `blocked/*`, exit code 2.
+- `worker_failed`: a launched worker reported `failed/*`, exit code 1.
+- `loop_soft_cap`: the workflow soft loop cap was reached before another
+  launch, exit code 2.
+- `loop_hard_cap`: the workflow hard loop cap blocked the run before another
+  launch, exit code 2.
+- `max_steps_reached`: the max-step guard stopped before another launch, exit
+  code 0.
+- `active_attempt_exists`: the command started while a worker attempt was
+  active, exit code 1.
+- `error`: invalid state, invalid config, launcher error, or persistence error,
+  exit code 1.
+
+Reviewer `changes_requested` outcomes are ordinary workflow outcomes. If the
+workflow routes back to code and no cap, block, failure, or guard stops the run,
+`advance` continues through the routed code/test/review cycle. `advance` does
+not call `orc run continue --allow-loop-cap`, resolve human blocks, skip steps,
+write Beads comments, or close Beads issues.
 
 Agent launches create a `starting` attempt before rendering the worker prompt.
 The attempt becomes `active` only after process metadata is recorded. The
@@ -130,8 +179,9 @@ Command and script steps use the same selected-step, active-attempt, retry,
 timeout, and persisted status lifecycle, but they execute a deterministic local
 foreground process instead of launching an LLM worker. `orc run next` remains
 read-only for these steps and prints that the deterministic step was selected
-without executing it. `orc worker launch-next <run-id>` executes the selected
-command or script.
+without executing it. `orc run advance <run-id>` executes selected command or
+script steps as part of its loop; `orc worker launch-next <run-id>` executes
+one selected command or script.
 
 Command steps pass `command.argv` directly to `exec` with no shell
 interpretation. Script steps execute the configured repository-relative script

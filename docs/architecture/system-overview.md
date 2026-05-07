@@ -30,7 +30,8 @@ The only runnable service today is the `orc` CLI:
 
 The CLI currently exposes help, version, init, `run start`,
 `run add-followup`, read-only `run status` / `run next` behavior,
-`worker launch-next` for launching the workflow-selected worker attempt, and
+`run advance` for conservatively advancing selected worker attempts,
+`worker launch-next` for launching one workflow-selected worker attempt, and
 `report` for worker report submission.
 
 Config loading and validation, deterministic workflow transitions,
