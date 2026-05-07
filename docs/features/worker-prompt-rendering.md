@@ -18,6 +18,7 @@ or run-store prompt artifacts.
 
 ## Related Docs
 
+- [live-worker-progress.md](live-worker-progress.md)
 - [run-start.md](run-start.md)
 - [run-inspection.md](run-inspection.md)
 - [../reference/configuration.md](../reference/configuration.md)
@@ -108,6 +109,13 @@ Rendered prompts also list optional structured report fields: repeatable
 not to combine `--json-file` with report field flags. The command validates
 required identity fields against the current `active_attempt` in attempt state
 `active` before persisting the structured report through the Run Store.
+
+Live worker-authored progress is a separate prompt guidance surface from final
+reports. When a live progress channel is available, prompts may mention
+`orc progress <message>` for operator feedback, but they must continue to
+present `orc report --status/--result` as the only final worker outcome
+submission path. The live progress contract is defined in
+[live-worker-progress.md](live-worker-progress.md).
 
 ## Persistence
 

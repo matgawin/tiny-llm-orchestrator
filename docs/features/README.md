@@ -28,6 +28,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 - Follow-up recording: [follow-up-recording.md](follow-up-recording.md)
 - Worker report command and report persistence: report contract in [worker-prompt-rendering.md](worker-prompt-rendering.md#report-contract), persistence contract in
   [../reference/run-store.md](../reference/run-store.md)
+- Live worker progress: [live-worker-progress.md](live-worker-progress.md)
 - Worker prompt rendering: [worker-prompt-rendering.md](worker-prompt-rendering.md)
 - Worker launching: [worker-launching.md](worker-launching.md)
 - Sandbox command execution: [sandbox-run.md](sandbox-run.md)

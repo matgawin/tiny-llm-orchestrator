@@ -75,6 +75,7 @@ Entrypoints:
 - final summary recording: [docs/features/final-summary-recording.md](docs/features/final-summary-recording.md)
 - worker prompt rendering: `internal/promptrender` and [docs/features/worker-prompt-rendering.md](docs/features/worker-prompt-rendering.md)
 - worker launching and process supervision: `internal/launcher` and [docs/features/worker-launching.md](docs/features/worker-launching.md)
+- live worker progress contract: [docs/features/live-worker-progress.md](docs/features/live-worker-progress.md)
 - project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md)
 - deterministic workflow transition logic: `internal/workflow` and [docs/reference/workflow-engine.md](docs/reference/workflow-engine.md)
 - run persistence: `internal/runstore` and [docs/reference/run-store.md](docs/reference/run-store.md)

@@ -39,6 +39,15 @@ These features are useful, but are not required for the first useful version:
 - expected-path enforcement beyond recording observed changed paths
 - richer manual inspection commands
 - web or TUI dashboard
+- persisted worker progress history
+- live worker progress TUI or web UI
+- full worker log streaming
+- cross-run progress broadcast
+- remote worker progress transport
+- Windows support for live worker progress
+- structured worker-progress lifecycle states
+- automatic summarization of live worker progress
+- Beads integration for live worker progress
 - MCP integration
 - replacing beads or wrapping the full bead lifecycle
 - automatically closing beads

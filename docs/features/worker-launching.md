@@ -17,6 +17,7 @@ Contributors changing worker process launch, active-attempt state, no-report out
 
 ## Related Docs
 
+- [live-worker-progress.md](live-worker-progress.md)
 - [worker-prompt-rendering.md](worker-prompt-rendering.md)
 - [run-inspection.md](run-inspection.md)
 - [../reference/run-store.md](../reference/run-store.md)
@@ -53,6 +54,12 @@ summary. With `--json`, stdout contains one final JSON object with `run_id`,
 `agent_id`, `attempt_id`, `status`, `result`, and `state` when known. Progress
 and launcher diagnostics are written to stderr in JSON mode so stdout remains
 machine-readable.
+
+Live worker-authored progress during supervision is defined in
+[live-worker-progress.md](live-worker-progress.md). Both `orc run advance` and
+`orc worker launch-next` own a temporary listener for `orc progress <message>`.
+Human output mode prints accepted live progress to stdout; `advance --json`
+prints live progress to stderr and keeps stdout for the final JSON object only.
 
 ## Sandbox Inheritance
 
@@ -190,6 +197,10 @@ repo-relative `cwd` is configured, inherit the launcher environment, apply
 configured `env` overrides, and run with closed stdin. They are bounded,
 non-interactive foreground executions, not daemon, watcher, background-job, or
 general async job-runner steps.
+
+Command and script steps inherit the same live progress environment as agent
+workers and may call `orc progress <message>`. Progress remains live
+operator-feedback only and does not affect the generated command/script report.
 
 Orc writes command/script reports itself; subprocesses do not call
 `orc report`. Exit mapping is fixed in v1:
