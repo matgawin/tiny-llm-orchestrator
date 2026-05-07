@@ -29,6 +29,8 @@ const (
 	StatusRejected = "rejected"
 )
 
+var ErrUnavailable = errors.New("progress channel is unavailable")
+
 type Request struct {
 	RunID     string `json:"run_id"`
 	StepID    string `json:"step_id"`
@@ -112,6 +114,35 @@ func GenerateToken() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
+func ValidateMessage(raw string) error {
+	_, err := sanitizeMessage(raw)
+	return err
+}
+
+func Send(socketPath string, req Request) (Response, error) {
+	if socketPath == "" {
+		return Response{}, ErrUnavailable
+	}
+	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	if err != nil {
+		return Response{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return Response{}, err
+	}
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		return Response{}, err
+	}
+	var resp Response
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		return Response{}, err
+	}
+	return resp, nil
+}
+
 func (l *Listener) SocketPath() string {
 	if l == nil {
 		return ""
@@ -187,6 +218,11 @@ func (l *Listener) acceptLoop() {
 			continue
 		}
 		l.mu.Lock()
+		if l.closed {
+			l.mu.Unlock()
+			_ = conn.Close()
+			return
+		}
 		l.conns[conn] = struct{}{}
 		l.mu.Unlock()
 		l.wg.Add(1)
@@ -223,29 +259,39 @@ func (l *Listener) handleConn(conn net.Conn) {
 
 func (l *Listener) evaluate(req Request) Response {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	if l.closed {
+		l.mu.Unlock()
 		return Response{Status: StatusRejected, Error: "progress listener is closed"}
 	}
 	reg := l.registration
 	if reg.RunID == "" {
+		l.mu.Unlock()
 		return Response{Status: StatusRejected, Error: "no active progress attempt is registered"}
 	}
 	if req.RunID != reg.RunID || req.StepID != reg.StepID || req.AttemptID != reg.AttemptID || req.Token != reg.Token {
+		l.mu.Unlock()
 		return Response{Status: StatusRejected, Error: "progress request identity or token is invalid"}
 	}
 	msg, err := sanitizeMessage(req.Message)
 	if err != nil {
+		l.mu.Unlock()
 		return Response{Status: StatusRejected, Error: err.Error()}
 	}
 	if !l.limiter.allow(l.now()) {
+		l.mu.Unlock()
 		return Response{Status: StatusDropped}
 	}
-	l.accepted <- AcceptedMessage{
+	accepted := AcceptedMessage{
 		StepID:    req.StepID,
 		AttemptID: req.AttemptID,
 		Message:   msg,
+	}
+	l.mu.Unlock()
+
+	select {
+	case l.accepted <- accepted:
+	default:
+		return Response{Status: StatusDropped}
 	}
 	return Response{Status: StatusAccepted}
 }

@@ -2,6 +2,7 @@ package progress
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -142,6 +143,54 @@ func TestListenerRateLimitDropsExcessMessages(t *testing.T) {
 		_ = receiveAccepted(t, l)
 	}
 	assertNoAccepted(t, l)
+}
+
+func TestListenerDropsWhenAcceptedChannelIsFullWithoutBlockingClose(t *testing.T) {
+	l := newRegisteredListener(t, validRegistration)
+	for range cap(l.accepted) {
+		l.accepted <- AcceptedMessage{}
+	}
+
+	resp := sendProgress(t, l.SocketPath(), requestWithMessage("backpressure"))
+	if resp.Status != StatusDropped {
+		t.Fatalf("response status = %q, want dropped", resp.Status)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- l.Close()
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close timed out after accepted channel backpressure")
+	}
+}
+
+func TestSendUsesSocketProtocol(t *testing.T) {
+	l := newRegisteredListener(t, validRegistration)
+
+	resp, err := Send(l.SocketPath(), requestWithMessage("sending from client"))
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if resp.Status != StatusAccepted {
+		t.Fatalf("response status = %q, want accepted: %s", resp.Status, resp.Error)
+	}
+	msg := receiveAccepted(t, l)
+	if msg.Message != "sending from client" {
+		t.Fatalf("accepted message = %q, want client message", msg.Message)
+	}
+}
+
+func TestSendUnavailableSocket(t *testing.T) {
+	_, err := Send("", requestWithMessage("working"))
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Send error = %v, want ErrUnavailable", err)
+	}
 }
 
 func TestListenerCleanupRemovesSocketDirectory(t *testing.T) {

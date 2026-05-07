@@ -15,6 +15,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
 	"tiny-llm-orchestrator/orc/internal/launcher"
+	"tiny-llm-orchestrator/orc/internal/progress"
 	"tiny-llm-orchestrator/orc/internal/report"
 	"tiny-llm-orchestrator/orc/internal/runinspect"
 	"tiny-llm-orchestrator/orc/internal/runstart"
@@ -54,6 +55,8 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return nil
 	case "init":
 		return executeInit(args[1:], stdin, stdout, stderr)
+	case "progress":
+		return executeProgress(args[1:], stdout, stderr)
 	case "run":
 		return executeRun(args[1:], stdin, stdout, stderr)
 	case "sandbox":
@@ -71,6 +74,81 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		}
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
+}
+
+func executeProgress(args []string, stdout, stderr io.Writer) error {
+	message, help, err := parseProgressMessage(args)
+	if help {
+		return printProgressHelp(stdout)
+	}
+	if err != nil {
+		return progressFlagError(stderr, err)
+	}
+	if err := progress.ValidateMessage(message); err != nil {
+		return progressFlagError(stderr, err)
+	}
+	socketPath := os.Getenv("ORC_PROGRESS_SOCKET")
+	if socketPath == "" {
+		_, err := fmt.Fprintln(stderr, "orc progress: live progress channel unavailable: ORC_PROGRESS_SOCKET is not set")
+		return err
+	}
+	req := progress.Request{
+		RunID:     os.Getenv("ORC_RUN_ID"),
+		StepID:    os.Getenv("ORC_STEP_ID"),
+		AttemptID: os.Getenv("ORC_ATTEMPT_ID"),
+		Token:     os.Getenv("ORC_PROGRESS_TOKEN"),
+		Message:   message,
+	}
+	if req.RunID == "" || req.StepID == "" || req.AttemptID == "" || req.Token == "" {
+		return progressFlagError(stderr, errors.New("ORC_RUN_ID, ORC_STEP_ID, ORC_ATTEMPT_ID, and ORC_PROGRESS_TOKEN must be set when ORC_PROGRESS_SOCKET is set"))
+	}
+	resp, err := progress.Send(socketPath, req)
+	if err != nil {
+		if errors.Is(err, progress.ErrUnavailable) {
+			_, writeErr := fmt.Fprintf(stderr, "orc progress: live progress channel unavailable: %v\n", err)
+			return writeErr
+		}
+		return progressFlagError(stderr, err)
+	}
+	switch resp.Status {
+	case progress.StatusAccepted:
+		return nil
+	case progress.StatusDropped:
+		_, err := fmt.Fprintln(stderr, "orc progress: live progress update was rate-limited and dropped")
+		return err
+	case progress.StatusRejected:
+		if resp.Error == "" {
+			resp.Error = "progress listener rejected the update"
+		}
+		return progressFlagError(stderr, errors.New(resp.Error))
+	default:
+		return progressFlagError(stderr, fmt.Errorf("progress listener returned unknown status %q", resp.Status))
+	}
+}
+
+func parseProgressMessage(args []string) (message string, help bool, err error) {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == helpFlag) {
+		return "", true, nil
+	}
+	if len(args) == 0 {
+		return "", false, errors.New("requires <message>")
+	}
+	words := make([]string, 0, len(args))
+	allowFlags := false
+	for _, arg := range args {
+		if !allowFlags && arg == "--" {
+			allowFlags = true
+			continue
+		}
+		if !allowFlags && strings.HasPrefix(arg, "-") {
+			return "", false, fmt.Errorf("unknown flag %q; use -- before a message word that starts with '-'", arg)
+		}
+		words = append(words, arg)
+	}
+	if len(words) == 0 {
+		return "", false, errors.New("requires <message>")
+	}
+	return strings.Join(words, " "), false, nil
 }
 
 // ExitCode returns the process exit code represented by err.
@@ -744,6 +822,16 @@ func reportFlagError(stderr io.Writer, err error) error {
 	return err
 }
 
+func progressFlagError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s progress: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	if helpErr := printProgressHelp(stderr); helpErr != nil {
+		return helpErr
+	}
+	return err
+}
+
 func runStartFlagError(stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s run start: %v\n\n", appName, err); writeErr != nil {
 		return writeErr
@@ -851,6 +939,7 @@ Usage:
 Available Commands:
   help        Show command help
   init        Scaffold project-local Tiny Orc config
+  progress    Send optional live worker progress to the supervising listener
   report      Validate and persist a worker report
   run         Manage orchestration runs
   sandbox     Run configured commands through bubblewrap
@@ -860,6 +949,41 @@ Available Commands:
 Flags:
   -h, --help  Show command help
 `, appName, appName)
+
+	return err
+}
+
+func printProgressHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s progress sends optional live worker progress to the supervising listener.
+
+Usage:
+  %s progress <message>
+
+The message may be one quoted argument or multiple positional words, which are joined with single spaces.
+Use -- before a message word that starts with '-' because v1 has no progress flags other than help.
+
+Environment:
+  ORC_PROGRESS_SOCKET   Unix socket path for the live progress channel
+  ORC_PROGRESS_TOKEN    Per-attempt progress token
+  ORC_RUN_ID            Current run id
+  ORC_STEP_ID           Current workflow step id
+  ORC_ATTEMPT_ID        Current attempt id
+
+If ORC_PROGRESS_SOCKET is unset or the socket listener is unavailable, this command warns on stderr and exits 0 so optional progress cannot fail worker execution.
+If ORC_PROGRESS_SOCKET is set, the run id, step id, attempt id, and token environment variables are required.
+
+Input:
+  Empty, whitespace-only, and messages over 1000 bytes after listener sanitization are rejected.
+  The listener trims surrounding whitespace, strips terminal control characters, and collapses embedded newlines and carriage returns to spaces before display.
+  Rate-limited progress updates warn on stderr and exit 0.
+  Invalid identity or token rejections are errors and exit non-zero.
+
+This command is only live operator feedback. It does not create final worker reports, workflow outcomes, run events, Beads comments, or persisted status fields.
+Use %s report --status <status> --result <result> for final worker outcome reporting.
+
+Flags:
+  -h, --help  Show command help
+`, appName, appName, appName)
 
 	return err
 }
