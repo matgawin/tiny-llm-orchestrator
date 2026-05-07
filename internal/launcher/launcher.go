@@ -152,9 +152,10 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
-	workflowEntry := workflowStateEntryForDecision(decision, latestOutcome, hasOutcome)
+	workflowOutcome, hasWorkflowOutcome := workflowEntryOutcome(loaded.Run.Status, latestOutcome, hasOutcome)
+	workflowEntry := workflowStateEntryForDecision(decision, workflowOutcome, hasWorkflowOutcome)
 	var consumeLoopCapOverride *runstore.WorkflowLoopHardCapOverride
-	capDecision := loopcap.Evaluate(loaded.Workflow.Name, loaded.Workflow.LoopCaps, loaded.Run.Status, decision, latestOutcome, hasOutcome)
+	capDecision := loopcap.Evaluate(loaded.Workflow.Name, loaded.Workflow.LoopCaps, loaded.Run.Status, decision, workflowOutcome, hasWorkflowOutcome)
 	if capDecision.Kind == loopcap.DecisionHard {
 		if override := loaded.Run.Status.WorkflowLoop.PendingHardCapOverride; workflowLoopHardCapOverrideMatches(override, capDecision) {
 			consumeLoopCapOverride = override
@@ -315,6 +316,13 @@ func workflowStateEntryForDecision(decision workflow.Decision, attempt runstore.
 		TriggerStatus: attempt.Status,
 		TriggerResult: attempt.Result,
 	}
+}
+
+func workflowEntryOutcome(status runstore.Status, latestOutcome runstore.Attempt, hasOutcome bool) (runstore.Attempt, bool) {
+	if hasOutcome {
+		return latestOutcome, true
+	}
+	return runstore.ResolvedHumanBlockOutcome(status)
 }
 
 func workflowLoopHardCapOverrideMatches(override *runstore.WorkflowLoopHardCapOverride, decision loopcap.Decision) bool {

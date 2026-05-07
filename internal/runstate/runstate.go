@@ -21,6 +21,10 @@ func WorkflowState(status runstore.Status) workflow.RunState {
 			Counts: maps.Clone(status.RetryLineage.Counts),
 		}
 	}
+	if step, ok := runstore.ResolvedHumanBlockStep(status); ok {
+		state.SelectedStep = step
+		return state
+	}
 	if attempt, ok := runstore.LatestConsumableOutcome(status); ok {
 		state.ActiveAttempt = false
 		state.SelectedStep = attempt.StepID

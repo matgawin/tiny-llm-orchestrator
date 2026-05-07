@@ -25,6 +25,7 @@ const (
 	eventAttemptReported         = "attempt.reported"
 	eventAttemptWarning          = "attempt.warning"
 	eventReportIgnored           = "report.ignored"
+	eventRunContinued            = "run.continued"
 	eventWorkflowSoftCap         = "workflow.loop_soft_cap"
 	eventWorkflowHardCap         = "workflow.loop_hard_cap"
 	eventWorkflowHardCapOverride = "workflow.loop_hard_cap_override"
@@ -115,6 +116,7 @@ type Status struct {
 	RetryLineage  *RetryLineage    `json:"retry_lineage,omitempty"`
 	Warnings      []AttemptWarning `json:"warnings"`
 	WorkflowLoop  WorkflowLoop     `json:"workflow_loop"`
+	Continued     *RunContinuation `json:"continued,omitempty"`
 }
 
 // StatusUpdate describes latest-state fields to materialize with an event.
@@ -226,6 +228,19 @@ type RetryLineage struct {
 	Counts map[string]int `json:"counts,omitempty"`
 }
 
+// RunContinuation records durable routing state created by a human-reviewed
+// continuation command.
+type RunContinuation struct {
+	Mode              string `json:"mode"`
+	Reason            string `json:"reason"`
+	ResolvedAttemptID string `json:"resolved_attempt_id"`
+	ResolvedStepID    string `json:"resolved_step_id"`
+	ResolvedStatus    string `json:"resolved_status"`
+	ResolvedResult    string `json:"resolved_result"`
+}
+
+const ContinueModeResolveBlock = "resolve_block"
+
 // AttemptWarning records a process fact that does not change the authoritative
 // terminal outcome of a worker attempt.
 type AttemptWarning struct {
@@ -334,6 +349,17 @@ type createRunPayload struct {
 type statusUpdatedPayload struct {
 	State              string              `json:"state"`
 	WorkflowStateEntry *WorkflowStateEntry `json:"workflow_state_entry,omitempty"`
+}
+
+type runContinuedPayload struct {
+	Mode              string `json:"mode"`
+	PreviousState     string `json:"previous_state"`
+	NewState          string `json:"new_state"`
+	Reason            string `json:"reason"`
+	ResolvedAttemptID string `json:"resolved_attempt_id"`
+	ResolvedStepID    string `json:"resolved_step_id"`
+	ResolvedStatus    string `json:"resolved_status"`
+	ResolvedResult    string `json:"resolved_result"`
 }
 
 type artifactWrittenPayload struct {

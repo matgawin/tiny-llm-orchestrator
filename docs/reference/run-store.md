@@ -318,6 +318,38 @@ the normal workflow state entry.
 }
 ```
 
+`run.continued` is written by `orc run continue <run-id> --resolve-block
+--reason <text>` after a human resolves a non-loop `blocked_for_human` blocker
+outside Orc. The reason is trimmed before validation and persistence. Replay
+requires the previous materialized state to be `blocked_for_human`, no active
+attempt, no active workflow-loop hard-cap block, and the latest attempt to be a
+terminal routing outcome matching the resolved fields. The latest workflow-loop
+entry must also be the transition into `blocked_for_human` with trigger
+status/result matching that attempt; a manually stale blocked state without that
+routing evidence is not resumable.
+
+The event returns the run to `running` and materializes a `continued` marker
+with mode `resolve_block`. That marker makes workflow evaluation select the
+resolved step without re-consuming the old blocked terminal outcome. The next
+matching `attempt.started` event records the normal workflow-loop entry and
+count for selecting that step again, then clears the marker. This continuation
+does not rewrite prior attempts or reports, create a worker attempt, create or
+consume a loop-cap override, reset retry lineage, or reset workflow-loop
+counters.
+
+```json
+{
+  "mode": "resolve_block",
+  "previous_state": "blocked_for_human",
+  "new_state": "running",
+  "reason": "fixed workflow config and reran checks",
+  "resolved_attempt_id": "20260507T023810Z-code-0b0dbb",
+  "resolved_step_id": "code",
+  "resolved_status": "blocked",
+  "resolved_result": "blocked"
+}
+```
+
 Retry starts derive supersession from `consume_attempt_id` plus `retry_lineage`.
 
 `attempt.prompted` links the rendered prompt artifact to the current attempt.
@@ -517,6 +549,11 @@ workflow/report layers own the allowed-state policy.
   `pending_hard_cap_override` stores the one-shot human-reviewed continuation
   created by `orc run continue --allow-loop-cap` until the next matching
   `attempt.started` consumes it.
+- Non-loop human-block continuation state is materialized in `continued` with
+  mode `resolve_block` until the next `attempt.started` clears it. This marker
+  records the human reason and resolved attempt fields needed to retry the same
+  blocked step after process restart without losing workflow-loop accounting
+  for the retry.
 
 The history entry below is abbreviated; entries use the same attempt object
 shape as `active_attempt`.

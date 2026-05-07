@@ -54,6 +54,20 @@ worker, and increments the target state's count to the previously blocked
 prospective count. The override does not raise configured caps or reset loop
 counters; a later hard-cap hit requires another explicit continue command.
 
+For non-loop `blocked_for_human` runs, `orc run continue <run-id>
+--resolve-block --reason <text>` records a human attestation that the external
+blocker was resolved outside Orc and returns the same run to `running`. This
+mode retries the same step that produced the blocked terminal outcome. It does
+not skip the step, select an arbitrary next step, prove the blocker is fixed,
+create a new run, clear retry lineage, or reset workflow-loop counters. The
+next `orc worker launch-next <run-id>` starts a new attempt for that blocked
+step and clears the continuation marker so the old blocked outcome is not
+re-consumed. The retry still records the normal workflow-loop entry and count
+for selecting that step again, with the resolved blocked attempt as the trigger.
+Use `--allow-loop-cap`, not `--resolve-block`, when the run has an active
+workflow-loop hard-cap block. Start a separate workflow when the run is not in
+`blocked_for_human` or no terminal blocked attempt can be resolved.
+
 Agent launches create a `starting` attempt before rendering the worker prompt.
 The attempt becomes `active` only after process metadata is recorded. The
 attempt records:

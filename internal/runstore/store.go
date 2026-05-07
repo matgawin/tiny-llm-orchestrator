@@ -621,6 +621,76 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 	return status, event, nil
 }
 
+// ResolveHumanBlock records human attestation that an external blocker was
+// resolved and returns a non-loop blocked_for_human run to running.
+func (s *Store) ResolveHumanBlock(runID, reason string, at time.Time) (Status, Event, error) {
+	if err := validateRunID(runID); err != nil {
+		return Status{}, Event{}, err
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return Status{}, Event{}, errors.New("--reason is required for --resolve-block and must be non-empty after trimming")
+	}
+	at = normalizeTime(at)
+	var status Status
+	var event Event
+	err := s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		if run.Status.WorkflowLoop.HardCapBlock != nil {
+			return fmt.Errorf("run %q is blocked by a workflow-loop hard cap; next action is orc run continue %s --allow-loop-cap after human review", runID, runID)
+		}
+		if run.Status.ActiveAttempt != nil {
+			return fmt.Errorf("run %q has active attempt %q; wait, recover, or inspect before continuing", runID, run.Status.ActiveAttempt.AttemptID)
+		}
+		if run.Status.State != stateBlockedHuman {
+			return fmt.Errorf("run %q state is %q; run is not in a resumable blocked state; inspect the run or start a new workflow as appropriate", runID, run.Status.State)
+		}
+		attempt, ok := latestResolvableBlockedAttempt(run.Status)
+		if !ok {
+			return fmt.Errorf("run %q has no terminal blocked attempt that can be resolved; inspect the run or start a new workflow", runID)
+		}
+		payload, err := marshalPayload(runContinuedPayload{
+			Mode:              ContinueModeResolveBlock,
+			PreviousState:     stateBlockedHuman,
+			NewState:          stateRunning,
+			Reason:            reason,
+			ResolvedAttemptID: attempt.AttemptID,
+			ResolvedStepID:    attempt.StepID,
+			ResolvedStatus:    attempt.Status,
+			ResolvedResult:    attempt.Result,
+		})
+		if err != nil {
+			return err
+		}
+		event = Event{Time: at, Type: eventRunContinued, Payload: payload}
+		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			applyRunContinued(status, runContinuedPayload{
+				Mode:              ContinueModeResolveBlock,
+				PreviousState:     stateBlockedHuman,
+				NewState:          stateRunning,
+				Reason:            reason,
+				ResolvedAttemptID: attempt.AttemptID,
+				ResolvedStepID:    attempt.StepID,
+				ResolvedStatus:    attempt.Status,
+				ResolvedResult:    attempt.Result,
+			})
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+		})
+		return err
+	})
+	if err != nil {
+		if statusBackedEventPossiblyCommitted(err) {
+			return status, event, err
+		}
+		return Status{}, Event{}, err
+	}
+	return status, event, nil
+}
+
 // WriteArtifact persists an artifact under the run directory and records it in the event log.
 func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, error) {
 	return s.writeArtifactWithStage(runID, artifact, nil, stageArtifact)
@@ -830,6 +900,7 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 			if req.ConsumeWorkflowLoopHardCapOverride != nil {
 				status.WorkflowLoop.PendingHardCapOverride = nil
 			}
+			status.Continued = nil
 			applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
 			status.ActiveAttempt = &attempt
 			status.Attempts = append(status.Attempts, attempt)
@@ -1723,10 +1794,76 @@ func LatestConsumableOutcome(status Status) (Attempt, bool) {
 		return Attempt{}, false
 	}
 	attempt := status.Attempts[len(status.Attempts)-1]
+	if status.Continued != nil &&
+		status.Continued.Mode == ContinueModeResolveBlock &&
+		status.Continued.ResolvedAttemptID == attempt.AttemptID {
+		return Attempt{}, false
+	}
 	if !terminalRoutingOutcome(attempt) {
 		return Attempt{}, false
 	}
 	return attempt, true
+}
+
+// ResolvedHumanBlockStep returns the workflow step selected by a durable
+// resolve-block continuation marker.
+func ResolvedHumanBlockStep(status Status) (string, bool) {
+	if status.State != stateRunning || status.ActiveAttempt != nil || status.Continued == nil {
+		return "", false
+	}
+	if status.Continued.Mode != ContinueModeResolveBlock || status.Continued.ResolvedStepID == "" {
+		return "", false
+	}
+	return status.Continued.ResolvedStepID, true
+}
+
+// ResolvedHumanBlockOutcome returns the terminal attempt resolved by a durable
+// resolve-block continuation marker. The outcome is not consumable for routing,
+// but it remains the trigger for workflow-loop accounting on the retry launch.
+func ResolvedHumanBlockOutcome(status Status) (Attempt, bool) {
+	if status.State != stateRunning || status.ActiveAttempt != nil || status.Continued == nil || len(status.Attempts) == 0 {
+		return Attempt{}, false
+	}
+	continued := status.Continued
+	if continued.Mode != ContinueModeResolveBlock {
+		return Attempt{}, false
+	}
+	attempt := status.Attempts[len(status.Attempts)-1]
+	if attempt.AttemptID != continued.ResolvedAttemptID ||
+		attempt.StepID != continued.ResolvedStepID ||
+		attempt.Status != continued.ResolvedStatus ||
+		attempt.Result != continued.ResolvedResult {
+		return Attempt{}, false
+	}
+	if !terminalRoutingOutcome(attempt) {
+		return Attempt{}, false
+	}
+	return attempt, true
+}
+
+func latestResolvableBlockedAttempt(status Status) (Attempt, bool) {
+	if status.State != stateBlockedHuman || status.ActiveAttempt != nil || len(status.Attempts) == 0 {
+		return Attempt{}, false
+	}
+	attempt := status.Attempts[len(status.Attempts)-1]
+	if !terminalRoutingOutcome(attempt) {
+		return Attempt{}, false
+	}
+	if !latestWorkflowEntryMatchesBlockedAttempt(status, attempt) {
+		return Attempt{}, false
+	}
+	return attempt, true
+}
+
+func latestWorkflowEntryMatchesBlockedAttempt(status Status, attempt Attempt) bool {
+	if len(status.WorkflowLoop.Entries) == 0 {
+		return false
+	}
+	entry := status.WorkflowLoop.Entries[len(status.WorkflowLoop.Entries)-1]
+	return entry.State == stateBlockedHuman &&
+		entry.PreviousState == attempt.StepID &&
+		entry.TriggerStatus == attempt.Status &&
+		entry.TriggerResult == attempt.Result
 }
 
 func unconsumedLauncherAttemptOutcome(attempt Attempt) bool {
@@ -1948,7 +2085,7 @@ func statusBackedEventPossiblyCommitted(err error) bool {
 
 func reservedEventType(eventType string) bool {
 	switch eventType {
-	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventWorkflowSoftCap, eventWorkflowHardCap, eventWorkflowHardCapOverride:
+	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventRunContinued, eventWorkflowSoftCap, eventWorkflowHardCap, eventWorkflowHardCapOverride:
 		return true
 	default:
 		return false
@@ -2002,6 +2139,50 @@ func applyWorkflowLoopHardCap(status *Status, loopCap WorkflowLoopHardCap) {
 func applyWorkflowLoopHardCapOverride(status *Status, override WorkflowLoopHardCapOverride) {
 	status.WorkflowLoop.PendingHardCapOverride = &override
 	status.WorkflowLoop.HardCapBlock = nil
+}
+
+func applyRunContinued(status *Status, payload runContinuedPayload) {
+	status.State = payload.NewState
+	status.Continued = &RunContinuation{
+		Mode:              payload.Mode,
+		Reason:            payload.Reason,
+		ResolvedAttemptID: payload.ResolvedAttemptID,
+		ResolvedStepID:    payload.ResolvedStepID,
+		ResolvedStatus:    payload.ResolvedStatus,
+		ResolvedResult:    payload.ResolvedResult,
+	}
+}
+
+func validateRunContinuedPayload(status Status, payload runContinuedPayload) error {
+	switch {
+	case payload.Mode != ContinueModeResolveBlock:
+		return fmt.Errorf("run continued mode = %q, want %q", payload.Mode, ContinueModeResolveBlock)
+	case payload.PreviousState != stateBlockedHuman:
+		return fmt.Errorf("run continued previous_state = %q, want %q", payload.PreviousState, stateBlockedHuman)
+	case payload.NewState != stateRunning:
+		return fmt.Errorf("run continued new_state = %q, want %q", payload.NewState, stateRunning)
+	case strings.TrimSpace(payload.Reason) == "":
+		return errors.New("run continued reason is required")
+	case payload.Reason != strings.TrimSpace(payload.Reason):
+		return errors.New("run continued reason must be trimmed")
+	case status.State != stateBlockedHuman:
+		return fmt.Errorf("run continued requires state %q, got %q", stateBlockedHuman, status.State)
+	case status.ActiveAttempt != nil:
+		return fmt.Errorf("run continued while attempt %q is active", status.ActiveAttempt.AttemptID)
+	case status.WorkflowLoop.HardCapBlock != nil:
+		return errors.New("run continued resolve_block is not valid for active workflow-loop hard-cap block")
+	}
+	attempt, ok := latestResolvableBlockedAttempt(status)
+	if !ok {
+		return errors.New("run continued resolve_block requires latest terminal blocked attempt")
+	}
+	if payload.ResolvedAttemptID != attempt.AttemptID ||
+		payload.ResolvedStepID != attempt.StepID ||
+		payload.ResolvedStatus != attempt.Status ||
+		payload.ResolvedResult != attempt.Result {
+		return errors.New("run continued resolved attempt fields do not match latest terminal blocked attempt")
+	}
+	return nil
 }
 
 func validateWorkflowLoopSoftCap(loopCap WorkflowLoopSoftCap) error {
@@ -2413,6 +2594,7 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			if payload.ConsumedWorkflowLoopHardCapOverride != nil {
 				replayed.WorkflowLoop.PendingHardCapOverride = nil
 			}
+			replayed.Continued = nil
 			attempt := payload.Attempt
 			if err := validateStartedAttemptEvent(event, attempt, replayed.RunID); err != nil {
 				return Status{}, err
@@ -2490,6 +2672,15 @@ func replayStatus(events []Event, status Status) (Status, error) {
 			if payload.RunID != "" && payload.RunID != event.RunID {
 				return Status{}, fmt.Errorf("event %d report ignored run_id %q does not match event run_id %q", event.Sequence, payload.RunID, event.RunID)
 			}
+		case eventRunContinued:
+			var payload runContinuedPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d run.continued payload: %w", event.Sequence, err)
+			}
+			if err := validateRunContinuedPayload(replayed, payload); err != nil {
+				return Status{}, fmt.Errorf("event %d run.continued payload: %w", event.Sequence, err)
+			}
+			applyRunContinued(&replayed, payload)
 		case eventWorkflowSoftCap:
 			var payload workflowLoopSoftCapPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {

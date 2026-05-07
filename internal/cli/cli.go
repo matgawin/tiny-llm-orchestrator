@@ -274,19 +274,45 @@ func executeRunContinue(args []string, stdout, stderr io.Writer) error {
 		return runContinueFlagError(stderr, fmt.Errorf("requires <run-id>"))
 	}
 	allowLoopCap := false
+	resolveBlock := false
+	var reasons []string
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
 		case "--allow-loop-cap":
 			allowLoopCap = true
+		case "--resolve-block":
+			resolveBlock = true
+		case "--reason":
+			var reason string
+			if !assignFlagValue(args, &i, &reason) {
+				return runContinueFlagError(stderr, fmt.Errorf("--reason requires a value"))
+			}
+			reasons = append(reasons, reason)
 		case "-h", helpFlag, helpCommand:
 			return printRunContinueHelp(stdout)
 		default:
+			if value, ok := strings.CutPrefix(arg, "--reason="); ok {
+				reasons = append(reasons, value)
+				continue
+			}
 			return runContinueFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
 		}
 	}
-	if !allowLoopCap {
-		return runContinueFlagError(stderr, fmt.Errorf("--allow-loop-cap is required for human-reviewed continuation after a hard workflow loop stop"))
+	if allowLoopCap && resolveBlock {
+		return runContinueFlagError(stderr, fmt.Errorf("--resolve-block and --allow-loop-cap are mutually exclusive continuation modes"))
+	}
+	if len(reasons) > 1 {
+		return runContinueFlagError(stderr, fmt.Errorf("repeated --reason flags are ambiguous"))
+	}
+	if len(reasons) > 0 && !resolveBlock {
+		return runContinueFlagError(stderr, fmt.Errorf("--reason is only valid with --resolve-block"))
+	}
+	if resolveBlock && len(reasons) == 0 {
+		return runContinueFlagError(stderr, fmt.Errorf("--reason is required for --resolve-block"))
+	}
+	if !allowLoopCap && !resolveBlock {
+		return runContinueFlagError(stderr, fmt.Errorf("choose one continuation mode: --allow-loop-cap or --resolve-block --reason <text>"))
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -294,6 +320,24 @@ func executeRunContinue(args []string, stdout, stderr io.Writer) error {
 	}
 	store, err := runstore.Open(root)
 	if err != nil {
+		return err
+	}
+	if resolveBlock {
+		reason := strings.TrimSpace(reasons[0])
+		if reason == "" {
+			return runContinueFlagError(stderr, fmt.Errorf("--reason is required for --resolve-block and must be non-empty after trimming"))
+		}
+		status, event, err := store.ResolveHumanBlock(runID, reason, time.Time{})
+		if err != nil {
+			if _, writeErr := fmt.Fprintf(stderr, "%s run continue: %v\n", appName, err); writeErr != nil {
+				return writeErr
+			}
+			return err
+		}
+		if status.Continued == nil {
+			return fmt.Errorf("run %q resolve-block continuation was not persisted", runID)
+		}
+		_, err = fmt.Fprintf(stdout, "continued run %s after human-resolved block; retrying step %s from attempt %s at event %d\n", runID, status.Continued.ResolvedStepID, status.Continued.ResolvedAttemptID, event.Sequence)
 		return err
 	}
 	status, _, err := store.AllowWorkflowLoopHardCap(runID, "allow_loop_cap", time.Time{})
@@ -625,13 +669,17 @@ func printRunContinueHelp(w io.Writer) error {
 
 Usage:
   %s run continue <run-id> --allow-loop-cap
+  %s run continue <run-id> --resolve-block --reason <text>
 
 Flags:
       --allow-loop-cap  Explicitly allow one continuation after a hard workflow loop stop
+      --resolve-block   Retry a non-loop blocked_for_human step after human resolution
+      --reason <text>   Required human attestation for --resolve-block
   -h, --help            Show command help
 
 The loop-cap override is for human-reviewed continuation after a hard workflow loop stop. It allows exactly one additional routing decision into the currently blocked workflow state.
-`, appName, appName)
+The resolve-block mode is for non-loop blocked_for_human runs where a human fixed the external problem outside Orc. It records the trimmed reason and retries the blocked step without skipping workflow routing.
+`, appName, appName, appName)
 
 	return err
 }

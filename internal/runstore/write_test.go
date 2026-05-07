@@ -1298,11 +1298,13 @@ func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 }
 
 func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
+	const attemptID = "attempt-001"
+
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-existing-ref-run")
-	startAttemptForTest(t, store, run.ID, "attempt-001")
-	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
-	recordProcessForTest(t, store, run.ID, "attempt-001")
+	startAttemptForTest(t, store, run.ID, attemptID)
+	linkPromptAndLogForTest(t, store, run.ID, attemptID)
+	recordProcessForTest(t, store, run.ID, attemptID)
 	ref, err := store.WriteArtifact(run.ID, Artifact{
 		Kind:    KindReport,
 		Name:    "existing-report",
@@ -1319,7 +1321,7 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 			RunID:     run.ID,
 			StepID:    "plan",
 			AgentID:   "planner",
-			AttemptID: "attempt-001",
+			AttemptID: attemptID,
 			Status:    "done",
 			Result:    "ready",
 			Summary:   "Plan is ready.",
@@ -1331,7 +1333,7 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
-	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != "attempt-001" {
+	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != attemptID {
 		t.Fatalf("active attempt = %+v, want unchanged attempt", loaded.Status.ActiveAttempt)
 	}
 	if loaded.Status.ActiveAttempt.ReportRef != nil || loaded.Status.ActiveAttempt.Report != nil {
@@ -2049,6 +2051,194 @@ func TestAllowWorkflowLoopHardCapFailsWithoutActiveBlock(t *testing.T) {
 	}
 	if after.Status.LastSequence != before.Status.LastSequence || after.Status.State != before.Status.State || after.Status.WorkflowLoop.PendingHardCapOverride != nil {
 		t.Fatalf("after status = %+v, want no mutation from %+v", after.Status, before.Status)
+	}
+}
+
+func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "resolve-human-block-run")
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
+	if _, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+		State: AttemptStateReported,
+		Report: Report{
+			RunID:     run.ID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
+			Status:    "blocked",
+			Result:    "blocked",
+			Summary:   "Need human config fix.",
+		},
+		Time: time.Date(2026, 5, 4, 12, 2, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+	if _, _, err := store.UpdateStatus(run.ID, StatusUpdate{
+		State: stateBlockedHuman,
+		WorkflowStateEntry: WorkflowStateEntryRequest{
+			State:         stateBlockedHuman,
+			PreviousState: "plan",
+			TriggerStatus: "blocked",
+			TriggerResult: "blocked",
+		},
+	}); err != nil {
+		t.Fatalf("UpdateStatus returned error: %v", err)
+	}
+
+	status, event, err := store.ResolveHumanBlock(run.ID, "  fixed workflow config and reran checks  ", time.Date(2026, 5, 4, 12, 3, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ResolveHumanBlock returned error: %v", err)
+	}
+	if event.Type != eventRunContinued {
+		t.Fatalf("event type = %q, want %q", event.Type, eventRunContinued)
+	}
+	if status.State != stateRunning || status.ActiveAttempt != nil {
+		t.Fatalf("status = %+v, want running without active attempt", status)
+	}
+	if status.Continued == nil ||
+		status.Continued.Mode != ContinueModeResolveBlock ||
+		status.Continued.Reason != "fixed workflow config and reran checks" ||
+		status.Continued.ResolvedAttemptID != "attempt-001" ||
+		status.Continued.ResolvedStepID != "plan" ||
+		status.Continued.ResolvedStatus != "blocked" ||
+		status.Continued.ResolvedResult != "blocked" {
+		t.Fatalf("continued marker = %+v, want resolved blocked attempt", status.Continued)
+	}
+	var payload runContinuedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal run.continued payload: %v", err)
+	}
+	if payload.Mode != ContinueModeResolveBlock || payload.PreviousState != stateBlockedHuman || payload.NewState != stateRunning || payload.Reason != "fixed workflow config and reran checks" {
+		t.Fatalf("payload = %+v, want resolve_block transition with trimmed reason", payload)
+	}
+	if _, ok := LatestConsumableOutcome(status); ok {
+		t.Fatal("LatestConsumableOutcome ok = true, want resolved blocked outcome ignored")
+	}
+	if step, ok := ResolvedHumanBlockStep(status); !ok || step != "plan" {
+		t.Fatalf("ResolvedHumanBlockStep = %q/%v, want plan/true", step, ok)
+	}
+
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Status.Continued == nil || *loaded.Status.Continued != *status.Continued {
+		t.Fatalf("loaded continued = %+v, want %+v", loaded.Status.Continued, status.Continued)
+	}
+	if _, ok := LatestConsumableOutcome(loaded.Status); ok {
+		t.Fatal("replayed LatestConsumableOutcome ok = true, want resolved blocked outcome ignored")
+	}
+}
+
+func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prepare func(*testing.T, *Store, string)
+		reason  string
+		want    []string
+	}{
+		{
+			name:   "empty reason",
+			reason: " \t ",
+			want:   []string{"--reason", "non-empty"},
+		},
+		{
+			name: "active hard cap",
+			prepare: func(t *testing.T, store *Store, runID string) {
+				t.Helper()
+				_, _, err := store.BlockWorkflowLoopHardCap(runID, WorkflowLoopHardCap{
+					Workflow:         testWorkflowName,
+					BlockedState:     testWorkflowStateCode,
+					CurrentCount:     1,
+					ProspectiveCount: 2,
+					Soft:             1,
+					Hard:             1,
+					Reason:           WorkflowLoopHardCapReason,
+				}, time.Time{})
+				if err != nil {
+					t.Fatalf("BlockWorkflowLoopHardCap returned error: %v", err)
+				}
+			},
+			reason: "reviewed",
+			want:   []string{"workflow-loop hard cap", "--allow-loop-cap"},
+		},
+		{
+			name: "active attempt",
+			prepare: func(t *testing.T, store *Store, runID string) {
+				t.Helper()
+				startAttemptForTest(t, store, runID, "attempt-001")
+			},
+			reason: "reviewed",
+			want:   []string{"active attempt", "wait, recover, or inspect"},
+		},
+		{
+			name:   "running",
+			reason: "reviewed",
+			want:   []string{"state is \"running\"", "not in a resumable blocked state"},
+		},
+		{
+			name: "blocked without attempt",
+			prepare: func(t *testing.T, store *Store, runID string) {
+				t.Helper()
+				if _, _, err := store.UpdateStatus(runID, StatusUpdate{State: stateBlockedHuman}); err != nil {
+					t.Fatalf("UpdateStatus returned error: %v", err)
+				}
+			},
+			reason: "reviewed",
+			want:   []string{"no terminal blocked attempt", "inspect the run or start a new workflow"},
+		},
+		{
+			name: "blocked without routing evidence",
+			prepare: func(t *testing.T, store *Store, runID string) {
+				t.Helper()
+				startAttemptForTest(t, store, runID, "attempt-001")
+				linkPromptAndLogForTest(t, store, runID, "attempt-001")
+				recordProcessForTest(t, store, runID, "attempt-001")
+				if _, _, err := store.RecordAttemptReport(runID, RecordReportRequest{
+					State: AttemptStateReported,
+					Report: Report{
+						RunID:     runID,
+						StepID:    "plan",
+						AgentID:   "planner",
+						AttemptID: "attempt-001",
+						Status:    "done",
+						Result:    "ready",
+						Summary:   "Plan is ready.",
+					},
+				}); err != nil {
+					t.Fatalf("RecordAttemptReport returned error: %v", err)
+				}
+				if _, _, err := store.UpdateStatus(runID, StatusUpdate{State: stateBlockedHuman}); err != nil {
+					t.Fatalf("UpdateStatus returned error: %v", err)
+				}
+			},
+			reason: "reviewed",
+			want:   []string{"no terminal blocked attempt", "inspect the run or start a new workflow"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := openStore(t, t.TempDir())
+			run := createManualRun(t, store, "resolve-refusal-"+strings.ReplaceAll(tc.name, " ", "-"))
+			if tc.prepare != nil {
+				tc.prepare(t, store, run.ID)
+			}
+			before, err := store.Load(run.ID)
+			if err != nil {
+				t.Fatalf("Load before returned error: %v", err)
+			}
+
+			_, _, err = store.ResolveHumanBlock(run.ID, tc.reason, time.Time{})
+			requireErrorContains(t, err, tc.want...)
+			after, err := store.Load(run.ID)
+			if err != nil {
+				t.Fatalf("Load after returned error: %v", err)
+			}
+			if after.Status.LastSequence != before.Status.LastSequence || after.Status.State != before.Status.State {
+				t.Fatalf("after status = %+v, want no mutation from %+v", after.Status, before.Status)
+			}
+		})
 	}
 }
 

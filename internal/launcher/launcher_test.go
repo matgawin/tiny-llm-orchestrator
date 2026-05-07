@@ -347,6 +347,106 @@ func TestLaunchNextRoutesExhaustedTimeoutToBlocked(t *testing.T) {
 	assertLaunchNextBlocksWithoutRelaunch(t, root, runID, first.Attempt.AttemptID, 1)
 }
 
+func TestLaunchNextRetriesResolvedHumanBlockAfterReload(t *testing.T) {
+	root, runID := createLauncherRun(t, "200ms")
+	first, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat"},
+		Time:    fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("first LaunchNext returned error: %v", err)
+	}
+	assertLaunchNextBlocksWithoutRelaunch(t, root, runID, first.Attempt.AttemptID, 1)
+
+	store := openLauncherStore(t, root)
+	if _, _, err := store.ResolveHumanBlock(runID, "fixed worker command input", fixedLauncherTime().Add(2*time.Second)); err != nil {
+		t.Fatalf("ResolveHumanBlock returned error: %v", err)
+	}
+
+	retry, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat"},
+		Time:    fixedLauncherTime().Add(3 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("retry LaunchNext returned error: %v", err)
+	}
+	if retry.Attempt.AttemptID == first.Attempt.AttemptID {
+		t.Fatalf("retry attempt id = %q, want new attempt", retry.Attempt.AttemptID)
+	}
+	if retry.Attempt.StepID != first.Attempt.StepID {
+		t.Fatalf("retry step = %q, want %q", retry.Attempt.StepID, first.Attempt.StepID)
+	}
+	loaded, err := store.Load(runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.Status.Continued != nil {
+		t.Fatalf("continued marker = %+v, want cleared after launch", loaded.Status.Continued)
+	}
+	if got := len(loaded.Status.Attempts); got != 2 {
+		t.Fatalf("attempt count = %d, want original plus retry", got)
+	}
+	if got := loaded.Status.WorkflowLoop.Counts[first.Attempt.StepID]; got != 2 {
+		t.Fatalf("%s workflow-loop count = %d, want initial plus continued retry", first.Attempt.StepID, got)
+	}
+	entries := loaded.Status.WorkflowLoop.Entries
+	if got := entries[len(entries)-1]; got.State != first.Attempt.StepID ||
+		got.PreviousState != first.Attempt.StepID ||
+		got.TriggerStatus != first.Attempt.Status ||
+		got.TriggerResult != first.Attempt.Result ||
+		got.Count != 2 ||
+		!got.Repeated {
+		t.Fatalf("last workflow-loop entry = %+v, want continued retry entry from blocked attempt", got)
+	}
+}
+
+func TestLaunchNextAppliesWorkflowLoopHardCapAfterResolvedHumanBlock(t *testing.T) {
+	root, runID := createLoopCapLauncherRun(t, "enabled: true\nsoft: 1\nhard: 2\n", "")
+	store := openLauncherStore(t, root)
+	seedReportedLoopAttempt(t, store, runID, "attempt-1", "")
+
+	blockedAttempt, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat"},
+		Time:    fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("first LaunchNext returned error: %v", err)
+	}
+	assertLaunchNextBlocksWithoutRelaunch(t, root, runID, blockedAttempt.Attempt.AttemptID, 2)
+
+	if _, _, err := store.ResolveHumanBlock(runID, "fixed worker input", fixedLauncherTime().Add(2*time.Second)); err != nil {
+		t.Fatalf("ResolveHumanBlock returned error: %v", err)
+	}
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat"},
+		Time:    fixedLauncherTime().Add(3 * time.Second),
+	})
+	if err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {
+		t.Fatalf("retry LaunchNext error = %v, want workflow-loop hard cap", err)
+	}
+	if result.Launched || result.Attempt.AttemptID != "" {
+		t.Fatalf("blocked retry result = %+v, want no launched attempt", result)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if got := loaded.Status.WorkflowLoop.Counts[blockedAttempt.Attempt.StepID]; got != 2 {
+		t.Fatalf("%s workflow-loop count = %d, want hard-capped current count 2", blockedAttempt.Attempt.StepID, got)
+	}
+	block := loaded.Status.WorkflowLoop.HardCapBlock
+	if block == nil || block.BlockedState != blockedAttempt.Attempt.StepID || block.CurrentCount != 2 || block.ProspectiveCount != 3 ||
+		block.PreviousState != blockedAttempt.Attempt.StepID || block.TriggerStatus != blockedAttempt.Attempt.Status || block.TriggerResult != blockedAttempt.Attempt.Result {
+		t.Fatalf("hard-cap block = %+v, want resolved blocked attempt trigger", block)
+	}
+}
+
 func TestLaunchNextRetriesThenExhaustsSynthesizedFailure(t *testing.T) {
 	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{
 		TaskContext: true,
@@ -1696,8 +1796,11 @@ steps:
     agent: planner
     allowed_results:
       done: [ready]
+      failed: [missing_report, timeout]
     on:
       done/ready: plan
+      failed/missing_report: blocked_for_human
+      failed/timeout: blocked_for_human
 `)
 }
 
