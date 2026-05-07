@@ -43,7 +43,15 @@ outcomes.
 Live progress messages are not workflow outcomes. They do not satisfy report
 requirements, affect workflow routing, change retry behavior, alter loop-cap
 behavior, write Beads state, contribute to summary context, or appear in final
-advance summaries.
+advance summaries. They also do not change active-attempt handling or the
+requirement that a worker eventually submits a final report.
+
+`orc run next <run-id>` is inspect-only and never creates a listener or
+launches a worker. `orc run advance <run-id>` supervises one or more selected
+attempts and owns a listener for each active attempt. `orc worker launch-next
+<run-id>` supervises exactly one selected attempt and owns that attempt's
+listener. `orc progress <message>` is worker-authored live feedback sent to the
+current supervising listener.
 
 ## CLI Shape
 
@@ -64,6 +72,19 @@ and size validation.
 
 If no live progress channel is available, `orc progress` warns on stderr and
 exits 0 so progress reporting cannot fail the worker task.
+
+Invalid local input is still an error: missing messages, empty messages after
+sanitization, oversized messages, unknown flags, and invalid required identity
+environment when a socket is present exit nonzero with actionable help.
+
+Quote messages when shell punctuation or spacing matters:
+
+```bash
+orc progress "testing parser edge cases"
+orc progress "blocked: missing API token"
+```
+
+Without quotes, multiple positional words are joined with single spaces.
 
 ## Transport
 
@@ -173,10 +194,41 @@ Sender behavior is:
 - no available channel before reaching a listener: `orc progress` warns on
   stderr and exits 0.
 
+Operator example in human mode:
+
+```text
+$ orc run advance 20260507T233024Z-implementation-main-a0p-3-897111
+[code 20260507T233051Z-code-abc123] analyzing code paths
+[code 20260507T233051Z-code-abc123] beginning focused tests
+advanced run 20260507T233024Z-implementation-main-a0p-3-897111
+...
+```
+
+Operator example in JSON mode:
+
+```text
+$ orc run advance 20260507T233024Z-implementation-main-a0p-3-897111 --json
+stderr: [code 20260507T233051Z-code-abc123] analyzing code paths
+stdout: {"run_id":"20260507T233024Z-implementation-main-a0p-3-897111",...}
+```
+
+Worker example:
+
+```bash
+orc progress "starting analysis"
+# ...perform the work...
+orc progress "beginning tests"
+orc report --run 20260507T233024Z-implementation-main-a0p-3-897111 --step code --agent coder --attempt 20260507T233051Z-code-abc123 --status done --result ready --summary "Implemented scoped change."
+```
+
+The progress calls are optional live updates. The final `orc report` remains
+required by the worker prompt's report contract and is the only outcome that
+drives workflow routing.
+
 ## Non-Persistence
 
 Live progress is not persisted as run events, artifacts, `status.json` fields,
-summary-context entries, final-summary data, Beads comments, workflow outcomes,
+summary-context entries, final-summary fields, Beads comments, workflow outcomes,
 or routing inputs. It is acceptable if progress text appears incidentally in
 existing worker stdout/stderr logs because those logs capture the worker
 process streams.

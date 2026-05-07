@@ -111,10 +111,17 @@ required identity fields against the current `active_attempt` in attempt state
 `active` before persisting the structured report through the Run Store.
 
 Live worker-authored progress is a separate prompt guidance surface from final
-reports. When a live progress channel is available, prompts may mention
-`orc progress <message>` for operator feedback, but they must continue to
-present `orc report --status/--result` as the only final worker outcome
-submission path. The live progress contract is defined in
+reports. Rendered prompts tell workers they may use `orc progress <short
+update>` for crucial operator-visible updates, such as starting analysis,
+choosing an approach, beginning tests, or finding a blocker. They also warn
+workers not to stream logs, file lists, diffs, frequent heartbeat messages, or
+routine chatter through live progress. Prompts continue to present
+`orc report --status/--result` as the only final worker outcome submission
+path.
+
+The prompt treats `ORC_PROGRESS_SOCKET`, `ORC_PROGRESS_TOKEN`, `ORC_RUN_ID`,
+`ORC_STEP_ID`, and `ORC_ATTEMPT_ID` as injected troubleshooting details, not
+normal manual arguments. The full live progress contract is defined in
 [live-worker-progress.md](live-worker-progress.md).
 
 ## Persistence
