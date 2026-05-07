@@ -75,6 +75,30 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	}
 }
 
+func TestLaunchNextPreservesExplicitCommandInsideVerifiedSandbox(t *testing.T) {
+	root, runID := createLauncherRun(t, "200ms")
+	appendLauncherSandboxConfig(t, root, false)
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:    root,
+		RunID:   runID,
+		Command: []string{"sh", "-c", "cat >/dev/null; printf explicit-worker-command"},
+		Time:    fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateMissingReport || result.Attempt.LogRef == nil {
+		t.Fatalf("attempt = %+v, want missing_report with log", result.Attempt)
+	}
+	logContent := readLauncherArtifact(t, root, runID, *result.Attempt.LogRef)
+	if !strings.Contains(string(logContent), "explicit-worker-command") {
+		t.Fatalf("log = %q, want explicit worker command output", string(logContent))
+	}
+}
+
 func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
 		Argv: []string{"sh", "-c", "printf stdout-$ORC_TEST; printf stderr >&2"},
@@ -101,6 +125,29 @@ func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 	loaded := loadLauncherRun(t, root, runID)
 	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "stdout-override")
 	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stderr", "stderr")
+}
+
+func TestLaunchNextCommandStepIgnoresSandboxWorkerDefault(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Argv: []string{"sh", "-c", "printf deterministic-command"},
+	})
+	appendLauncherSandboxConfig(t, root, false)
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+
+	result, err := LaunchNext(context.Background(), Options{
+		Root:  root,
+		RunID: runID,
+		Time:  fixedLauncherTime(),
+	})
+	if err != nil {
+		t.Fatalf("LaunchNext returned error: %v", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Result != resultCommandPassed {
+		t.Fatalf("attempt = %+v, want command step done/passed", result.Attempt)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "deterministic-command")
 }
 
 func TestLaunchNextResolvesCommandStepFromConfiguredPATH(t *testing.T) {
@@ -1976,6 +2023,21 @@ func writeCommandLauncherProject(t *testing.T, root string, opts commandWorkflow
       failed/timeout: blocked_for_human
 `)
 	writeLauncherFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), workflowYAML.String())
+}
+
+func appendLauncherSandboxConfig(t *testing.T, root string, requireForWorkers bool) {
+	t.Helper()
+	configPath := filepath.Join(root, ".orc", "config.yaml")
+	content := string(readLauncherFile(t, configPath))
+	require := "false"
+	if requireForWorkers {
+		require = "true"
+	}
+	writeLauncherFile(t, configPath, content+`sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+  require_for_workers: `+require+`
+`)
 }
 
 func openLauncherStore(t *testing.T, root string) *runstore.Store {

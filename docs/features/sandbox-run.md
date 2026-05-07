@@ -53,6 +53,26 @@ top-level Codex/orchestrator session with `orc sandbox run`; any child
 `orc worker launch-next <run-id>` processes launched from that session run in
 the same bubblewrap environment and see the marker variables above.
 
+Agent worker launches use the normal Codex default outside a verified Orc
+sandbox:
+
+```bash
+codex --ask-for-approval never exec --skip-git-repo-check -
+```
+
+When the repository has sandbox config and Orc verifies both `ORC_SANDBOX=1`
+and a canonical `ORC_SANDBOX_ROOT` matching the current repository root, agent
+worker launches use Codex yolo mode:
+
+```bash
+codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
+```
+
+The outer bubblewrap process is the isolation boundary in this mode. Manually
+exported marker variables do not change worker defaults in repositories without
+sandbox config, and invalid or mismatched markers do not enable yolo mode.
+Explicit worker command overrides are used unchanged.
+
 Set `sandbox.require_for_workers: true` when a repository should refuse worker
 launches unless those markers prove the launcher is already inside the
 repository's sandbox. The guard is opt-in so existing non-sandbox workflows keep
@@ -199,7 +219,9 @@ writable host caches by default, mount `/nix/store` writable, expose SSH agents,
 Git credentials, browser profiles, or unrelated user files by default, deny
 network access by default, discover Bun, Node, Codex, or `CODEX_BIN` binaries,
 add diagnostic helper subcommands such as `sandbox check` or
-`sandbox print-bwrap`, or enable yolo mode by default.
+`sandbox print-bwrap`, or enable yolo mode for non-sandbox worker launches.
+`orc sandbox run` still does not invent a Codex or yolo command when sandbox
+config is missing or invalid.
 
 The generated `.orc/config.yaml` scaffold includes a commented Codex yolo-mode
 sandbox example. The example is not active until the user uncomments it because

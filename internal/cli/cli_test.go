@@ -181,6 +181,13 @@ func (s cliCodexShim) setDefaultEnv(t *testing.T) {
 	t.Setenv("ORC_CLI_CODEX_STDIN", s.stdinPath)
 }
 
+func assertCLICodexArgs(t *testing.T, shim cliCodexShim, want string) {
+	t.Helper()
+	if got := string(readCLIFile(t, shim.argsPath)); got != want {
+		t.Fatalf("codex args = %q, want %q", got, want)
+	}
+}
+
 func (s cliCodexShim) processEnv(mode string, extra ...string) []string {
 	env := append([]string{
 		"ORC_CLI_EXECUTE=1",
@@ -1556,21 +1563,87 @@ func TestExecuteWorkerLaunchNextUsesDefaultCodexCommand(t *testing.T) {
 	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 	shim := installCLICodexShim(t, root)
 	shim.setDefaultEnv(t)
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
 
 	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
 	if !strings.Contains(output, "result: failed/missing_report") {
 		t.Fatalf("output missing successful shim missing_report result:\n%s\nlogs:\n%s", output, readCLILaunchLogs(t, root, result.runID))
 	}
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt"})
-	if got := string(readCLIFile(t, shim.argsPath)); got != "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n" {
-		t.Fatalf("codex args = %q, want default launch command args", got)
-	}
+	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
 	assertCLIOutputContainsAll(t, string(readCLIFile(t, shim.stdinPath)), []string{
 		"# Tiny Orc Worker Prompt\n",
 		"- run_id: `" + result.runID + "`\n",
 		"- step_id: `plan`\n",
 		"- agent_id: `planner`\n",
 	})
+}
+
+func TestExecuteWorkerLaunchNextUsesNormalDefaultWithSandboxConfigOutsideSandbox(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+`)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	shim.setDefaultEnv(t)
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
+}
+
+func TestExecuteWorkerLaunchNextUsesSandboxCodexCommandInsideVerifiedSandbox(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+`)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	shim.setDefaultEnv(t)
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	assertCLICodexArgs(t, shim, "--dangerously-bypass-approvals-and-sandbox\nexec\n--skip-git-repo-check\n-\n")
+}
+
+func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxMarkerDisabled(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+`)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	shim.setDefaultEnv(t)
+	t.Setenv("ORC_SANDBOX", "0")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
+}
+
+func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxRootInvalid(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProjectWithSandbox(t, root, `sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+`)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	shim.setDefaultEnv(t)
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", filepath.Join(root, "missing-sandbox-root"))
+
+	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
 }
 
 func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardMissingMarker(t *testing.T) {
@@ -1649,6 +1722,7 @@ func TestExecuteWorkerLaunchNextAllowsMatchingSandboxGuard(t *testing.T) {
 
 	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	assertCLICodexArgs(t, shim, "--dangerously-bypass-approvals-and-sandbox\nexec\n--skip-git-repo-check\n-\n")
 }
 
 func TestConcurrentWorkerLaunchNextOnlyStartsOneWorker(t *testing.T) {

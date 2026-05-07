@@ -100,11 +100,26 @@ attempt records:
 - log artifact reference when the durable log destination is created
 
 The launcher renders the prompt through `internal/promptrender` using the same
-attempt metadata that was persisted. The worker command is:
+attempt metadata that was persisted. Outside a verified Orc sandbox, the
+default agent worker command is:
 
 ```bash
 codex --ask-for-approval never exec --skip-git-repo-check -
 ```
+
+When the repository has sandbox config and the launcher verifies
+`ORC_SANDBOX=1` plus a canonical `ORC_SANDBOX_ROOT` matching the current
+repository root, the default agent worker command is:
+
+```bash
+codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
+```
+
+This sandbox-only yolo default relies on the inherited outer bubblewrap sandbox
+as the isolation boundary. Explicit launcher command overrides are preserved
+unchanged. Missing, invalid, or mismatched sandbox markers keep the normal
+default unless `sandbox.require_for_workers: true` is enabled, in which case
+the launch is refused before command selection.
 
 The command runs from the project root, resolves `codex` from the effective
 worker environment, and receives the rendered prompt on stdin. In the Nix

@@ -62,7 +62,10 @@ const (
 
 const sandboxWorkerGuardGuidance = "sandbox.require_for_workers is enabled; start the orchestrator with `orc sandbox run` so worker launches inherit the sandbox"
 
-var defaultCommand = []string{"codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check", "-"}
+var (
+	defaultCommand        = []string{"codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check", "-"}
+	sandboxDefaultCommand = []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check", "-"}
+)
 
 func init() {
 	if len(os.Args) >= 3 && os.Args[1] == execHelperArg {
@@ -293,12 +296,19 @@ func enforceWorkerSandboxGuard(root string, sandboxConfig *config.SandboxConfig)
 	if sandboxConfig == nil || !sandboxConfig.RequireForWorkers {
 		return nil
 	}
+	if err := verifyWorkerRepoSandbox(root); err != nil {
+		return workerSandboxGuardError(err)
+	}
+	return nil
+}
+
+func verifyWorkerRepoSandbox(root string) error {
 	if os.Getenv("ORC_SANDBOX") != "1" {
-		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX=1)")
+		return errMissingWorkerSandboxMarker
 	}
 	markerRoot := os.Getenv("ORC_SANDBOX_ROOT")
 	if markerRoot == "" {
-		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX_ROOT)")
+		return errMissingWorkerSandboxRoot
 	}
 	currentRoot, err := canonicalPath(root)
 	if err != nil {
@@ -306,12 +316,58 @@ func enforceWorkerSandboxGuard(root string, sandboxConfig *config.SandboxConfig)
 	}
 	sandboxRoot, err := canonicalPath(markerRoot)
 	if err != nil {
-		return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q is invalid: %w", sandboxWorkerGuardGuidance, markerRoot, err)
+		return workerSandboxRootInvalidError{markerRoot: markerRoot, err: err}
 	}
 	if sandboxRoot != currentRoot {
-		return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q does not match current repo root %q", sandboxWorkerGuardGuidance, sandboxRoot, currentRoot)
+		return workerSandboxRootMismatchError{sandboxRoot: sandboxRoot, currentRoot: currentRoot}
 	}
 	return nil
+}
+
+func workerSandboxGuardError(err error) error {
+	switch {
+	case errors.Is(err, errMissingWorkerSandboxMarker):
+		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX=1)")
+	case errors.Is(err, errMissingWorkerSandboxRoot):
+		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX_ROOT)")
+	default:
+		var invalid workerSandboxRootInvalidError
+		if errors.As(err, &invalid) {
+			return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q is invalid: %w", sandboxWorkerGuardGuidance, invalid.markerRoot, invalid.err)
+		}
+		var mismatch workerSandboxRootMismatchError
+		if errors.As(err, &mismatch) {
+			return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q does not match current repo root %q", sandboxWorkerGuardGuidance, mismatch.sandboxRoot, mismatch.currentRoot)
+		}
+		return err
+	}
+}
+
+var (
+	errMissingWorkerSandboxMarker = errors.New("missing ORC_SANDBOX=1")
+	errMissingWorkerSandboxRoot   = errors.New("missing ORC_SANDBOX_ROOT")
+)
+
+type workerSandboxRootInvalidError struct {
+	markerRoot string
+	err        error
+}
+
+func (e workerSandboxRootInvalidError) Error() string {
+	return fmt.Sprintf("ORC_SANDBOX_ROOT %q is invalid: %v", e.markerRoot, e.err)
+}
+
+func (e workerSandboxRootInvalidError) Unwrap() error {
+	return e.err
+}
+
+type workerSandboxRootMismatchError struct {
+	sandboxRoot string
+	currentRoot string
+}
+
+func (e workerSandboxRootMismatchError) Error() string {
+	return fmt.Sprintf("ORC_SANDBOX_ROOT %q does not match current repo root %q", e.sandboxRoot, e.currentRoot)
 }
 
 func canonicalPath(path string) (string, error) {
@@ -873,7 +929,7 @@ func (r *workerRunner) run() (runstore.Attempt, runstore.ArtifactRef, bool, erro
 func (r *workerRunner) selectCommand() (runstore.Attempt, error) {
 	r.command = r.opts.Command
 	if len(r.command) == 0 {
-		r.command = defaultCommand
+		r.command = r.defaultCommand()
 	}
 	if r.command[0] == "" {
 		err := errors.New("worker command is required")
@@ -883,6 +939,13 @@ func (r *workerRunner) selectCommand() (runstore.Attempt, error) {
 		return r.finishPreStart(exitStateCanceled, runstore.ArtifactRef{}, err)
 	}
 	return runstore.Attempt{}, nil
+}
+
+func (r *workerRunner) defaultCommand() []string {
+	if r.loaded.Project.Config.Sandbox != nil && verifyWorkerRepoSandbox(r.loaded.Project.Root) == nil {
+		return slices.Clone(sandboxDefaultCommand)
+	}
+	return slices.Clone(defaultCommand)
 }
 
 func (r *workerRunner) openLog() (runstore.Attempt, error) {
