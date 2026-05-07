@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -16,7 +17,11 @@ const (
 	sandboxMountModeRO   = "ro"
 	sandboxMountModeRW   = "rw"
 	sandboxMountModeAuto = "auto"
+
+	sandboxSyntheticHome = "/home/orc"
 )
+
+var sandboxEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 	if cfg.Version != schemaVersion {
@@ -144,14 +149,24 @@ func validatePresetMountMode(name, mode string, allowAuto bool) error {
 
 func validateSandboxEnvConfig(env SandboxEnvConfig) error {
 	for i, name := range env.Pass {
-		if name == "" {
-			return fmt.Errorf("sandbox.env.pass[%d] is empty", i)
+		if err := validateSandboxEnvName(name); err != nil {
+			return fmt.Errorf("sandbox.env.pass[%d]: %w", i, err)
 		}
 	}
 	for name := range env.Set {
-		if name == "" {
-			return errors.New("sandbox.env.set contains an empty variable name")
+		if err := validateSandboxEnvName(name); err != nil {
+			return fmt.Errorf("sandbox.env.set[%q]: %w", name, err)
 		}
+	}
+	return nil
+}
+
+func validateSandboxEnvName(name string) error {
+	if name == "" {
+		return errors.New("environment variable name is empty")
+	}
+	if !sandboxEnvNamePattern.MatchString(name) {
+		return fmt.Errorf("environment variable name %q is invalid", name)
 	}
 	return nil
 }
@@ -163,6 +178,9 @@ func validateSandboxMount(projectRoot string, index int, mount SandboxMount) err
 	}
 	if mount.Target == "" {
 		return fmt.Errorf("%s.target is required", name)
+	}
+	if err := validateSandboxMountTarget(projectRoot, mount.Target); err != nil {
+		return fmt.Errorf("%s.target %q: %w", name, mount.Target, err)
 	}
 	if mount.Mode != sandboxMountModeRO && mount.Mode != sandboxMountModeRW {
 		return fmt.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
@@ -203,6 +221,57 @@ func validateSandboxMount(projectRoot string, index int, mount SandboxMount) err
 		return fmt.Errorf("%s.host %q must not escape repository root for writable mounts", name, mount.Host)
 	}
 	return nil
+}
+
+func validateSandboxMountTarget(projectRoot, target string) error {
+	if !filepath.IsAbs(target) {
+		return errors.New("must be an absolute sandbox path")
+	}
+	clean := filepath.Clean(target)
+	if clean != target {
+		return errors.New("must be clean")
+	}
+	if clean == "/" {
+		return errors.New("must not target sandbox root")
+	}
+	if filepath.IsAbs(projectRoot) {
+		root := filepath.Clean(projectRoot)
+		if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) || isStrictPathAncestor(clean, root) {
+			return errors.New("must not override the repository mount")
+		}
+	}
+	if clean == "/home" || clean == sandboxSyntheticHome {
+		return fmt.Errorf("must not override critical sandbox path %s", clean)
+	}
+	if strings.HasPrefix(clean, "/home/") && !strings.HasPrefix(clean, sandboxSyntheticHome+string(filepath.Separator)) {
+		return errors.New("must not override critical sandbox path /home")
+	}
+	criticalTargets := []string{
+		"/proc",
+		"/dev",
+		"/tmp",
+		"/usr",
+		"/bin",
+		"/sbin",
+		"/lib",
+		"/lib64",
+		"/etc",
+		"/nix/store",
+	}
+	for _, critical := range criticalTargets {
+		if clean == critical || strings.HasPrefix(clean, critical+string(filepath.Separator)) || isStrictPathAncestor(clean, critical) {
+			return fmt.Errorf("must not override critical sandbox path %s", critical)
+		}
+	}
+	return nil
+}
+
+func isStrictPathAncestor(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func resolveExistingProjectPath(projectRoot, path string) (string, string, error) {

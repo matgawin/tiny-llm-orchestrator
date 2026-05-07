@@ -142,16 +142,14 @@ func (c *SandboxCommand) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
-// BubblewrapConfig stores bubblewrap options used by sandbox execution and
-// later policy expansion.
+// BubblewrapConfig stores bubblewrap options used by sandbox execution.
 type BubblewrapConfig struct {
 	Enabled bool                  `yaml:"enabled"`
 	Network RequiredBool          `yaml:"network"`
 	Mounts  BubblewrapMountConfig `yaml:"mounts"`
 }
 
-// BubblewrapMountConfig stores named preset mount policies. Detailed policy
-// translation to bwrap args is deferred to later sandbox policy work.
+// BubblewrapMountConfig stores named preset mount policies.
 type BubblewrapMountConfig struct {
 	Repo      string `yaml:"repo"`
 	Beads     string `yaml:"beads"`
@@ -159,14 +157,14 @@ type BubblewrapMountConfig struct {
 	Tmp       string `yaml:"tmp"`
 }
 
-// SandboxEnvConfig reserves explicit environment passthrough and override
+// SandboxEnvConfig declares explicit environment passthrough and override
 // policy. It does not imply whole-host environment passthrough.
 type SandboxEnvConfig struct {
 	Pass []string          `yaml:"pass"`
 	Set  map[string]string `yaml:"set"`
 }
 
-// SandboxMount declares an extra host mount for later sandbox policy work.
+// SandboxMount declares an extra host mount for sandbox execution.
 type SandboxMount struct {
 	Host     string       `yaml:"host"`
 	Target   string       `yaml:"target"`

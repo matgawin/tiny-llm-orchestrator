@@ -48,21 +48,62 @@ Orc sets these marker variables in the sandboxed environment:
 - `ORC_SANDBOX=1`
 - `ORC_SANDBOX_ROOT=<repo>`
 
-## Bubblewrap Defaults In This Slice
+## Bubblewrap Defaults
 
-The v1 runner constructs a minimal bubblewrap invocation that includes:
+The v1 runner constructs a pragmatic default bubblewrap invocation for Codex
+orchestration. By default it includes:
 
 - `--die-with-parent`
 - PID, IPC, and UTS isolation
 - optional network isolation when `sandbox.bubblewrap.network: false`
 - a read-write bind of the repository root at the same absolute path
+- a read-write bind of `../.beads` from the repository root when that directory
+  exists; missing Beads state is skipped as an optional default
+- a read-write Codex config bind. If `CODEX_HOME` is set, Orc mounts that
+  absolute path at the same path and sets `CODEX_HOME` to it inside the
+  sandbox. Otherwise Orc uses the host `~/.codex`, creating it when needed, and
+  mounts it at `/home/orc/.codex`.
+- a synthetic home at `/home/orc`; the real host home directory is not bound
+  wholesale by default
+- a private writable `/tmp` tmpfs instead of writable host `/tmp`
 - read-only binds for existing executable/system paths needed to start normal
   configured commands: `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`, and
   `/nix/store`
 - `/proc` and `/dev`
 - `--chdir` to the validated sandbox cwd
 
-The complete mount and environment policy is intentionally separate follow-up
-work. v1 does not implement worker launch refusal outside the sandbox,
-diagnostic helper subcommands such as `sandbox check` or `sandbox print-bwrap`,
-or scaffold examples.
+## Environment
+
+The sandbox does not pass the whole host environment. Orc clears the child
+environment and sets an allowlisted environment into bubblewrap. The default
+allowlist includes `PATH`, synthetic `HOME`, `TERM`, `LANG`, `LC_*`, `SHELL`,
+`USER`, `LOGNAME`, `CODEX_HOME`, `OPENAI_API_KEY`, `ORC_SANDBOX`, and
+`ORC_SANDBOX_ROOT`.
+
+`sandbox.env.pass` adds explicit host variables by name when present.
+`sandbox.env.set` sets fixed values and wins over pass-through values with the
+same name. Orc-managed values for `HOME`, `CODEX_HOME`, `ORC_SANDBOX`, and
+`ORC_SANDBOX_ROOT` are set to the resolved sandbox values.
+
+## Extra Mounts
+
+Extra `sandbox.mounts` entries support `ro` and `rw` modes. Relative host paths
+resolve from the repository root. Missing mounts are errors unless
+`optional: true` is set, in which case Orc skips the missing mount.
+
+Writable repo-relative host paths must stay inside the repository and must not
+escape through traversal or symlinks. Mount targets must be clean absolute
+sandbox paths and cannot override critical sandbox internals such as `/proc`,
+`/dev`, `/tmp`, `/home`, `/home/orc`, read-only system paths, `/nix/store`, or
+the repository mount. Parent paths that would mask those protected mounts are
+also rejected. Explicit mounts under `/home/orc/...` are allowed for selected
+synthetic-home config paths.
+
+## Explicit Non-Defaults
+
+v1 does not bind the whole real home, pass the whole host environment, mount
+writable host caches by default, mount `/nix/store` writable, expose SSH agents,
+Git credentials, browser profiles, or unrelated user files by default, deny
+network access by default, implement worker launch refusal outside the sandbox,
+add diagnostic helper subcommands such as `sandbox check` or
+`sandbox print-bwrap`, or add scaffold examples.

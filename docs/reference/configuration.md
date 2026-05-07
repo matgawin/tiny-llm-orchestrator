@@ -166,10 +166,12 @@ sandbox:
       optional: true
 ```
 
-The sandbox section configures `orc sandbox run`; see
+The sandbox section configures `orc sandbox run`. This reference documents the
+configuration shape and validation rules; see
 [../features/sandbox-run.md](../features/sandbox-run.md) for the executable CLI
-behavior. Bubblewrap sandbox execution is Linux-only for v1, although the
-configuration schema can be loaded on any platform.
+behavior and the canonical bubblewrap mount, environment, home, network, and
+non-default policy. Bubblewrap sandbox execution is Linux-only for v1, although
+the configuration schema can be loaded on any platform.
 
 `sandbox.command.argv` is required whenever `sandbox` is present. It must be a
 non-empty argv list with no empty entries. Shell-string command declarations
@@ -184,28 +186,21 @@ symlink.
 `sandbox.bubblewrap.enabled` is reserved for bubblewrap policy selection; v1
 `orc sandbox run` always shells out to `bwrap` and never treats this field as
 permission to run unsandboxed. `sandbox.bubblewrap.network` accepts `true` or
-`false` and defaults to `true`, which is the recommended setting for Codex
-orchestration because model and tool workflows normally need network access.
-Preset
-`sandbox.bubblewrap.mounts` reserve named mount policies for later policy work:
-`repo`, `codex_home`, and `tmp` accept `ro` or `rw`; `beads` accepts `auto`,
-`ro`, or `rw`.
+`false` and defaults to `true`. Preset `sandbox.bubblewrap.mounts` validates
+named mount policy declarations for the sandbox contract: `repo`, `codex_home`,
+and `tmp` accept `ro` or `rw`; `beads` accepts `auto`, `ro`, or `rw`.
 
-`sandbox.env.pass` and `sandbox.env.set` reserve explicit environment
-passthrough and override policy. They do not imply whole-host environment
-passthrough.
+`sandbox.env.pass` is an optional list of environment variable names to pass
+from the host when present. `sandbox.env.set` is an optional map of fixed
+environment variable values; duplicate keys are allowed with pass-through names,
+and the fixed value takes precedence.
 
-Extra `sandbox.mounts` entries reserve project-specific host mounts. Relative
-`host` paths resolve from the repository root. `mode` must be exactly `ro` or
-`rw`. Missing required mounts are validation errors; missing mounts with
-`optional: true` are skipped. Writable repository-contained relative mounts
-must not traverse outside the repository or escape it through symlinks.
-
-Sandbox v1 deliberately excludes shell command strings, automatic yolo-mode
-defaults, unsandboxed fallback execution, whole-home passthrough by default,
-whole-host environment passthrough by default, network denial by default,
-non-Linux execution, embedding bubblewrap, and replacing bubblewrap with a Go
-implementation.
+Extra `sandbox.mounts` entries declare project-specific host mounts. `mode` must
+be exactly `ro` or `rw`. `host` may be absolute or repository-relative.
+Repository-relative writable host paths must resolve inside the repository.
+`target` must be a clean absolute sandbox path that passes the protected-target
+validation used by `orc sandbox run`. Missing required mounts are validation
+errors; missing mounts with `optional: true` are skipped.
 
 ## Workflow Files
 

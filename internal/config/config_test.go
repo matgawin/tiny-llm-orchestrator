@@ -667,7 +667,104 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
     argv: ["codex"]
   env:
     pass: ["TERM", ""]`,
-			contains: []string{`sandbox.env.pass[1] is empty`},
+			contains: []string{`sandbox.env.pass[1]: environment variable name is empty`},
+		},
+		{
+			name: "invalid env pass entry",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  env:
+    pass: ["BAD-NAME"]`,
+			contains: []string{`sandbox.env.pass[0]: environment variable name "BAD-NAME" is invalid`},
+		},
+		{
+			name: "relative extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: workspace
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].target "workspace": must be an absolute sandbox path`},
+		},
+		{
+			name: "critical extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: /tmp/cache
+      mode: rw`,
+			contains: []string{`sandbox.mounts[0].target "/tmp/cache": must not override critical sandbox path /tmp`},
+		},
+		{
+			name: "critical extra mount parent target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: /nix
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].target "/nix": must not override critical sandbox path /nix/store`},
+		},
+		{
+			name: "synthetic home root extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: /home/orc
+      mode: rw`,
+			contains: []string{`sandbox.mounts[0].target "/home/orc": must not override critical sandbox path /home/orc`},
+		},
+		{
+			name: "repo extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: REPO_PLACEHOLDER/cache
+      mode: rw`,
+			prepare: func(t *testing.T, root string) {
+				configPath := filepath.Join(root, ".orc", "config.yaml")
+				content, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatalf("read config: %v", err)
+				}
+				content = []byte(strings.ReplaceAll(string(content), "REPO_PLACEHOLDER", root))
+				if err := os.WriteFile(configPath, content, 0o644); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			},
+			contains: []string{`must not override the repository mount`},
+		},
+		{
+			name: "repo parent extra mount target",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: REPO_PARENT_PLACEHOLDER
+      mode: ro`,
+			prepare: func(t *testing.T, root string) {
+				configPath := filepath.Join(root, ".orc", "config.yaml")
+				content, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatalf("read config: %v", err)
+				}
+				content = []byte(strings.ReplaceAll(string(content), "REPO_PARENT_PLACEHOLDER", filepath.Dir(root)))
+				if err := os.WriteFile(configPath, content, 0o644); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			},
+			contains: []string{`must not override the repository mount`},
 		},
 	}
 
@@ -691,6 +788,23 @@ func TestLoadSkipsMissingOptionalSandboxMount(t *testing.T) {
       target: /workspace/missing
       mode: rw
       optional: true`)})
+
+	if _, err := Load(root); err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+}
+
+func TestLoadAcceptsSyntheticHomeSandboxMount(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{config: configWithSandbox(`sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: data
+      target: /home/orc/.config/tool
+      mode: rw`)})
+	if err := os.Mkdir(filepath.Join(root, "data"), 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
 
 	if _, err := Load(root); err != nil {
 		t.Fatalf("Load returned error: %v", err)

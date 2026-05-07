@@ -23,6 +23,18 @@ func TestBuildSpecConstructsBubblewrapArgv(t *testing.T) {
 	if err := os.Mkdir(cwd, 0o750); err != nil {
 		t.Fatalf("mkdir cwd: %v", err)
 	}
+	beads := filepath.Clean(filepath.Join(root, "..", ".beads"))
+	if err := os.Mkdir(beads, 0o750); err != nil {
+		t.Fatalf("mkdir beads: %v", err)
+	}
+	codexHome := filepath.Join(root, "codex-home")
+	extraMount := filepath.Join(root, "data")
+	if err := os.Mkdir(codexHome, 0o700); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	if err := os.Mkdir(extraMount, 0o750); err != nil {
+		t.Fatalf("mkdir extra mount: %v", err)
+	}
 	project := sandboxProject(root, config.SandboxConfig{
 		Command: config.SandboxCommand{Argv: []string{"codex", "exec"}},
 		CWD:     "work",
@@ -33,11 +45,36 @@ func TestBuildSpecConstructsBubblewrapArgv(t *testing.T) {
 				Set:   true,
 			},
 		},
+		Env: config.SandboxEnvConfig{
+			Pass: []string{"EXTRA_TOKEN"},
+			Set: map[string]string{
+				"TERM": "xterm-256color",
+			},
+		},
+		Mounts: []config.SandboxMount{
+			{Host: "data", Target: "/workspace/data", Mode: "ro"},
+		},
 	})
 
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
-		PathExists:  onlyHostPaths("/usr", "/bin", "/lib64", "/etc"),
+		Environ: func() []string {
+			return []string{
+				"PATH=/usr/bin",
+				"HOME=" + root,
+				"TERM=host-term",
+				"LANG=C.UTF-8",
+				"LC_ALL=C.UTF-8",
+				"SHELL=/bin/sh",
+				"USER=tester",
+				"LOGNAME=tester",
+				"CODEX_HOME=" + codexHome,
+				"OPENAI_API_KEY=sk-test",
+				"EXTRA_TOKEN=from-pass",
+				"UNRELATED_SECRET=hidden",
+			}
+		},
+		PathExists: onlyHostPaths(beads, codexHome, extraMount, "/usr", "/bin", "/lib64", "/etc"),
 		LookPath: func(name string) (string, error) {
 			if name != "bwrap" {
 				t.Fatalf("LookPath name = %q, want bwrap", name)
@@ -54,13 +91,38 @@ func TestBuildSpecConstructsBubblewrapArgv(t *testing.T) {
 		"--unshare-pid",
 		"--unshare-ipc",
 		"--unshare-uts",
+		"--clearenv",
+		"--tmpfs", "/tmp",
+		"--dir", "/home",
+		"--dir", "/home/orc",
+		"--dir", filepath.Dir(root),
+		"--dir", root,
+		"--dir", beads,
+		"--dir", codexHome,
+		"--dir", "/workspace",
 		"--bind", root, root,
+		"--bind", beads, beads,
+		"--bind", codexHome, codexHome,
 		"--ro-bind", "/usr", "/usr",
 		"--ro-bind", "/bin", "/bin",
 		"--ro-bind", "/lib64", "/lib64",
 		"--ro-bind", "/etc", "/etc",
+		"--ro-bind", extraMount, "/workspace/data",
 		"--proc", "/proc",
 		"--dev", "/dev",
+		"--setenv", "CODEX_HOME", codexHome,
+		"--setenv", "EXTRA_TOKEN", "from-pass",
+		"--setenv", "HOME", "/home/orc",
+		"--setenv", "LANG", "C.UTF-8",
+		"--setenv", "LC_ALL", "C.UTF-8",
+		"--setenv", "LOGNAME", "tester",
+		"--setenv", "OPENAI_API_KEY", "sk-test",
+		"--setenv", "ORC_SANDBOX", "1",
+		"--setenv", "ORC_SANDBOX_ROOT", root,
+		"--setenv", "PATH", "/usr/bin",
+		"--setenv", "SHELL", "/bin/sh",
+		"--setenv", "TERM", "xterm-256color",
+		"--setenv", "USER", "tester",
 		"--chdir", cwd,
 		"--",
 		"codex", "exec",
@@ -74,11 +136,48 @@ func TestBuildSpecConstructsBubblewrapArgv(t *testing.T) {
 	if spec.CWD != cwd {
 		t.Fatalf("cwd = %q, want %q", spec.CWD, cwd)
 	}
+	assertEnvContains(t, spec.Env, "HOME=/home/orc")
+	assertEnvContains(t, spec.Env, "CODEX_HOME="+codexHome)
 	assertEnvContains(t, spec.Env, markerSandbox)
 	assertEnvContains(t, spec.Env, markerSandboxRoot+root)
+	assertEnvContains(t, spec.Env, "EXTRA_TOKEN=from-pass")
+	assertEnvContains(t, spec.Env, "TERM=xterm-256color")
+	assertEnvMissing(t, spec.Env, "UNRELATED_SECRET=")
+}
+
+func TestBuildSpecCreatesHomeDirsBeforeRepoBind(t *testing.T) {
+	root := "/home/tester/project"
+	codexHome := "/home/tester/.codex"
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(codexHome),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=/home/tester", "CODEX_HOME=" + codexHome}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	repoBind := indexSequence(spec.Args, "--bind", root, root)
+	homeDir := indexSequence(spec.Args, "--dir", "/home")
+	userHomeDir := indexSequence(spec.Args, "--dir", "/home/tester")
+	if repoBind < 0 || homeDir < 0 || userHomeDir < 0 {
+		t.Fatalf("bwrap args = %#v, want /home setup dirs and repo bind", spec.Args)
+	}
+	if homeDir > repoBind || userHomeDir > repoBind {
+		t.Fatalf("bwrap args = %#v, want /home setup dirs before repo bind", spec.Args)
+	}
 }
 
 func TestBuildSpecNetworkFalseAddsUnshareNet(t *testing.T) {
+	root := t.TempDir()
 	project := sandboxProject(t.TempDir(), config.SandboxConfig{
 		Command: config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:     ".",
@@ -91,12 +190,97 @@ func TestBuildSpecNetworkFalseAddsUnshareNet(t *testing.T) {
 		},
 	})
 
-	spec, err := BuildSpec(project, Options{RuntimeGOOS: "linux", LookPath: foundBwrap, PathExists: noHostPaths})
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  noHostPaths,
+		Environ:     testEnv(root),
+	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
 	if !containsArg(spec.Args, "--unshare-net") {
 		t.Fatalf("bwrap args = %#v, want --unshare-net", spec.Args)
+	}
+}
+
+func TestBuildSpecSkipsMissingOptionalBeadsDir(t *testing.T) {
+	root := t.TempDir()
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex")),
+		Environ:     testEnv(root),
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	if containsSequence(spec.Args, "--bind", filepath.Clean(filepath.Join(root, "..", ".beads")), filepath.Clean(filepath.Join(root, "..", ".beads"))) {
+		t.Fatalf("bwrap args = %#v, want missing beads dir skipped", spec.Args)
+	}
+}
+
+func TestBuildSpecCreatesDefaultCodexHomeUnderSyntheticHome(t *testing.T) {
+	root := t.TempDir()
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+	var created string
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  noHostPaths,
+		Environ:     testEnv(root),
+		MkdirAll: func(path string, _ os.FileMode) error {
+			created = path
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	hostCodex := filepath.Join(root, ".codex")
+	if created != hostCodex {
+		t.Fatalf("created codex home = %q, want %q", created, hostCodex)
+	}
+	if !containsSequence(spec.Args, "--bind", hostCodex, "/home/orc/.codex") {
+		t.Fatalf("bwrap args = %#v, want default codex home mounted into synthetic home", spec.Args)
+	}
+	assertEnvContains(t, spec.Env, "HOME=/home/orc")
+	assertEnvContains(t, spec.Env, "CODEX_HOME=/home/orc/.codex")
+}
+
+func TestBuildSpecSkipsMissingOptionalExtraMount(t *testing.T) {
+	root := t.TempDir()
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		Mounts: []config.SandboxMount{
+			{Host: "missing", Target: "/workspace/missing", Mode: "rw", Optional: config.RequiredBool{Value: true, Set: true}},
+		},
+	})
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex")),
+		Environ:     testEnv(root),
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	if containsSequence(spec.Args, "--bind", filepath.Join(root, "missing"), "/workspace/missing") {
+		t.Fatalf("bwrap args = %#v, want optional missing mount skipped", spec.Args)
 	}
 }
 
@@ -231,8 +415,30 @@ func onlyHostPaths(paths ...string) func(string) bool {
 	}
 }
 
+func testEnv(home string) func() []string {
+	return func() []string {
+		return []string{"PATH=/usr/bin", "HOME=" + home}
+	}
+}
+
 func containsArg(args []string, want string) bool {
 	return slices.Contains(args, want)
+}
+
+func containsSequence(args []string, want ...string) bool {
+	return indexSequence(args, want...) >= 0
+}
+
+func indexSequence(args []string, want ...string) int {
+	if len(want) == 0 || len(want) > len(args) {
+		return -1
+	}
+	for i := 0; i <= len(args)-len(want); i++ {
+		if slices.Equal(args[i:i+len(want)], want) {
+			return i
+		}
+	}
+	return -1
 }
 
 func assertEnvContains(t *testing.T, env []string, want string) {
@@ -241,6 +447,15 @@ func assertEnvContains(t *testing.T, env []string, want string) {
 		return
 	}
 	t.Fatalf("env missing %q: %#v", want, env)
+}
+
+func assertEnvMissing(t *testing.T, env []string, prefix string) {
+	t.Helper()
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			t.Fatalf("env contains %q with prefix %q: %#v", entry, prefix, env)
+		}
+	}
 }
 
 func shellQuote(s string) string {
