@@ -6,7 +6,7 @@ task_context:
   beads: optional
   markdown_fallback: true
 vcs:
-  dirty_start: block
+  dirty_start: allow
   no_vcs: allow
 defaults:
   timeout: 30m

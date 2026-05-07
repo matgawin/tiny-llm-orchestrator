@@ -412,6 +412,299 @@ agents:
 	}
 }
 
+func TestLoadAcceptsMinimalSandboxConfig(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{config: `version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+sandbox:
+  command:
+    argv: ["codex"]
+`})
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if project.Config.Sandbox == nil {
+		t.Fatal("sandbox config was nil")
+	}
+	if got, want := project.Config.Sandbox.Command.Argv, []string{"codex"}; !slices.Equal(got, want) {
+		t.Fatalf("sandbox command argv = %v, want %v", got, want)
+	}
+	if got := project.Config.Sandbox.CWD; got != "." {
+		t.Fatalf("sandbox cwd = %q, want .", got)
+	}
+	if got := project.Config.Sandbox.Bubblewrap.Network; !got.Set || !got.Value {
+		t.Fatalf("sandbox bubblewrap network = %+v, want default true", got)
+	}
+}
+
+func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{config: `version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+sandbox:
+  command:
+    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+  cwd: tools
+  bubblewrap:
+    enabled: true
+    network: false
+    mounts:
+      repo: rw
+      beads: auto
+      codex_home: rw
+      tmp: rw
+  env:
+    pass: ["TERM"]
+    set:
+      ORC_SANDBOX: "1"
+  mounts:
+    - host: data
+      target: /workspace/data
+      mode: ro
+    - host: missing-cache
+      target: /workspace/cache
+      mode: rw
+      optional: true
+`})
+	if err := os.Mkdir(filepath.Join(root, "tools"), 0o755); err != nil {
+		t.Fatalf("create tools dir: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "data"), 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	sandbox := project.Config.Sandbox
+	if sandbox == nil {
+		t.Fatal("sandbox config was nil")
+	}
+	if got := sandbox.CWD; got != "tools" {
+		t.Fatalf("sandbox cwd = %q, want tools", got)
+	}
+	if !sandbox.Bubblewrap.Enabled {
+		t.Fatal("sandbox bubblewrap enabled = false, want true")
+	}
+	if got := sandbox.Bubblewrap.Network; !got.Set || got.Value {
+		t.Fatalf("sandbox bubblewrap network = %+v, want explicit false", got)
+	}
+	if got := sandbox.Bubblewrap.Mounts.Beads; got != "auto" {
+		t.Fatalf("sandbox beads mount = %q, want auto", got)
+	}
+	if got := sandbox.Env.Pass; !slices.Equal(got, []string{"TERM"}) {
+		t.Fatalf("sandbox env pass = %v, want TERM", got)
+	}
+	if got := sandbox.Env.Set["ORC_SANDBOX"]; got != "1" {
+		t.Fatalf("sandbox env set ORC_SANDBOX = %q, want 1", got)
+	}
+	if got := len(sandbox.Mounts); got != 2 {
+		t.Fatalf("sandbox mounts length = %d, want 2", got)
+	}
+}
+
+func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   string
+		prepare  func(t *testing.T, root string)
+		contains []string
+	}{
+		{
+			name: "missing command argv",
+			config: `sandbox:
+  command: {}`,
+			contains: []string{"sandbox.command.argv must declare at least one argument"},
+		},
+		{
+			name: "empty argv element",
+			config: `sandbox:
+  command:
+    argv: ["codex", ""]`,
+			contains: []string{"sandbox.command.argv[1] is empty"},
+		},
+		{
+			name: "shell string command",
+			config: `sandbox:
+  command: "codex --dangerously-bypass-approvals-and-sandbox"`,
+			contains: []string{"sandbox.command must use argv", "shell-string commands are not supported"},
+		},
+		{
+			name: "absolute cwd",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  cwd: /tmp`,
+			contains: []string{`sandbox.cwd "/tmp" must be repo-relative`},
+		},
+		{
+			name: "traversing cwd",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  cwd: ../outside`,
+			contains: []string{`sandbox.cwd "../outside" must be clean and stay under repository root`},
+		},
+		{
+			name: "symlink escaping cwd",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  cwd: linked-outside`,
+			prepare: func(t *testing.T, root string) {
+				outside := t.TempDir()
+				if err := os.Symlink(outside, filepath.Join(root, "linked-outside")); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			},
+			contains: []string{`sandbox.cwd "linked-outside"`, "path must not escape repository root"},
+		},
+		{
+			name: "invalid extra mount mode",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: .
+      target: /workspace
+      mode: write`,
+			contains: []string{`sandbox.mounts[0].mode "write" is invalid; allowed: ro, rw`},
+		},
+		{
+			name: "missing required mount",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: missing
+      target: /workspace/missing
+      mode: ro`,
+			contains: []string{`sandbox.mounts[0].host "missing" does not exist`},
+		},
+		{
+			name: "invalid preset mount mode",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  bubblewrap:
+    mounts:
+      repo: auto`,
+			contains: []string{`sandbox.bubblewrap.mounts.repo "auto" is invalid; allowed: ro, rw`},
+		},
+		{
+			name: "unsafe writable mount traversal",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: ../outside
+      target: /outside
+      mode: rw`,
+			prepare: func(t *testing.T, root string) {
+				if err := os.Mkdir(filepath.Join(root, "..", "outside"), 0o755); err != nil {
+					t.Fatalf("create outside dir: %v", err)
+				}
+			},
+			contains: []string{`sandbox.mounts[0].host "../outside" must not traverse outside repository root for writable mounts`},
+		},
+		{
+			name: "unsafe optional writable mount traversal",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: ../outside
+      target: /outside
+      mode: rw
+      optional: true`,
+			prepare: func(t *testing.T, root string) {
+				if err := os.Mkdir(filepath.Join(root, "..", "outside"), 0o755); err != nil {
+					t.Fatalf("create outside dir: %v", err)
+				}
+			},
+			contains: []string{`sandbox.mounts[0].host "../outside" must not traverse outside repository root for writable mounts`},
+		},
+		{
+			name: "unsafe missing optional writable mount traversal",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: ../missing-outside
+      target: /outside
+      mode: rw
+      optional: true`,
+			contains: []string{`sandbox.mounts[0].host "../missing-outside" must not traverse outside repository root for writable mounts`},
+		},
+		{
+			name: "unsafe writable mount symlink",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: linked-outside
+      target: /outside
+      mode: rw`,
+			prepare: func(t *testing.T, root string) {
+				outside := t.TempDir()
+				if err := os.Symlink(outside, filepath.Join(root, "linked-outside")); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			},
+			contains: []string{`sandbox.mounts[0].host "linked-outside" must not escape repository root for writable mounts`},
+		},
+		{
+			name: "empty env pass entry",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  env:
+    pass: ["TERM", ""]`,
+			contains: []string{`sandbox.env.pass[1] is empty`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{config: configWithSandbox(tt.config)})
+			if tt.prepare != nil {
+				tt.prepare(t, root)
+			}
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
+	}
+}
+
+func TestLoadSkipsMissingOptionalSandboxMount(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{config: configWithSandbox(`sandbox:
+  command:
+    argv: ["codex"]
+  mounts:
+    - host: missing
+      target: /workspace/missing
+      mode: rw
+      optional: true`)})
+
+	if _, err := Load(root); err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+}
+
+func TestLoadAcceptsDocumentedOptionalSandboxMount(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{config: configWithSandbox(documentedSandboxConfig(t))})
+
+	if _, err := Load(root); err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+}
+
 func TestLoadRejectsGeneratedWorkflowConfig(t *testing.T) {
 	tests := []invalidWorkflowCase{
 		generatedWorkflowCase(t, "invalid transition target", func(workflow Workflow) Workflow {
@@ -745,6 +1038,45 @@ func configForAgents(agents map[string]string) string {
 		b.WriteString(".md\n")
 	}
 	return b.String()
+}
+
+func configWithSandbox(sandbox string) string {
+	return "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n" + sandbox + "\n"
+}
+
+func documentedSandboxConfig(t *testing.T) string {
+	t.Helper()
+
+	docPath := filepath.Join("..", "..", "docs", "reference", "configuration.md")
+	content, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read configuration reference: %v", err)
+	}
+
+	const intro = "Project config may also declare an Orc-managed sandbox command contract:"
+	afterIntro, ok := cutAfter(string(content), intro)
+	if !ok {
+		t.Fatalf("configuration reference missing sandbox sample intro %q", intro)
+	}
+
+	const fence = "```yaml\n"
+	afterFence, ok := cutAfter(afterIntro, fence)
+	if !ok {
+		t.Fatal("configuration reference sandbox sample is missing opening YAML fence")
+	}
+	sample, _, ok := strings.Cut(afterFence, "\n```")
+	if !ok {
+		t.Fatal("configuration reference sandbox sample is missing closing YAML fence")
+	}
+	return sample
+}
+
+func cutAfter(s, sep string) (string, bool) {
+	_, after, ok := strings.Cut(s, sep)
+	if !ok {
+		return "", false
+	}
+	return after, true
 }
 
 func removeOnce(t *testing.T, input, target string) string {

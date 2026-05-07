@@ -52,10 +52,12 @@ steps:
       argv: ["task", "check"]
     allowed_results:
       done: [passed, failed]
+      blocked: [blocked]
       failed: [timeout, process_error]
     on:
       done/passed: review
       done/failed: code
+      blocked/blocked: blocked_for_human
       failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   review:
@@ -108,10 +110,12 @@ steps:
       argv: ["task", "check"]
     allowed_results:
       done: [passed, failed]
+      blocked: [blocked]
       failed: [timeout, process_error]
     on:
       done/passed: redundancy-review
       done/failed: code_fixer
+      blocked/blocked: blocked_for_human
       failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   readability-review:
@@ -149,9 +153,11 @@ steps:
       argv: ["task", "check"]
     allowed_results:
       done: [passed, failed]
+      blocked: [blocked]
       failed: [timeout, process_error]
     on:
       done/passed: readability-review
       done/failed: code_cleaner
+      blocked/blocked: blocked_for_human
       failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human

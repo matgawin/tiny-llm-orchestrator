@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -11,9 +12,13 @@ const (
 	defaultLoopCapsEnabled = true
 	defaultLoopCapsSoft    = 2
 	defaultLoopCapsHard    = 4
+
+	sandboxMountModeRO   = "ro"
+	sandboxMountModeRW   = "rw"
+	sandboxMountModeAuto = "auto"
 )
 
-func validateProjectConfig(cfg ProjectConfig) error {
+func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 	if cfg.Version != schemaVersion {
 		return fmt.Errorf("config version = %d, want %d", cfg.Version, schemaVersion)
 	}
@@ -37,6 +42,188 @@ func validateProjectConfig(cfg ProjectConfig) error {
 		if err := validateEffectiveLoopCaps(fmt.Sprintf("workflows.%s.loop_caps", name), effective); err != nil {
 			return err
 		}
+	}
+	if cfg.Sandbox != nil {
+		if err := validateSandboxConfig(projectRoot, cfg.Sandbox); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSandboxConfig(projectRoot string, sandbox *SandboxConfig) error {
+	if len(sandbox.Command.Argv) == 0 {
+		return errors.New("sandbox.command.argv must declare at least one argument")
+	}
+	for i, arg := range sandbox.Command.Argv {
+		if arg == "" {
+			return fmt.Errorf("sandbox.command.argv[%d] is empty", i)
+		}
+	}
+	if sandbox.CWD == "" {
+		sandbox.CWD = "."
+	}
+	if err := validateSandboxCWD(projectRoot, sandbox.CWD); err != nil {
+		return err
+	}
+	if !sandbox.Bubblewrap.Network.Set {
+		sandbox.Bubblewrap.Network = RequiredBool{Value: true, Set: true}
+	}
+	if err := validateBubblewrapMountConfig(sandbox.Bubblewrap.Mounts); err != nil {
+		return err
+	}
+	if err := validateSandboxEnvConfig(sandbox.Env); err != nil {
+		return err
+	}
+	for i, mount := range sandbox.Mounts {
+		if err := validateSandboxMount(projectRoot, i, mount); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSandboxCWD(projectRoot, cwd string) error {
+	if filepath.IsAbs(cwd) {
+		return fmt.Errorf("sandbox.cwd %q must be repo-relative", cwd)
+	}
+	clean := filepath.Clean(cwd)
+	if cwd != "" && clean != cwd {
+		return fmt.Errorf("sandbox.cwd %q must be clean and stay under repository root", cwd)
+	}
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("sandbox.cwd %q must be clean and stay under repository root", cwd)
+	}
+	path := filepath.Join(projectRoot, clean)
+	realRoot, realPath, err := resolveExistingProjectPath(projectRoot, path)
+	if err != nil {
+		return fmt.Errorf("sandbox.cwd %q: %w", cwd, err)
+	}
+	if err := validateResolvedUnderRoot(realRoot, realPath); err != nil {
+		return fmt.Errorf("sandbox.cwd %q: %w", cwd, err)
+	}
+	info, err := os.Stat(realPath)
+	if err != nil {
+		return fmt.Errorf("sandbox.cwd %q: %w", cwd, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("sandbox.cwd %q must be a directory", cwd)
+	}
+	return nil
+}
+
+func validateBubblewrapMountConfig(mounts BubblewrapMountConfig) error {
+	if err := validatePresetMountMode("sandbox.bubblewrap.mounts.repo", mounts.Repo, false); err != nil {
+		return err
+	}
+	if err := validatePresetMountMode("sandbox.bubblewrap.mounts.beads", mounts.Beads, true); err != nil {
+		return err
+	}
+	if err := validatePresetMountMode("sandbox.bubblewrap.mounts.codex_home", mounts.CodexHome, false); err != nil {
+		return err
+	}
+	if err := validatePresetMountMode("sandbox.bubblewrap.mounts.tmp", mounts.Tmp, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePresetMountMode(name, mode string, allowAuto bool) error {
+	if mode == "" || mode == sandboxMountModeRO || mode == sandboxMountModeRW {
+		return nil
+	}
+	if allowAuto && mode == sandboxMountModeAuto {
+		return nil
+	}
+	allowed := "ro, rw"
+	if allowAuto {
+		allowed = "auto, ro, rw"
+	}
+	return fmt.Errorf("%s %q is invalid; allowed: %s", name, mode, allowed)
+}
+
+func validateSandboxEnvConfig(env SandboxEnvConfig) error {
+	for i, name := range env.Pass {
+		if name == "" {
+			return fmt.Errorf("sandbox.env.pass[%d] is empty", i)
+		}
+	}
+	for name := range env.Set {
+		if name == "" {
+			return errors.New("sandbox.env.set contains an empty variable name")
+		}
+	}
+	return nil
+}
+
+func validateSandboxMount(projectRoot string, index int, mount SandboxMount) error {
+	name := fmt.Sprintf("sandbox.mounts[%d]", index)
+	if mount.Host == "" {
+		return fmt.Errorf("%s.host is required", name)
+	}
+	if mount.Target == "" {
+		return fmt.Errorf("%s.target is required", name)
+	}
+	if mount.Mode != sandboxMountModeRO && mount.Mode != sandboxMountModeRW {
+		return fmt.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
+	}
+	if mount.Mode == sandboxMountModeRW && !filepath.IsAbs(mount.Host) {
+		clean := filepath.Clean(mount.Host)
+		if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("%s.host %q must not traverse outside repository root for writable mounts", name, mount.Host)
+		}
+	}
+
+	hostPath := mount.Host
+	if !filepath.IsAbs(hostPath) {
+		hostPath = filepath.Join(projectRoot, hostPath)
+	}
+	info, err := os.Stat(hostPath)
+	if err != nil {
+		if mount.Optional.Value && errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s.host %q does not exist", name, mount.Host)
+		}
+		return fmt.Errorf("%s.host %q: %w", name, mount.Host, err)
+	}
+	if info == nil {
+		return fmt.Errorf("%s.host %q does not exist", name, mount.Host)
+	}
+	if mount.Mode != sandboxMountModeRW || filepath.IsAbs(mount.Host) {
+		return nil
+	}
+
+	realRoot, realPath, err := resolveExistingProjectPath(projectRoot, hostPath)
+	if err != nil {
+		return fmt.Errorf("%s.host %q: %w", name, mount.Host, err)
+	}
+	if err := validateResolvedUnderRoot(realRoot, realPath); err != nil {
+		return fmt.Errorf("%s.host %q must not escape repository root for writable mounts", name, mount.Host)
+	}
+	return nil
+}
+
+func resolveExistingProjectPath(projectRoot, path string) (string, string, error) {
+	realRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", "", err
+	}
+	return realRoot, realPath, nil
+}
+
+func validateResolvedUnderRoot(realRoot, realPath string) error {
+	rel, err := filepath.Rel(realRoot, realPath)
+	if err != nil {
+		return fmt.Errorf("resolve path relative to repository root: %w", err)
+	}
+	if rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("path must not escape repository root")
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -71,6 +72,7 @@ type ProjectConfig struct {
 	Defaults  ProjectDefaults              `yaml:"defaults"`
 	Workflows map[string]WorkflowReference `yaml:"workflows"`
 	Agents    map[string]string            `yaml:"agents"`
+	Sandbox   *SandboxConfig               `yaml:"sandbox"`
 }
 
 // ProjectDefaults contains project-wide config defaults.
@@ -106,6 +108,70 @@ type LoopCapsConfig struct {
 	Enabled RequiredBool `yaml:"enabled"`
 	Soft    OptionalInt  `yaml:"soft"`
 	Hard    OptionalInt  `yaml:"hard"`
+}
+
+// SandboxConfig stores the durable Orc-managed sandbox configuration contract.
+// Process execution and bubblewrap argv construction are intentionally owned by
+// later sandbox runner work.
+type SandboxConfig struct {
+	Command    SandboxCommand   `yaml:"command"`
+	CWD        string           `yaml:"cwd"`
+	Bubblewrap BubblewrapConfig `yaml:"bubblewrap"`
+	Env        SandboxEnvConfig `yaml:"env"`
+	Mounts     []SandboxMount   `yaml:"mounts"`
+}
+
+// SandboxCommand declares the argv-only command launched by future sandbox
+// runner work.
+type SandboxCommand struct {
+	Argv []string `yaml:"argv"`
+}
+
+// UnmarshalYAML rejects shell-string sandbox commands in favor of argv-only
+// command declarations.
+func (c *SandboxCommand) UnmarshalYAML(data []byte) error {
+	var shellCommand string
+	if err := yaml.Unmarshal(data, &shellCommand); err == nil {
+		return errors.New("sandbox.command must use argv; shell-string commands are not supported")
+	}
+	type sandboxCommand SandboxCommand
+	var decoded sandboxCommand
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = SandboxCommand(decoded)
+	return nil
+}
+
+// BubblewrapConfig reserves sandbox runner bubblewrap options.
+type BubblewrapConfig struct {
+	Enabled bool                  `yaml:"enabled"`
+	Network RequiredBool          `yaml:"network"`
+	Mounts  BubblewrapMountConfig `yaml:"mounts"`
+}
+
+// BubblewrapMountConfig stores named preset mount policies. Detailed policy
+// translation to bwrap args is deferred to the sandbox runner and policy work.
+type BubblewrapMountConfig struct {
+	Repo      string `yaml:"repo"`
+	Beads     string `yaml:"beads"`
+	CodexHome string `yaml:"codex_home"`
+	Tmp       string `yaml:"tmp"`
+}
+
+// SandboxEnvConfig reserves explicit environment passthrough and override
+// policy. It does not imply whole-host environment passthrough.
+type SandboxEnvConfig struct {
+	Pass []string          `yaml:"pass"`
+	Set  map[string]string `yaml:"set"`
+}
+
+// SandboxMount declares an extra host mount for future sandbox runner work.
+type SandboxMount struct {
+	Host     string       `yaml:"host"`
+	Target   string       `yaml:"target"`
+	Mode     string       `yaml:"mode"`
+	Optional RequiredBool `yaml:"optional"`
 }
 
 // EffectiveLoopCaps is the resolved workflow loop-cap policy.

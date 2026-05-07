@@ -29,7 +29,7 @@ func Load(projectRoot string) (*Project, error) {
 	if err := readYAML(realOrcDir, configPath, &cfg); err != nil {
 		return nil, err
 	}
-	if err := validateProjectConfig(cfg); err != nil {
+	if err := validateProjectConfig(absRoot, &cfg); err != nil {
 		return nil, err
 	}
 
