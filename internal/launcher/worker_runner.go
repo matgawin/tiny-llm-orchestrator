@@ -3,6 +3,7 @@ package launcher
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/sandbox"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
@@ -157,6 +159,11 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 	if len(runtimeDirs) > 0 && len(runtime.Directories.Args) == 0 {
 		return nil, "", fmt.Errorf("runtime %q directories.args are required for runtime_dirs", runtimeID)
 	}
+	if sandboxMode {
+		if err := r.verifySandboxRuntimeDirs(runtimeID, runtimeDirs); err != nil {
+			return nil, "", err
+		}
+	}
 	if promptMode == runtimePromptDeliveryFile && values.promptFile == "" {
 		return nil, "", fmt.Errorf("runtime %q prompt.delivery=file requires a persisted prompt artifact path", runtimeID)
 	}
@@ -186,6 +193,74 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 		command = append(command, dirArgs...)
 	}
 	return command, promptMode, nil
+}
+
+func (r *workerRunner) verifySandboxRuntimeDirs(runtimeID string, runtimeDirs []string) error {
+	coverage, coverageErr := activeSandboxRuntimeDirCoverage()
+	for _, dir := range runtimeDirs {
+		resolved := effectiveRuntimeDir(r.loaded.Project.Root, dir)
+		if coverageErr != nil {
+			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, coverageErr.Error())
+		}
+		if !pathCoveredByAny(resolved, coverage) {
+			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, "not covered by the repository mount, project sandbox.mounts, or selected runtime sandbox requirements")
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, fmt.Sprintf("not visible inside the active sandbox: %v", err))
+		}
+		if !info.IsDir() {
+			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, "visible path is not a directory")
+		}
+	}
+	return nil
+}
+
+func activeSandboxRuntimeDirCoverage() ([]string, error) {
+	value := os.Getenv(sandbox.RuntimeDirCoverageEnv)
+	if value == "" {
+		return nil, fmt.Errorf("active sandbox runtime_dir coverage marker %s is not set", sandbox.RuntimeDirCoverageEnv)
+	}
+	var targets []string
+	if err := json.Unmarshal([]byte(value), &targets); err != nil {
+		return nil, fmt.Errorf("active sandbox runtime_dir coverage marker %s is invalid: %w", sandbox.RuntimeDirCoverageEnv, err)
+	}
+	coverage := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if filepath.IsAbs(target) {
+			coverage = append(coverage, filepath.Clean(target))
+		}
+	}
+	return coverage, nil
+}
+
+func pathCoveredByAny(path string, coverage []string) bool {
+	cleanPath := filepath.Clean(path)
+	for _, root := range coverage {
+		if pathCoveredBy(cleanPath, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathCoveredBy(path, root string) bool {
+	cleanRoot := filepath.Clean(root)
+	if !filepath.IsAbs(cleanRoot) {
+		return false
+	}
+	if path == cleanRoot {
+		return true
+	}
+	rel, err := filepath.Rel(cleanRoot, path)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func runtimeDirSandboxCoverageError(stepID, runtimeID, original, resolved, reason string) error {
+	return fmt.Errorf("runtime_dir sandbox coverage error for step %q runtime %q: runtime_dirs value %q resolved to %q: %s", stepID, runtimeID, original, resolved, reason)
 }
 
 type runtimePlaceholderValues struct {

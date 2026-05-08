@@ -1046,6 +1046,7 @@ func TestBuildSpecResolvesEnvSourcedRuntimeSandboxMount(t *testing.T) {
 		t.Fatalf("bwrap args = %#v, want env-sourced mount at same target", spec.Args)
 	}
 	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+source)
+	assertEnvContains(t, spec.Env, RuntimeDirCoverageEnv+"="+runtimeDirCoverageValue(root, []resolvedMount{{target: source}}))
 }
 
 func TestBuildSpecAllowsEnvSourcedSamePathRuntimeSandboxMountUnderHome(t *testing.T) {

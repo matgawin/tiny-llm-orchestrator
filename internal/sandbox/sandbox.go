@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -59,6 +60,10 @@ type BwrapSpec struct {
 	CWD  string
 	Env  []string
 }
+
+// RuntimeDirCoverageEnv carries the sandbox-visible mount targets that may
+// cover runtime_dirs for worker launches inside an active Orc sandbox.
+const RuntimeDirCoverageEnv = "ORC_SANDBOX_RUNTIME_DIR_COVERAGE"
 
 // Run loads project sandbox config, starts bwrap, and waits for it to finish.
 func Run(ctx context.Context, opts Options) error {
@@ -248,7 +253,21 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 	if pathExists(beadsPath) {
 		policy.beadsPath = beadsPath
 	}
+	policy.env[RuntimeDirCoverageEnv] = runtimeDirCoverageValue(root, extraMounts)
 	return policy, nil
+}
+
+func runtimeDirCoverageValue(root string, extraMounts []resolvedMount) string {
+	targets := make([]string, 0, 1+len(extraMounts))
+	targets = append(targets, filepath.Clean(root))
+	for _, mount := range extraMounts {
+		targets = append(targets, filepath.Clean(mount.target))
+	}
+	value, err := json.Marshal(targets)
+	if err != nil {
+		return "[]"
+	}
+	return string(value)
 }
 
 func hostEnvMap(opts Options) map[string]string {

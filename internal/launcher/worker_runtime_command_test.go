@@ -1,6 +1,8 @@
 package launcher
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/sandbox"
 )
 
 const launcherPlanStep = "plan"
@@ -130,6 +133,218 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandSandboxRuntimeDirsAllowRepositoryRelativeDirs(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "shared"), 0o750); err != nil {
+		t.Fatalf("create shared runtime dir: %v", err)
+	}
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+	setRuntimeDirCoverageEnv(t, root)
+	runtime := runtimeWithDirs("recorder")
+	workflow := config.Workflow{
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{"shared", "shared"}},
+		Steps: map[string]config.Step{
+			launcherPlanStep: {Agent: "planner"},
+		},
+	}
+
+	command, _, err := runtimeCommandForTest(root, workflow, runtime)
+	if err != nil {
+		t.Fatalf("runtimeCommand returned error: %v", err)
+	}
+	want := []string{"recorder", "--dir", filepath.Join(root, "shared"), "--dir", filepath.Join(root, "shared")}
+	if !slices.Equal(command, want) {
+		t.Fatalf("command = %#v, want duplicate runtime_dirs preserved as %#v", command, want)
+	}
+}
+
+func TestRuntimeCommandSandboxRuntimeDirsAllowProjectSandboxMount(t *testing.T) {
+	root := t.TempDir()
+	external := filepath.Join(t.TempDir(), "external-worktree")
+	if err := os.Mkdir(external, 0o750); err != nil {
+		t.Fatalf("create external runtime dir: %v", err)
+	}
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+	setRuntimeDirCoverageEnv(t, root, external)
+	runtime := runtimeWithDirs("recorder")
+	workflow := config.Workflow{
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
+		Steps: map[string]config.Step{
+			launcherPlanStep: {Agent: "planner"},
+		},
+	}
+	sandboxConfig := config.SandboxConfig{
+		Mounts: []config.SandboxMount{{Host: external, Target: external, Mode: "rw"}},
+	}
+
+	command, _, err := runtimeCommandForTestWithSandbox(root, workflow, runtime, sandboxConfig)
+	if err != nil {
+		t.Fatalf("runtimeCommand returned error: %v", err)
+	}
+	want := []string{"recorder", "--dir", external}
+	if !slices.Equal(command, want) {
+		t.Fatalf("command = %#v, want %#v", command, want)
+	}
+}
+
+func TestRuntimeCommandSandboxRuntimeDirsAllowRuntimeSandboxRequirement(t *testing.T) {
+	root := t.TempDir()
+	external := filepath.Join(t.TempDir(), "runtime-required")
+	if err := os.Mkdir(external, 0o750); err != nil {
+		t.Fatalf("create runtime-required dir: %v", err)
+	}
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+	setRuntimeDirCoverageEnv(t, root, external)
+	runtime := runtimeWithDirs("recorder")
+	runtime.Sandbox.Requirements.Mounts = []config.RuntimeSandboxMount{
+		{Host: external, Target: config.RuntimeSandboxMountTarget{Path: external}, Mode: "rw"},
+	}
+	workflow := config.Workflow{
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
+		Steps: map[string]config.Step{
+			launcherPlanStep: {Agent: "planner"},
+		},
+	}
+
+	command, _, err := runtimeCommandForTest(root, workflow, runtime)
+	if err != nil {
+		t.Fatalf("runtimeCommand returned error: %v", err)
+	}
+	want := []string{"recorder", "--dir", external}
+	if !slices.Equal(command, want) {
+		t.Fatalf("command = %#v, want %#v", command, want)
+	}
+}
+
+func TestRuntimeCommandSandboxRuntimeDirsUseActiveSandboxCoverage(t *testing.T) {
+	root := t.TempDir()
+	external := filepath.Join(t.TempDir(), "runtime-required")
+	if err := os.Mkdir(external, 0o750); err != nil {
+		t.Fatalf("create runtime-required dir: %v", err)
+	}
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+	setRuntimeDirCoverageEnv(t, root, external)
+	runtime := runtimeWithDirs("recorder")
+	runtime.Sandbox.Requirements.Mounts = []config.RuntimeSandboxMount{
+		{
+			ID: "config_home",
+			Source: config.RuntimeSandboxMountSource{
+				Env: "RECORDER_HOME",
+			},
+			Target: config.RuntimeSandboxMountTarget{
+				EnvSameAsSource: true,
+			},
+			Mode: "rw",
+		},
+	}
+	workflow := config.Workflow{
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
+		Steps: map[string]config.Step{
+			launcherPlanStep: {Agent: "planner"},
+		},
+	}
+
+	command, _, err := runtimeCommandForTest(root, workflow, runtime)
+	if err != nil {
+		t.Fatalf("runtimeCommand returned error: %v", err)
+	}
+	want := []string{"recorder", "--dir", external}
+	if !slices.Equal(command, want) {
+		t.Fatalf("command = %#v, want %#v", command, want)
+	}
+}
+
+func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		setup   func(t *testing.T, root string) string
+		wantErr string
+	}{
+		{
+			name: "missing",
+			setup: func(t *testing.T, root string) string {
+				return "missing"
+			},
+			wantErr: "not visible inside the active sandbox",
+		},
+		{
+			name: "file",
+			setup: func(t *testing.T, root string) string {
+				path := filepath.Join(root, "runtime-file")
+				if err := os.WriteFile(path, []byte("not a dir"), 0o640); err != nil {
+					t.Fatalf("create runtime file: %v", err)
+				}
+				return "runtime-file"
+			},
+			wantErr: "visible path is not a directory",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := tt.setup(t, root)
+			t.Setenv("ORC_SANDBOX", "1")
+			t.Setenv("ORC_SANDBOX_ROOT", root)
+			setRuntimeDirCoverageEnv(t, root)
+			runtime := runtimeWithDirs("recorder")
+			workflow := config.Workflow{
+				Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{dir}},
+				Steps: map[string]config.Step{
+					launcherPlanStep: {Agent: "planner"},
+				},
+			}
+
+			_, _, err := runtimeCommandForTest(root, workflow, runtime)
+			resolved := effectiveRuntimeDir(root, dir)
+			for _, want := range []string{
+				`step "plan"`,
+				`runtime "recorder"`,
+				`runtime_dirs value "` + dir + `"`,
+				`resolved to "` + resolved + `"`,
+				tt.wantErr,
+			} {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("runtimeCommand error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeCommandSandboxRuntimeDirsRejectUncoveredAbsoluteDir(t *testing.T) {
+	root := t.TempDir()
+	external := filepath.Join(t.TempDir(), "unmounted")
+	if err := os.Mkdir(external, 0o750); err != nil {
+		t.Fatalf("create unmounted dir: %v", err)
+	}
+	t.Setenv("ORC_SANDBOX", "1")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+	setRuntimeDirCoverageEnv(t, root)
+	runtime := runtimeWithDirs("recorder")
+	workflow := config.Workflow{
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
+		Steps: map[string]config.Step{
+			launcherPlanStep: {Agent: "planner"},
+		},
+	}
+
+	_, _, err := runtimeCommandForTest(root, workflow, runtime)
+	for _, want := range []string{
+		`step "plan"`,
+		`runtime "recorder"`,
+		`runtime_dirs value "` + external + `"`,
+		`resolved to "` + external + `"`,
+		"not covered by the repository mount",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("runtimeCommand error = %v, want %q", err, want)
+		}
+	}
+}
+
 func TestRuntimeCommandRejectsPlaceholderWithoutValue(t *testing.T) {
 	_, err := substituteRuntimePlaceholders([]string{"--model", "{model}"}, runtimePlaceholderValues{})
 	if err == nil {
@@ -151,6 +366,10 @@ func TestRuntimeCommandRejectsUnknownPlaceholder(t *testing.T) {
 }
 
 func runtimeCommandForTest(root string, workflow config.Workflow, runtime config.Runtime) ([]string, string, error) {
+	return runtimeCommandForTestWithSandbox(root, workflow, runtime, config.SandboxConfig{})
+}
+
+func runtimeCommandForTestWithSandbox(root string, workflow config.Workflow, runtime config.Runtime, sandboxConfig config.SandboxConfig) ([]string, string, error) {
 	stepID := launcherPlanStep
 	agentID := "planner"
 	if _, ok := workflow.Steps[launcherCodeStep]; ok {
@@ -162,7 +381,7 @@ func runtimeCommandForTest(root string, workflow config.Workflow, runtime config
 			Project: &config.Project{
 				Root: root,
 				Config: config.ProjectConfig{
-					Sandbox: &config.SandboxConfig{},
+					Sandbox: &sandboxConfig,
 				},
 				Runtimes: map[string]config.Runtime{runtime.ID: runtime},
 			},
@@ -179,4 +398,25 @@ func runtimeCommandForTest(root string, workflow config.Workflow, runtime config
 		},
 	}
 	return runner.runtimeCommand()
+}
+
+func runtimeWithDirs(id string) config.Runtime {
+	return config.Runtime{
+		ID: id,
+		Command: config.RuntimeCommand{
+			Executable: id,
+		},
+		Prompt:      config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
+		Directories: config.RuntimeDirectories{Supported: true, Args: []string{"--dir", "{dir}"}},
+		Sandbox:     config.RuntimeSandbox{Supported: true},
+	}
+}
+
+func setRuntimeDirCoverageEnv(t *testing.T, targets ...string) {
+	t.Helper()
+	value, err := json.Marshal(targets)
+	if err != nil {
+		t.Fatalf("marshal runtime dir coverage: %v", err)
+	}
+	t.Setenv(sandbox.RuntimeDirCoverageEnv, string(value))
 }
