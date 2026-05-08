@@ -192,11 +192,13 @@ exactly `synthetic` and `host_path`. `synthetic` keeps sandbox `HOME` at
 path without binding the whole host home directory. Current Codex compatibility
 still maps the default host `.codex` directory to the matching sandbox home
 target, and an absolute host `CODEX_HOME` is mounted read-write at the same
-absolute path in both modes. The approved runtime descriptor schema will move
-that Codex config-home behavior into generic runtime sandbox requirement data.
+absolute path in both modes. The runtime descriptor schema can express that
+Codex config-home behavior as generic runtime sandbox requirement data; the
+follow-up Codex migration moves the current compatibility behavior into the
+descriptor.
 See [../features/sandbox-run.md](../features/sandbox-run.md) for current HOME
 resolution and [configuration-runtimes.md](configuration-runtimes.md) for the
-approved descriptor schema design.
+descriptor schema.
 
 `sandbox.path.mode` is optional and defaults to `none`. Allowed values are
 exactly `none` and `host_entries`. `none` preserves the existing PATH and mount

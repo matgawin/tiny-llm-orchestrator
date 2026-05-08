@@ -99,8 +99,8 @@ orchestration. By default it includes:
 - a read-write bind of the repository root at the same absolute path
 - a read-write bind of `../.beads` from the repository root when that directory
   exists; missing Beads state is skipped as an optional default
-- a read-write Codex config bind as current compatibility behavior until
-  `main-b77.2` moves that policy into runtime descriptor data
+- a read-write Codex config bind as current compatibility behavior until the
+  follow-up Codex migration moves that policy into runtime descriptor data
 - a configurable sandbox home policy; the real host home directory is never
   bound wholesale by default
 - an optional `sandbox.path.mode: host_entries` policy that mounts existing
@@ -134,13 +134,13 @@ environment policy before bubblewrap starts. Static fixed-value conflicts fail
 when project config is loaded; missing host variables requested through
 pass-through are skipped the same way as `sandbox.env.pass`.
 
-The approved `main-b77.2` runtime sandbox design adds descriptor-owned
-env-sourced mounts and `sandbox.requirements.env.set_from_mount.<NAME>.value:
-target`, so runtime env values can be derived from resolved mount targets while
-building the bubblewrap spec. See
+Runtime descriptor requirements support descriptor-owned env-sourced mounts and
+`sandbox.requirements.env.set_from_mount.<NAME>.value: target`, so runtime env
+values can be derived from resolved mount targets while building the bubblewrap
+spec. See
 [../reference/configuration-runtimes.md](../reference/configuration-runtimes.md)
-for the schema design. Until that implementation lands, Codex config home
-handling remains compatibility behavior in the sandbox builder.
+for the schema. Codex config home handling remains compatibility behavior in
+the sandbox builder until the follow-up descriptor migration lands.
 
 ## PATH Mount Policy
 
@@ -205,12 +205,13 @@ When host `CODEX_HOME` is set in either home mode, current compatibility
 requires an absolute path, mounts it read-write at the same absolute path inside
 the sandbox, and sets sandbox `CODEX_HOME` to that path.
 
-After `main-b77.2`, this Codex-specific compatibility should be represented as
-generic runtime descriptor data: use an absolute `CODEX_HOME` source when set,
-otherwise fall back to host HOME plus `.codex`, create the resolved source when
-requested, mount it read-write, and derive sandbox `CODEX_HOME` from the
-resolved target path. The approved target behavior preserves the same
-synthetic-home and host-path results described above.
+The generic runtime descriptor schema can represent this Codex-specific
+compatibility as data: use an absolute `CODEX_HOME` source when set, otherwise
+fall back to host HOME plus `.codex`, create the resolved source when requested,
+mount it read-write, and derive sandbox `CODEX_HOME` from the resolved target
+path. The follow-up Codex migration moves the current compatibility behavior
+into the scaffolded descriptor while preserving the same synthetic-home and
+host-path results described above.
 
 ## Extra Mounts
 
@@ -218,11 +219,11 @@ Extra `sandbox.mounts` entries support `ro` and `rw` modes. Relative host paths
 resolve from the repository root. Missing mounts are errors unless
 `optional: true` is set, in which case Orc skips the missing mount.
 Runtime descriptor `sandbox.requirements.mounts` entries use the same fields
-for simple static mounts. The approved `main-b77.2` design also adds extended
-mounts with `source.env`, `source.fallback.host_home`, `source.create`,
-`target.env_same_as_source`, `target.fallback.sandbox_home`, and optional `id`
-for `env.set_from_mount` references. Those extended runtime mounts will be
-resolved while building the bubblewrap spec, before the sandbox process starts.
+for simple static mounts. Extended runtime mounts support `source.env`,
+`source.fallback.host_home`, `source.create`, `target.env_same_as_source`,
+`target.fallback.sandbox_home`, and optional `id` for `env.set_from_mount`
+references. Those extended runtime mounts are resolved while building the
+bubblewrap spec, before the sandbox process starts.
 Static target and duplicate declaration conflicts fail during config load;
 host-dependent missing paths, explicit creation, env source resolution,
 env-from-mount reference resolution, and symlink escape checks fail during

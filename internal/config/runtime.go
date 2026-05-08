@@ -158,28 +158,124 @@ func validateRuntimeSandbox(runtime Runtime) error {
 	if runtime.Sandbox.Required && !runtime.Sandbox.Supported {
 		return errors.New("sandbox.required requires sandbox.supported=true")
 	}
-	if err := validateSandboxEnvConfig(runtime.Sandbox.Requirements.Env); err != nil {
+	if err := validateRuntimeSandboxEnvConfig(runtime.Sandbox.Requirements.Env); err != nil {
 		return fmt.Errorf("sandbox.requirements.env: %w", err)
 	}
+	mountIDs := map[string]struct{}{}
 	for i, mount := range runtime.Sandbox.Requirements.Mounts {
-		name := fmt.Sprintf("sandbox.requirements.mounts[%d]", i)
-		if mount.Host == "" {
-			return fmt.Errorf("%s.host is required", name)
-		}
-		if err := validateRuntimeRequirementHost(name+".host", mount.Host); err != nil {
+		if err := validateRuntimeSandboxMount(i, mount, mountIDs); err != nil {
 			return err
 		}
-		if mount.Target == "" {
-			return fmt.Errorf("%s.target is required", name)
+	}
+	for name, ref := range runtime.Sandbox.Requirements.Env.SetFromMount {
+		if err := validateSandboxEnvName(name); err != nil {
+			return fmt.Errorf("sandbox.requirements.env.set_from_mount[%q]: %w", name, err)
 		}
-		if err := validateSandboxMountTarget("", SandboxHomeModeSynthetic, mount.Target); err != nil {
-			return fmt.Errorf("%s.target %q: %w", name, mount.Target, err)
+		if ref.Mount == "" {
+			return fmt.Errorf("sandbox.requirements.env.set_from_mount[%q].mount is required", name)
 		}
-		if mount.Mode != sandboxMountModeRO && mount.Mode != sandboxMountModeRW {
-			return fmt.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
+		if _, ok := mountIDs[ref.Mount]; !ok {
+			return fmt.Errorf("sandbox.requirements.env.set_from_mount[%q].mount %q does not reference a sandbox.requirements.mounts id", name, ref.Mount)
+		}
+		if ref.Value != "target" {
+			return fmt.Errorf("sandbox.requirements.env.set_from_mount[%q].value %q is invalid; allowed: target", name, ref.Value)
 		}
 	}
 	return nil
+}
+
+func validateRuntimeSandboxEnvConfig(env RuntimeSandboxEnvConfig) error {
+	if err := validateSandboxEnvConfig(SandboxEnvConfig{Pass: env.Pass, Set: env.Set}); err != nil {
+		return err
+	}
+	for name := range env.SetFromMount {
+		if err := validateSandboxEnvName(name); err != nil {
+			return fmt.Errorf("set_from_mount[%q]: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func validateRuntimeSandboxMount(index int, mount RuntimeSandboxMount, mountIDs map[string]struct{}) error {
+	name := fmt.Sprintf("sandbox.requirements.mounts[%d]", index)
+	if mount.ID != "" {
+		if err := validateConfigID(name+".id", mount.ID); err != nil {
+			return err
+		}
+		if _, ok := mountIDs[mount.ID]; ok {
+			return fmt.Errorf("%s.id %q duplicates another sandbox.requirements.mounts id", name, mount.ID)
+		}
+		mountIDs[mount.ID] = struct{}{}
+	}
+	if mount.Mode != sandboxMountModeRO && mount.Mode != sandboxMountModeRW {
+		return fmt.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
+	}
+	hasSource := runtimeMountHasSource(mount.Source)
+	switch {
+	case mount.Host != "" && hasSource:
+		return fmt.Errorf("%s must not combine simple host with extended source", name)
+	case mount.Host == "" && !hasSource:
+		return fmt.Errorf("%s.host is required", name)
+	case mount.Host != "":
+		return validateRuntimeSimpleSandboxMount(name, mount)
+	default:
+		return validateRuntimeExtendedSandboxMount(name, mount)
+	}
+}
+
+func validateRuntimeSimpleSandboxMount(name string, mount RuntimeSandboxMount) error {
+	if err := validateRuntimeRequirementHost(name+".host", mount.Host); err != nil {
+		return err
+	}
+	if mount.Target.Path == "" {
+		return fmt.Errorf("%s.target is required", name)
+	}
+	if runtimeMountHasStructuredTarget(mount.Target) {
+		return fmt.Errorf("%s.target must use either simple path or extended target fields, not both", name)
+	}
+	if err := validateSandboxMountTarget("", SandboxHomeModeSynthetic, mount.Target.Path); err != nil {
+		return fmt.Errorf("%s.target %q: %w", name, mount.Target.Path, err)
+	}
+	return nil
+}
+
+func validateRuntimeExtendedSandboxMount(name string, mount RuntimeSandboxMount) error {
+	if mount.Target.Path != "" {
+		return fmt.Errorf("%s.target must use extended target fields when source is extended", name)
+	}
+	if mount.Source.Env == "" {
+		return fmt.Errorf("%s.source.env is required", name)
+	}
+	if err := validateSandboxEnvName(mount.Source.Env); err != nil {
+		return fmt.Errorf("%s.source.env: %w", name, err)
+	}
+	if mount.Source.Fallback.HostHome != "" {
+		if err := validateCleanRelativeNoExpansion(name+".source.fallback.host_home", mount.Source.Fallback.HostHome); err != nil {
+			return err
+		}
+	}
+	if !mount.Target.EnvSameAsSource {
+		return fmt.Errorf("%s.target.env_same_as_source must be true for env-sourced mounts", name)
+	}
+	if mount.Source.Fallback.HostHome != "" {
+		if mount.Target.Fallback.SandboxHome == "" {
+			return fmt.Errorf("%s.target.fallback.sandbox_home is required when source.fallback.host_home is set", name)
+		}
+		if err := validateCleanRelativeNoExpansion(name+".target.fallback.sandbox_home", mount.Target.Fallback.SandboxHome); err != nil {
+			return err
+		}
+	} else if mount.Target.Fallback.SandboxHome != "" {
+		return fmt.Errorf("%s.target.fallback.sandbox_home requires source.fallback.host_home", name)
+	}
+	return nil
+}
+
+func runtimeMountHasSource(source RuntimeSandboxMountSource) bool {
+	return source.Env != "" || source.Fallback.HostHome != "" || source.Create
+}
+
+func runtimeMountHasStructuredTarget(target RuntimeSandboxMountTarget) bool {
+	return target.EnvSameAsSource || target.Fallback.SandboxHome != ""
 }
 
 func validateRuntimeRequirementHost(name, host string) error {
@@ -195,6 +291,20 @@ func validateRuntimeRequirementHost(name, host string) error {
 	clean := filepath.Clean(host)
 	if host != clean || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("%s %q must be clean and stay under repository root", name, host)
+	}
+	return nil
+}
+
+func validateCleanRelativeNoExpansion(name, value string) error {
+	if strings.HasPrefix(value, "~") || strings.ContainsAny(value, "$`") {
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
+	}
+	if filepath.IsAbs(value) {
+		return fmt.Errorf("%s %q must be relative", name, value)
+	}
+	clean := filepath.Clean(value)
+	if value != clean || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s %q must be clean and stay under its base directory", name, value)
 	}
 	return nil
 }
@@ -222,7 +332,7 @@ func validateSelectedRuntimeSandboxRequirementConflicts(sandbox *SandboxConfig, 
 		if err := merged.addEnvSet(prefix+".env.set", runtime.Sandbox.Requirements.Env.Set); err != nil {
 			return err
 		}
-		if err := merged.addMounts(prefix+".mounts", runtime.Sandbox.Requirements.Mounts); err != nil {
+		if err := merged.addRuntimeMounts(prefix+".mounts", runtime.Sandbox.Requirements.Mounts); err != nil {
 			return err
 		}
 	}
@@ -253,21 +363,43 @@ func (s sandboxRequirementSet) addEnvSet(source string, env map[string]string) e
 
 func (s sandboxRequirementSet) addMounts(source string, mounts []SandboxMount) error {
 	for i, mount := range mounts {
-		target := filepath.Clean(mount.Target)
-		next := sandboxRequirementMount{
+		if err := s.addStaticMountDescriptor(filepath.Clean(mount.Target), sandboxRequirementMount{
 			host:     cleanSandboxRequirementHost(mount.Host),
 			mode:     mount.Mode,
 			optional: mount.Optional.Value,
 			source:   fmt.Sprintf("%s[%d]", source, i),
+		}); err != nil {
+			return err
 		}
-		existing, ok := s.mounts[target]
-		if !ok {
-			s.mounts[target] = next
+	}
+	return nil
+}
+
+func (s sandboxRequirementSet) addRuntimeMounts(source string, mounts []RuntimeSandboxMount) error {
+	for i, mount := range mounts {
+		if runtimeMountHasSource(mount.Source) {
 			continue
 		}
-		if existing.host != next.host || existing.mode != next.mode || existing.optional != next.optional {
-			return fmt.Errorf("%s target %q conflicts with %s target %q", next.source, target, existing.source, target)
+		if err := s.addStaticMountDescriptor(filepath.Clean(mount.Target.Path), sandboxRequirementMount{
+			host:     cleanSandboxRequirementHost(mount.Host),
+			mode:     mount.Mode,
+			optional: mount.Optional.Value,
+			source:   fmt.Sprintf("%s[%d]", source, i),
+		}); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (s sandboxRequirementSet) addStaticMountDescriptor(target string, next sandboxRequirementMount) error {
+	existing, ok := s.mounts[target]
+	if !ok {
+		s.mounts[target] = next
+		return nil
+	}
+	if existing.host != next.host || existing.mode != next.mode || existing.optional != next.optional {
+		return fmt.Errorf("%s target %q conflicts with %s target %q", next.source, target, existing.source, target)
 	}
 	return nil
 }

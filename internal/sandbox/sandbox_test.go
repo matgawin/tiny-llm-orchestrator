@@ -14,7 +14,11 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 )
 
-const testBwrapPath = "/usr/bin/bwrap"
+const (
+	testBwrapPath      = "/usr/bin/bwrap"
+	testCustomHomePath = "/opt/custom-home"
+	testHomePath       = "/home/user"
+)
 
 func TestBuildSpecCreatesHomeDirsBeforeRepoBind(t *testing.T) {
 	root := "/home/tester/project"
@@ -335,7 +339,7 @@ func TestBuildSpecManagedHomeAndCodexHomeOverrideSandboxEnvSet(t *testing.T) {
 
 func TestBuildSpecHostPathHomeAllowsExplicitSubpathMount(t *testing.T) {
 	root := t.TempDir()
-	home := "/home/user"
+	home := testHomePath
 	hostBun := filepath.Join(root, "bun")
 	codexHome := filepath.Join(home, ".codex")
 	project := sandboxProject(root, config.SandboxConfig{
@@ -368,13 +372,13 @@ func TestBuildSpecHostPathHomeRejectsHomeTargetAndAncestors(t *testing.T) {
 		target string
 		want   string
 	}{
-		{name: "exact home", target: "/home/user", want: "must not override active sandbox HOME"},
+		{name: "exact home", target: testHomePath, want: "must not override active sandbox HOME"},
 		{name: "ancestor", target: "/home", want: "must not override ancestor of active sandbox HOME"},
 		{name: "sibling home", target: "/home/other/.cache", want: "must not override critical sandbox path /home"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			home := "/home/user"
+			home := testHomePath
 			hostMount := filepath.Join(root, "mount")
 			codexHome := filepath.Join(home, ".codex")
 			project := sandboxProject(root, config.SandboxConfig{
@@ -522,7 +526,7 @@ func TestBuildSpecPathHostEntriesWorksInHostPathHomeMode(t *testing.T) {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
 	assertPathMount(t, spec.Args, "/home/user/.bun/bin", "/home/user/.bun/bin")
-	if containsSequence(spec.Args, "--bind", "/home/user", "/home/user") {
+	if containsSequence(spec.Args, "--bind", testHomePath, testHomePath) {
 		t.Fatalf("bwrap args = %#v, must not bind whole host HOME for PATH mount", spec.Args)
 	}
 }
@@ -569,7 +573,7 @@ func TestBuildSpecPathHostEntriesRejectsUnsafeTargets(t *testing.T) {
 		want string
 	}{
 		{name: "active sandbox home", path: "/home/orc", want: "must not mount active sandbox HOME"},
-		{name: "resolved host home", path: "/home/user", want: "must not mount resolved host HOME"},
+		{name: "resolved host home", path: testHomePath, want: "must not mount resolved host HOME"},
 		{name: "home ancestor", path: "/home", want: "must not mount ancestor of active sandbox HOME"},
 		{name: "repository target", path: "/repo/project", want: "must not override the repository mount"},
 		{name: "repository ancestor", path: "/repo", want: "must not override the repository mount"},
@@ -783,12 +787,12 @@ func TestBuildSpecIncludesSelectedRuntimeSandboxRequirements(t *testing.T) {
 			Sandbox: config.RuntimeSandbox{
 				Supported: true,
 				Requirements: config.RuntimeSandboxRequirements{
-					Env: config.SandboxEnvConfig{
+					Env: config.RuntimeSandboxEnvConfig{
 						Pass: []string{"CUSTOM_TOKEN"},
 						Set:  map[string]string{"ORC_RUNTIME": "custom"},
 					},
-					Mounts: []config.SandboxMount{
-						{Host: ".orc/cache/custom", Target: "/workspace/.orc/cache/custom", Mode: "rw"},
+					Mounts: []config.RuntimeSandboxMount{
+						{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: "/workspace/.orc/cache/custom"}, Mode: "rw"},
 					},
 				},
 			},
@@ -838,8 +842,8 @@ func TestBuildSpecRejectsMissingRequiredRuntimeSandboxMount(t *testing.T) {
 			Sandbox: config.RuntimeSandbox{
 				Supported: true,
 				Requirements: config.RuntimeSandboxRequirements{
-					Mounts: []config.SandboxMount{
-						{Host: ".orc/cache/missing", Target: "/workspace/.orc/cache/missing", Mode: "ro"},
+					Mounts: []config.RuntimeSandboxMount{
+						{Host: ".orc/cache/missing", Target: config.RuntimeSandboxMountTarget{Path: "/workspace/.orc/cache/missing"}, Mode: "ro"},
 					},
 				},
 			},
@@ -917,8 +921,8 @@ func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
 					Sandbox: config.RuntimeSandbox{
 						Supported: true,
 						Requirements: config.RuntimeSandboxRequirements{
-							Mounts: []config.SandboxMount{
-								{Host: ".orc/cache/custom", Target: tt.target(root), Mode: "ro"},
+							Mounts: []config.RuntimeSandboxMount{
+								{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: tt.target(root)}, Mode: "ro"},
 							},
 						},
 					},
@@ -935,6 +939,525 @@ func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
 				t.Fatalf("BuildSpec error = %v, want runtime protected target error containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildSpecResolvesEnvSourcedRuntimeSandboxMount(t *testing.T) {
+	root := t.TempDir()
+	source := testCustomHomePath
+	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	}, config.RuntimeSandboxRequirements{
+		Env: config.RuntimeSandboxEnvConfig{
+			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
+				"CUSTOM_HOME": {Mount: "config_home", Value: "target"},
+			},
+		},
+		Mounts: []config.RuntimeSandboxMount{
+			{
+				ID: "config_home",
+				Source: config.RuntimeSandboxMountSource{
+					Env: "CUSTOM_HOME",
+					Fallback: config.RuntimeSandboxMountSourceFallback{
+						HostHome: ".custom",
+					},
+				},
+				Target: config.RuntimeSandboxMountTarget{
+					EnvSameAsSource: true,
+					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: ".custom"},
+				},
+				Mode: "rw",
+			},
+		},
+	})
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		Stat:        fakePathStat(map[string]bool{source: true}),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			source: source,
+		}, nil),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	if !containsSequence(spec.Args, "--bind", source, source) {
+		t.Fatalf("bwrap args = %#v, want env-sourced mount at same target", spec.Args)
+	}
+	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+source)
+}
+
+func TestBuildSpecAllowsEnvSourcedSamePathRuntimeSandboxMountUnderHome(t *testing.T) {
+	root := t.TempDir()
+	source := "/home/user/.custom"
+	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeSynthetic},
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		Stat:        fakePathStat(map[string]bool{source: true}),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			source: source,
+		}, nil),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	if !containsSequence(spec.Args, "--bind", source, source) {
+		t.Fatalf("bwrap args = %#v, want env-sourced /home mount at same target", spec.Args)
+	}
+	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+source)
+}
+
+func TestBuildSpecRejectsEnvSourcedSamePathRuntimeSandboxMountOverRepository(t *testing.T) {
+	root := "/home/user/project"
+	source := testHomePath
+	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeSynthetic},
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
+
+	_, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		Stat:        fakePathStat(map[string]bool{source: true}),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			source: source,
+		}, nil),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=/tmp/host-home", "CUSTOM_HOME=" + source}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must not override the repository mount") {
+		t.Fatalf("BuildSpec error = %v, want repository mount conflict", err)
+	}
+}
+
+func TestBuildSpecEnvFromMountUsesRuntimeScopedMountID(t *testing.T) {
+	root := t.TempDir()
+	recorderSource := "/opt/recorder-home"
+	customSource := testCustomHomePath
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+	project.Workflows = map[string]config.Workflow{
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "recorder"},
+			Steps: map[string]config.Step{
+				"code":   {Agent: "coder"},
+				"review": {Agent: "reviewer", Runtime: "custom"},
+			},
+		},
+	}
+	project.Runtimes = map[string]config.Runtime{
+		"custom": {
+			ID: "custom",
+			Sandbox: config.RuntimeSandbox{
+				Supported:    true,
+				Requirements: runtimeRequirementsWithEnvMount("CUSTOM_HOME"),
+			},
+		},
+		"recorder": {
+			ID: "recorder",
+			Sandbox: config.RuntimeSandbox{
+				Supported:    true,
+				Requirements: runtimeRequirementsWithEnvMount("RECORDER_HOME"),
+			},
+		},
+	}
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), customSource, recorderSource),
+		Stat: fakePathStat(map[string]bool{
+			customSource:   true,
+			recorderSource: true,
+		}),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			customSource:   customSource,
+			recorderSource: recorderSource,
+		}, nil),
+		Environ: func() []string {
+			return []string{
+				"PATH=/usr/bin",
+				"HOME=" + root,
+				"CUSTOM_HOME=" + customSource,
+				"RECORDER_HOME=" + recorderSource,
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+customSource)
+	assertEnvContains(t, spec.Env, "RECORDER_HOME="+recorderSource)
+}
+
+func TestBuildSpecRejectsConflictingEnvFromMountNamesAcrossRuntimes(t *testing.T) {
+	root := t.TempDir()
+	recorderSource := "/opt/recorder-home"
+	customSource := testCustomHomePath
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+	project.Workflows = map[string]config.Workflow{
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "recorder"},
+			Steps: map[string]config.Step{
+				"code":   {Agent: "coder"},
+				"review": {Agent: "reviewer", Runtime: "custom"},
+			},
+		},
+	}
+	project.Runtimes = map[string]config.Runtime{
+		"custom": {
+			ID: "custom",
+			Sandbox: config.RuntimeSandbox{
+				Supported:    true,
+				Requirements: runtimeRequirementsWithEnvMountSource("CUSTOM_HOME", "CUSTOM_SOURCE", ".custom"),
+			},
+		},
+		"recorder": {
+			ID: "recorder",
+			Sandbox: config.RuntimeSandbox{
+				Supported:    true,
+				Requirements: runtimeRequirementsWithEnvMountSource("CUSTOM_HOME", "RECORDER_SOURCE", ".recorder"),
+			},
+		},
+	}
+
+	_, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), customSource, recorderSource),
+		Stat: fakePathStat(map[string]bool{
+			customSource:   true,
+			recorderSource: true,
+		}),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			customSource:   customSource,
+			recorderSource: recorderSource,
+		}, nil),
+		Environ: func() []string {
+			return []string{
+				"PATH=/usr/bin",
+				"HOME=" + root,
+				"CUSTOM_SOURCE=" + customSource,
+				"RECORDER_SOURCE=" + recorderSource,
+			}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `runtime "`) || !strings.Contains(err.Error(), `sandbox.requirements.env.set_from_mount["CUSTOM_HOME"] conflicts with another sandbox environment value for CUSTOM_HOME`) {
+		t.Fatalf("BuildSpec error = %v, want conflicting env-from-mount name error", err)
+	}
+}
+
+func TestBuildSpecEnvFromMountResolvesDeduplicatedRuntimeMount(t *testing.T) {
+	root := t.TempDir()
+	source := "/opt/dedup-home"
+	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		Mounts: []config.SandboxMount{
+			{Host: source, Target: source, Mode: "rw"},
+		},
+	}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		Stat:        fakePathStat(map[string]bool{source: true}),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			source: source,
+		}, nil),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+source)
+}
+
+func TestBuildSpecRuntimeSandboxMountFallbackSources(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		envValue string
+	}{
+		{name: "unset"},
+		{name: "empty", envValue: ""},
+		{name: "relative", envValue: "relative-home"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			home := filepath.Join(root, "home")
+			source := filepath.Join(home, ".custom")
+			if err := os.MkdirAll(source, 0o755); err != nil {
+				t.Fatalf("create fallback source: %v", err)
+			}
+			project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+				Command:    config.SandboxCommand{Argv: []string{"sh"}},
+				CWD:        ".",
+				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			}, fallbackRuntimeRequirements(false))
+			env := []string{"PATH=/usr/bin", "HOME=" + home}
+			if tt.name != "unset" {
+				env = append(env, "CUSTOM_HOME="+tt.envValue)
+			}
+
+			spec, err := BuildSpec(project, Options{
+				RuntimeGOOS: "linux",
+				LookPath:    foundBwrap,
+				Environ:     func() []string { return env },
+			})
+			if err != nil {
+				t.Fatalf("BuildSpec returned error: %v", err)
+			}
+			if !containsSequence(spec.Args, "--bind", source, "/home/orc/.custom") {
+				t.Fatalf("bwrap args = %#v, want fallback source mounted under sandbox home", spec.Args)
+			}
+			assertEnvContains(t, spec.Env, "CUSTOM_HOME=/home/orc/.custom")
+		})
+	}
+}
+
+func TestBuildSpecRuntimeSandboxMountCreateAndMissingBehavior(t *testing.T) {
+	t.Run("create true creates missing source", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		source := filepath.Join(home, ".custom")
+		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+			Command:    config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:        ".",
+			Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		}, fallbackRuntimeRequirements(true))
+
+		spec, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
+		})
+		if err != nil {
+			t.Fatalf("BuildSpec returned error: %v", err)
+		}
+		if info, err := os.Stat(source); err != nil || !info.IsDir() {
+			t.Fatalf("created source stat = %v, %v; want directory", info, err)
+		}
+		if !containsSequence(spec.Args, "--bind", source, "/home/orc/.custom") {
+			t.Fatalf("bwrap args = %#v, want created source mount", spec.Args)
+		}
+	})
+
+	t.Run("create false rejects missing source", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+			Command:    config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:        ".",
+			Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		}, fallbackRuntimeRequirements(false))
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
+		})
+		if err == nil || !strings.Contains(err.Error(), `source resolved path`) || !strings.Contains(err.Error(), `does not exist`) {
+			t.Fatalf("BuildSpec error = %v, want missing source error", err)
+		}
+	})
+}
+
+func TestBuildSpecRejectsRuntimeSandboxMountSourceFile(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "custom-file")
+	if err := os.WriteFile(source, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	}, fallbackRuntimeRequirements(false))
+
+	_, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `must be a directory`) {
+		t.Fatalf("BuildSpec error = %v, want source file rejection", err)
+	}
+}
+
+func TestBuildSpecRuntimeSandboxMountFallbackTargetsByHomeMode(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		mode     string
+		wantHome func(string) string
+	}{
+		{name: "synthetic", mode: config.SandboxHomeModeSynthetic, wantHome: func(string) string { return "/home/orc/.custom" }},
+		{name: "host path", mode: config.SandboxHomeModeHostPath, wantHome: func(home string) string { return filepath.Join(home, ".custom") }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			home := filepath.Join(root, "home")
+			source := filepath.Join(home, ".custom")
+			if err := os.MkdirAll(source, 0o755); err != nil {
+				t.Fatalf("create fallback source: %v", err)
+			}
+			project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+				Command:    config.SandboxCommand{Argv: []string{"sh"}},
+				CWD:        ".",
+				Home:       config.SandboxHomeConfig{Mode: tt.mode},
+				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			}, fallbackRuntimeRequirements(false))
+
+			spec, err := BuildSpec(project, Options{
+				RuntimeGOOS: "linux",
+				LookPath:    foundBwrap,
+				Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
+			})
+			if err != nil {
+				t.Fatalf("BuildSpec returned error: %v", err)
+			}
+			if !containsSequence(spec.Args, "--bind", source, tt.wantHome(home)) {
+				t.Fatalf("bwrap args = %#v, want fallback target %s", spec.Args, tt.wantHome(home))
+			}
+		})
+	}
+}
+
+func TestBuildSpecRejectsRuntimeSandboxMountActiveConflicts(t *testing.T) {
+	tests := []struct {
+		name    string
+		sandbox config.SandboxConfig
+		want    string
+	}{
+		{
+			name: "project mount",
+			sandbox: config.SandboxConfig{
+				Command:    config.SandboxCommand{Argv: []string{"sh"}},
+				CWD:        ".",
+				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+				Mounts: []config.SandboxMount{
+					{Host: ".", Target: "/home/orc/.custom", Mode: "ro"},
+				},
+			},
+			want: "conflicts with explicit sandbox mount target",
+		},
+		{
+			name: "home policy",
+			sandbox: config.SandboxConfig{
+				Command:    config.SandboxCommand{Argv: []string{"sh"}},
+				CWD:        ".",
+				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			},
+			want: "must not override ancestor of active sandbox HOME",
+		},
+		{
+			name: "protected system",
+			sandbox: config.SandboxConfig{
+				Command:    config.SandboxCommand{Argv: []string{"sh"}},
+				CWD:        ".",
+				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			},
+			want: "must not override protected sandbox path /tmp",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			home := filepath.Join(root, "home")
+			source := filepath.Join(home, ".custom")
+			if err := os.MkdirAll(source, 0o755); err != nil {
+				t.Fatalf("create fallback source: %v", err)
+			}
+			requirements := fallbackRuntimeRequirements(false)
+			switch tt.name {
+			case "home policy":
+				requirements.Mounts[0].Target.Fallback.SandboxHome = ".."
+				tt.sandbox.Home.Mode = config.SandboxHomeModeHostPath
+			case "protected system":
+				requirements.Mounts[0].Target.Fallback.SandboxHome = "../../tmp/custom"
+			}
+			project := sandboxProjectWithRuntime(root, tt.sandbox, requirements)
+
+			_, err := BuildSpec(project, Options{
+				RuntimeGOOS: "linux",
+				LookPath:    foundBwrap,
+				Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildSpec error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildSpecRejectsRuntimeSandboxMountAutomaticPathConflict(t *testing.T) {
+	root := t.TempDir()
+	source := "/opt/custom/bin"
+	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Path:       config.SandboxPathConfig{Mode: config.SandboxPathModeHostEntries},
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	}, config.RuntimeSandboxRequirements{
+		Mounts: []config.RuntimeSandboxMount{
+			{
+				Source: config.RuntimeSandboxMountSource{Env: "CUSTOM_BIN"},
+				Target: config.RuntimeSandboxMountTarget{
+					EnvSameAsSource: true,
+				},
+				Mode: "ro",
+			},
+		},
+	})
+
+	_, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		Stat:        fakePathStat(map[string]bool{source: true}),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			source: source,
+		}, nil),
+		Environ: func() []string {
+			return []string{"PATH=" + source, "HOME=" + root, "CUSTOM_BIN=" + source}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `conflicts with explicit sandbox mount target`) {
+		t.Fatalf("BuildSpec error = %v, want automatic PATH conflict", err)
 	}
 }
 
@@ -1047,6 +1570,85 @@ func sandboxProject(root string, sandboxConfig config.SandboxConfig) *config.Pro
 		Root: root,
 		Config: config.ProjectConfig{
 			Sandbox: &sandboxConfig,
+		},
+	}
+}
+
+func sandboxProjectWithRuntime(root string, sandboxConfig config.SandboxConfig, requirements config.RuntimeSandboxRequirements) *config.Project {
+	project := sandboxProject(root, sandboxConfig)
+	project.Workflows = map[string]config.Workflow{
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "custom"},
+			Steps: map[string]config.Step{
+				"code": {Agent: "coder"},
+			},
+		},
+	}
+	project.Runtimes = map[string]config.Runtime{
+		"custom": {
+			ID: "custom",
+			Sandbox: config.RuntimeSandbox{
+				Supported:    true,
+				Requirements: requirements,
+			},
+		},
+	}
+	return project
+}
+
+func runtimeRequirementsWithEnvMount(envName string) config.RuntimeSandboxRequirements {
+	return runtimeRequirementsWithEnvMountSource(envName, envName, ".custom")
+}
+
+func runtimeRequirementsWithEnvMountSource(envName, sourceEnv, fallback string) config.RuntimeSandboxRequirements {
+	return config.RuntimeSandboxRequirements{
+		Env: config.RuntimeSandboxEnvConfig{
+			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
+				envName: {Mount: "config_home", Value: "target"},
+			},
+		},
+		Mounts: []config.RuntimeSandboxMount{
+			{
+				ID: "config_home",
+				Source: config.RuntimeSandboxMountSource{
+					Env: sourceEnv,
+					Fallback: config.RuntimeSandboxMountSourceFallback{
+						HostHome: fallback,
+					},
+				},
+				Target: config.RuntimeSandboxMountTarget{
+					EnvSameAsSource: true,
+					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: fallback},
+				},
+				Mode: "rw",
+			},
+		},
+	}
+}
+
+func fallbackRuntimeRequirements(create bool) config.RuntimeSandboxRequirements {
+	return config.RuntimeSandboxRequirements{
+		Env: config.RuntimeSandboxEnvConfig{
+			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
+				"CUSTOM_HOME": {Mount: "config_home", Value: "target"},
+			},
+		},
+		Mounts: []config.RuntimeSandboxMount{
+			{
+				ID: "config_home",
+				Source: config.RuntimeSandboxMountSource{
+					Env:    "CUSTOM_HOME",
+					Create: create,
+					Fallback: config.RuntimeSandboxMountSourceFallback{
+						HostHome: ".custom",
+					},
+				},
+				Target: config.RuntimeSandboxMountTarget{
+					EnvSameAsSource: true,
+					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: ".custom"},
+				},
+				Mode: "rw",
+			},
 		},
 	}
 }

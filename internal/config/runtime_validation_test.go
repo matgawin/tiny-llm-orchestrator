@@ -139,6 +139,179 @@ sandbox:
 	}
 }
 
+func TestLoadRuntimeSandboxRequirementsExtendedSchema(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{
+		config: configWithRuntimes(map[string]string{"custom": "runtimes/custom.yaml"}),
+		workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "custom"
+			return workflow
+		}),
+		runtimes: map[string]string{"custom": `id: custom
+command:
+  executable: recorder
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+  requirements:
+    env:
+      pass: [CUSTOM_TOKEN]
+      set:
+        ORC_RUNTIME: custom
+      set_from_mount:
+        CUSTOM_HOME:
+          mount: config_home
+          value: target
+    mounts:
+      - id: config_home
+        source:
+          env: CUSTOM_HOME
+          fallback:
+            host_home: .custom
+          create: true
+        target:
+          env_same_as_source: true
+          fallback:
+            sandbox_home: .custom
+        mode: rw
+      - host: .orc/cache/custom
+        target: /workspace/.orc/cache/custom
+        mode: rw
+        optional: true
+`},
+	})
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	requirements := project.Runtimes["custom"].Sandbox.Requirements
+	if got := requirements.Mounts[0].ID; got != "config_home" {
+		t.Fatalf("extended mount id = %q, want config_home", got)
+	}
+	if got := requirements.Env.SetFromMount["CUSTOM_HOME"].Mount; got != "config_home" {
+		t.Fatalf("set_from_mount mount = %q, want config_home", got)
+	}
+	if got := requirements.Mounts[1].Target.Path; got != "/workspace/.orc/cache/custom" {
+		t.Fatalf("simple mount target = %q, want legacy scalar target", got)
+	}
+}
+
+func TestLoadRejectsInvalidRuntimeSandboxRequirementExtendedSchema(t *testing.T) {
+	tests := []struct {
+		name     string
+		mount    string
+		env      string
+		contains []string
+	}{
+		{
+			name: "invalid mount id",
+			mount: `      - id: bad.id
+        host: .orc/cache/custom
+        target: /workspace/.orc/cache/custom
+        mode: rw
+`,
+			contains: []string{`sandbox.requirements.mounts[0].id "bad.id" is invalid`},
+		},
+		{
+			name: "duplicate mount id",
+			mount: `      - id: cache
+        host: .orc/cache/custom
+        target: /workspace/.orc/cache/custom
+        mode: rw
+      - id: cache
+        host: .orc/cache/other
+        target: /workspace/.orc/cache/other
+        mode: rw
+`,
+			contains: []string{`sandbox.requirements.mounts[1].id "cache" duplicates another sandbox.requirements.mounts id`},
+		},
+		{
+			name: "invalid set from mount env name",
+			env: `      set_from_mount:
+        BAD-NAME:
+          mount: cache
+          value: target
+`,
+			mount: `      - id: cache
+        host: .orc/cache/custom
+        target: /workspace/.orc/cache/custom
+        mode: rw
+`,
+			contains: []string{`sandbox.requirements.env: set_from_mount["BAD-NAME"]: environment variable name "BAD-NAME" is invalid`},
+		},
+		{
+			name: "invalid source combination",
+			mount: `      - host: .orc/cache/custom
+        source:
+          env: CUSTOM_HOME
+        target:
+          env_same_as_source: true
+        mode: rw
+`,
+			contains: []string{`sandbox.requirements.mounts[0] must not combine simple host with extended source`},
+		},
+		{
+			name: "invalid target combination",
+			mount: `      - host: .orc/cache/custom
+        target:
+          env_same_as_source: true
+        mode: rw
+`,
+			contains: []string{`sandbox.requirements.mounts[0].target is required`},
+		},
+		{
+			name: "unsupported expansion syntax",
+			mount: `      - source:
+          env: CUSTOM_HOME
+          fallback:
+            host_home: $CUSTOM_HOME
+        target:
+          env_same_as_source: true
+          fallback:
+            sandbox_home: .custom
+        mode: rw
+`,
+			contains: []string{`sandbox.requirements.mounts[0].source.fallback.host_home "$CUSTOM_HOME" must not use shell, environment, or tilde expansion`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := tt.env
+			if env == "" {
+				env = "      set: {}\n"
+			}
+			root := writeMinimalProject(t, projectFixture{
+				config: configWithRuntimes(map[string]string{"custom": "runtimes/custom.yaml"}),
+				workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+					workflow.Defaults.Runtime = "custom"
+					return workflow
+				}),
+				runtimes: map[string]string{"custom": `id: custom
+command:
+  executable: recorder
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+  requirements:
+    env:
+` + env + `    mounts:
+` + tt.mount},
+			})
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
+	}
+}
+
 func TestLoadRejectsInvalidRuntimeDescriptors(t *testing.T) {
 	tests := []struct {
 		name       string

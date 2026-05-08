@@ -239,8 +239,76 @@ type RuntimeSandbox struct {
 
 // RuntimeSandboxRequirements declares runtime-owned sandbox inputs.
 type RuntimeSandboxRequirements struct {
-	Env    SandboxEnvConfig `yaml:"env"`
-	Mounts []SandboxMount   `yaml:"mounts"`
+	Env    RuntimeSandboxEnvConfig `yaml:"env"`
+	Mounts []RuntimeSandboxMount   `yaml:"mounts"`
+}
+
+// RuntimeSandboxEnvConfig declares runtime-owned sandbox environment inputs.
+type RuntimeSandboxEnvConfig struct {
+	Pass         []string                          `yaml:"pass"`
+	Set          map[string]string                 `yaml:"set"`
+	SetFromMount map[string]RuntimeEnvFromMountRef `yaml:"set_from_mount"`
+}
+
+// RuntimeEnvFromMountRef declares a sandbox env value derived from a resolved
+// runtime sandbox mount.
+type RuntimeEnvFromMountRef struct {
+	Mount string `yaml:"mount"`
+	Value string `yaml:"value"`
+}
+
+// RuntimeSandboxMount declares a runtime-owned sandbox mount. It supports the
+// legacy simple host/target shape and the extended env-sourced shape.
+type RuntimeSandboxMount struct {
+	ID       string                    `yaml:"id"`
+	Host     string                    `yaml:"host"`
+	Source   RuntimeSandboxMountSource `yaml:"source"`
+	Target   RuntimeSandboxMountTarget `yaml:"target"`
+	Mode     string                    `yaml:"mode"`
+	Optional RequiredBool              `yaml:"optional"`
+}
+
+// RuntimeSandboxMountSource declares how an extended runtime mount source is
+// resolved from host state.
+type RuntimeSandboxMountSource struct {
+	Env      string                            `yaml:"env"`
+	Fallback RuntimeSandboxMountSourceFallback `yaml:"fallback"`
+	Create   bool                              `yaml:"create"`
+}
+
+// RuntimeSandboxMountSourceFallback declares source fallback strategies.
+type RuntimeSandboxMountSourceFallback struct {
+	HostHome string `yaml:"host_home"`
+}
+
+// RuntimeSandboxMountTarget declares where an extended runtime mount appears in
+// the sandbox. Path is populated for the legacy scalar target form.
+type RuntimeSandboxMountTarget struct {
+	Path            string                            `yaml:"-"`
+	EnvSameAsSource bool                              `yaml:"env_same_as_source"`
+	Fallback        RuntimeSandboxMountTargetFallback `yaml:"fallback"`
+}
+
+// UnmarshalYAML accepts both the legacy scalar target and the extended mapping
+// target forms for runtime sandbox mounts.
+func (t *RuntimeSandboxMountTarget) UnmarshalYAML(data []byte) error {
+	var path string
+	if err := yaml.Unmarshal(data, &path); err == nil {
+		t.Path = path
+		return nil
+	}
+	type target RuntimeSandboxMountTarget
+	var decoded target
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*t = RuntimeSandboxMountTarget(decoded)
+	return nil
+}
+
+// RuntimeSandboxMountTargetFallback declares target fallback strategies.
+type RuntimeSandboxMountTargetFallback struct {
+	SandboxHome string `yaml:"sandbox_home"`
 }
 
 // EffectiveLoopCaps is the resolved workflow loop-cap policy.

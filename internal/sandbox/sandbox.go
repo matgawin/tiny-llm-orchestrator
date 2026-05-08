@@ -182,9 +182,12 @@ type sandboxPolicy struct {
 }
 
 type resolvedMount struct {
-	host   string
-	target string
-	mode   string
+	host                     string
+	target                   string
+	mode                     string
+	runtimeID                string
+	id                       string
+	envSourcedSamePathTarget bool
 }
 
 const (
@@ -232,8 +235,12 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 		return sandboxPolicy{}, err
 	}
 	beadsPath := filepath.Clean(filepath.Join(root, "..", ".beads"))
-	sandboxEnv, sandboxMounts := mergeRuntimeSandboxRequirements(project, sandboxConfig)
-	extraMounts, err := resolveExtraMounts(root, beadsPath, home, sandboxMounts, pathExists, evalSymlinks)
+	sandboxEnv, sandboxMounts, setFromMount := mergeRuntimeSandboxRequirements(project, sandboxConfig)
+	extraMounts, resolvedByID, err := resolveExtraMounts(root, beadsPath, home, hostEnv, opts, sandboxMounts, pathExists, stat, evalSymlinks)
+	if err != nil {
+		return sandboxPolicy{}, err
+	}
+	sandboxEnv, err = applyEnvFromMount(sandboxEnv, setFromMount, resolvedByID)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
@@ -337,12 +344,20 @@ func effectiveSandboxPath(hostEnv map[string]string, sandboxEnv config.SandboxEn
 	return hostEnv["PATH"]
 }
 
-func mergeRuntimeSandboxRequirements(project *config.Project, sandboxConfig *config.SandboxConfig) (config.SandboxEnvConfig, []sourcedSandboxMount) {
+type envFromMountRequirement struct {
+	envName   string
+	runtimeID string
+	mountID   string
+	source    string
+}
+
+func mergeRuntimeSandboxRequirements(project *config.Project, sandboxConfig *config.SandboxConfig) (config.SandboxEnvConfig, []sourcedSandboxMount, []envFromMountRequirement) {
 	env := sandboxConfig.Env
 	if env.Set != nil {
 		env.Set = maps.Clone(env.Set)
 	}
 	mounts := make([]sourcedSandboxMount, 0, len(sandboxConfig.Mounts))
+	setFromMount := make([]envFromMountRequirement, 0)
 	for i, mount := range sandboxConfig.Mounts {
 		mounts = append(mounts, sourcedSandboxMount{
 			mount:  mount,
@@ -364,59 +379,239 @@ func mergeRuntimeSandboxRequirements(project *config.Project, sandboxConfig *con
 		}
 		for i, mount := range requirements.Mounts {
 			mounts = append(mounts, sourcedSandboxMount{
-				mount:  mount,
-				source: fmt.Sprintf("runtime %q sandbox.requirements.mounts[%d]", runtimeID, i),
+				runtimeMount: mount,
+				source:       fmt.Sprintf("runtime %q sandbox.requirements.mounts[%d]", runtimeID, i),
+				runtimeID:    runtimeID,
+				runtime:      true,
+			})
+		}
+		envNames := make([]string, 0, len(requirements.Env.SetFromMount))
+		for envName := range requirements.Env.SetFromMount {
+			envNames = append(envNames, envName)
+		}
+		sort.Strings(envNames)
+		for _, envName := range envNames {
+			ref := requirements.Env.SetFromMount[envName]
+			setFromMount = append(setFromMount, envFromMountRequirement{
+				envName:   envName,
+				runtimeID: runtimeID,
+				mountID:   ref.Mount,
+				source:    fmt.Sprintf("runtime %q sandbox.requirements.env.set_from_mount[%q]", runtimeID, envName),
 			})
 		}
 	}
-	return env, mounts
+	return env, mounts, setFromMount
 }
 
 type sourcedSandboxMount struct {
-	mount  config.SandboxMount
-	source string
+	mount        config.SandboxMount
+	runtimeMount config.RuntimeSandboxMount
+	source       string
+	runtimeID    string
+	runtime      bool
 }
 
-func resolveExtraMounts(root, beadsPath, sandboxHome string, mounts []sourcedSandboxMount, pathExists func(string) bool, evalSymlinks func(string) (string, error)) ([]resolvedMount, error) {
+type runtimeMountKey struct {
+	runtimeID string
+	mountID   string
+}
+
+func resolveExtraMounts(root, beadsPath, sandboxHome string, hostEnv map[string]string, opts Options, mounts []sourcedSandboxMount, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, map[runtimeMountKey]resolvedMount, error) {
 	resolved := make([]resolvedMount, 0, len(mounts))
+	resolvedByID := map[runtimeMountKey]resolvedMount{}
 	for _, sourced := range mounts {
-		mount := sourced.mount
-		host := mount.Host
-		if !filepath.IsAbs(host) {
-			host = filepath.Join(root, host)
+		mount, ok, err := resolveSourcedMount(root, sandboxHome, hostEnv, opts, sourced, pathExists, stat, evalSymlinks)
+		if err != nil {
+			return nil, nil, err
 		}
-		host = filepath.Clean(host)
-		if !pathExists(host) {
-			if mount.Optional.Value {
-				continue
-			}
-			return nil, fmt.Errorf("%s.host %q does not exist", sourced.source, mount.Host)
+		if !ok {
+			continue
 		}
-		if !filepath.IsAbs(mount.Host) && mount.Mode == "rw" {
-			realRoot, err := evalSymlinks(root)
-			if err != nil {
-				return nil, fmt.Errorf("%s.host %q: resolve repository root: %w", sourced.source, mount.Host, err)
+		target := filepath.Clean(mount.target)
+		mount.target = target
+		if err := validateExtraMountTarget(sourced.source, root, beadsPath, sandboxHome, mount); err != nil {
+			return nil, nil, err
+		}
+		conflict := false
+		for _, existing := range resolved {
+			if existing.target == mount.target && existing.host == mount.host && existing.mode == mount.mode {
+				conflict = true
+				break
 			}
-			realHost, err := evalSymlinks(host)
-			if err != nil {
-				return nil, fmt.Errorf("%s.host %q: %w", sourced.source, mount.Host, err)
-			}
-			rel, err := filepath.Rel(realRoot, realHost)
-			if err != nil || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return nil, fmt.Errorf("%s.host %q must not escape repository root for writable mounts", sourced.source, mount.Host)
+			if pathIntersects(existing.target, mount.target) {
+				return nil, nil, fmt.Errorf("%s.target %q conflicts with explicit sandbox mount target %q", sourced.source, mount.target, existing.target)
 			}
 		}
-		target := filepath.Clean(mount.Target)
-		if err := validateExtraMountTarget(sourced.source, root, beadsPath, sandboxHome, target); err != nil {
-			return nil, err
+		if conflict {
+			indexResolvedRuntimeMount(resolvedByID, mount)
+			continue
 		}
-		resolved = append(resolved, resolvedMount{
-			host:   host,
-			target: target,
-			mode:   mount.Mode,
-		})
+		resolved = append(resolved, mount)
+		indexResolvedRuntimeMount(resolvedByID, mount)
 	}
-	return resolved, nil
+	return resolved, resolvedByID, nil
+}
+
+func indexResolvedRuntimeMount(resolvedByID map[runtimeMountKey]resolvedMount, mount resolvedMount) {
+	if mount.runtimeID != "" && mount.id != "" {
+		resolvedByID[runtimeMountKey{runtimeID: mount.runtimeID, mountID: mount.id}] = mount
+	}
+}
+
+func resolveSourcedMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+	if sourced.runtime && sourced.runtimeMount.Host == "" {
+		return resolveRuntimeSandboxMount(root, sandboxHome, hostEnv, opts, sourced, pathExists, stat, evalSymlinks)
+	}
+	return resolveStaticSandboxMount(root, staticSandboxMount(sourced), pathExists, evalSymlinks)
+}
+
+type staticSandboxMountDescriptor struct {
+	host      string
+	target    string
+	mode      string
+	optional  bool
+	source    string
+	runtimeID string
+	id        string
+}
+
+func staticSandboxMount(sourced sourcedSandboxMount) staticSandboxMountDescriptor {
+	if sourced.runtime {
+		mount := sourced.runtimeMount
+		return staticSandboxMountDescriptor{
+			host:      mount.Host,
+			target:    mount.Target.Path,
+			mode:      mount.Mode,
+			optional:  mount.Optional.Value,
+			source:    sourced.source,
+			runtimeID: sourced.runtimeID,
+			id:        mount.ID,
+		}
+	}
+	mount := sourced.mount
+	return staticSandboxMountDescriptor{
+		host:     mount.Host,
+		target:   mount.Target,
+		mode:     mount.Mode,
+		optional: mount.Optional.Value,
+		source:   sourced.source,
+	}
+}
+
+func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, pathExists func(string) bool, evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+	host := mount.host
+	if !filepath.IsAbs(host) {
+		host = filepath.Join(root, host)
+	}
+	host = filepath.Clean(host)
+	if !pathExists(host) {
+		if mount.optional {
+			return resolvedMount{}, false, nil
+		}
+		return resolvedMount{}, false, fmt.Errorf("%s.host %q does not exist", mount.source, mount.host)
+	}
+	if !filepath.IsAbs(mount.host) && mount.mode == "rw" {
+		realRoot, err := evalSymlinks(root)
+		if err != nil {
+			return resolvedMount{}, false, fmt.Errorf("%s.host %q: resolve repository root: %w", mount.source, mount.host, err)
+		}
+		realHost, err := evalSymlinks(host)
+		if err != nil {
+			return resolvedMount{}, false, fmt.Errorf("%s.host %q: %w", mount.source, mount.host, err)
+		}
+		rel, err := filepath.Rel(realRoot, realHost)
+		if err != nil || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return resolvedMount{}, false, fmt.Errorf("%s.host %q must not escape repository root for writable mounts", mount.source, mount.host)
+		}
+	}
+	return resolvedMount{
+		host:      host,
+		target:    mount.target,
+		mode:      mount.mode,
+		runtimeID: mount.runtimeID,
+		id:        mount.id,
+	}, true, nil
+}
+
+func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+	mount := sourced.runtimeMount
+	host, usedFallback, err := resolveRuntimeMountSource(sourced.source, mount, hostEnv, opts)
+	if err != nil {
+		return resolvedMount{}, false, err
+	}
+	host = filepath.Clean(host)
+	if !pathExists(host) {
+		if mount.Optional.Value {
+			return resolvedMount{}, false, nil
+		}
+		if !mount.Source.Create {
+			return resolvedMount{}, false, fmt.Errorf("%s.source resolved path %q does not exist", sourced.source, host)
+		}
+		mkdirAll := os.MkdirAll
+		if opts.MkdirAll != nil {
+			mkdirAll = opts.MkdirAll
+		}
+		if err := mkdirAll(host, 0o700); err != nil {
+			return resolvedMount{}, false, fmt.Errorf("%s.source create %q: %w", sourced.source, host, err)
+		}
+	}
+	info, err := stat(host)
+	if err != nil {
+		return resolvedMount{}, false, fmt.Errorf("%s.source %q: %w", sourced.source, host, err)
+	}
+	if !info.IsDir() {
+		return resolvedMount{}, false, fmt.Errorf("%s.source %q must be a directory", sourced.source, host)
+	}
+	realHost, err := evalSymlinks(host)
+	if err != nil {
+		return resolvedMount{}, false, fmt.Errorf("%s.source %q: %w", sourced.source, host, err)
+	}
+	target := host
+	if usedFallback {
+		target = filepath.Join(sandboxHome, mount.Target.Fallback.SandboxHome)
+	}
+	return resolvedMount{
+		host:                     filepath.Clean(realHost),
+		target:                   filepath.Clean(target),
+		mode:                     mount.Mode,
+		runtimeID:                sourced.runtimeID,
+		id:                       mount.ID,
+		envSourcedSamePathTarget: !usedFallback && mount.Target.EnvSameAsSource,
+	}, true, nil
+}
+
+func resolveRuntimeMountSource(source string, mount config.RuntimeSandboxMount, hostEnv map[string]string, opts Options) (string, bool, error) {
+	if value := hostEnv[mount.Source.Env]; filepath.IsAbs(value) {
+		return value, false, nil
+	}
+	if mount.Source.Fallback.HostHome == "" {
+		return "", false, fmt.Errorf("%s.source.env %q is unset, empty, or not absolute and no source fallback is configured", source, mount.Source.Env)
+	}
+	hostHome, err := resolveHostHome(hostEnv, opts)
+	if err != nil {
+		return "", false, fmt.Errorf("%s.source.fallback.host_home: %w", source, err)
+	}
+	return filepath.Join(hostHome, mount.Source.Fallback.HostHome), true, nil
+}
+
+func applyEnvFromMount(env config.SandboxEnvConfig, requirements []envFromMountRequirement, resolvedByID map[runtimeMountKey]resolvedMount) (config.SandboxEnvConfig, error) {
+	if len(requirements) == 0 {
+		return env, nil
+	}
+	if env.Set == nil {
+		env.Set = map[string]string{}
+	}
+	for _, requirement := range requirements {
+		mount, ok := resolvedByID[runtimeMountKey{runtimeID: requirement.runtimeID, mountID: requirement.mountID}]
+		if !ok {
+			return env, fmt.Errorf("%s references unresolved mount id %q", requirement.source, requirement.mountID)
+		}
+		if existing, ok := env.Set[requirement.envName]; ok && existing != mount.target {
+			return env, fmt.Errorf("%s conflicts with another sandbox environment value for %s", requirement.source, requirement.envName)
+		}
+		env.Set[requirement.envName] = mount.target
+	}
+	return env, nil
 }
 
 func resolvePathMounts(root, beadsPath, sandboxHome, hostHome, pathValue, mode string, explicitMounts []resolvedMount, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, error) {
@@ -520,7 +715,8 @@ func pathIntersects(a, b string) bool {
 	return a == b || isStrictPathAncestor(a, b) || isStrictPathAncestor(b, a)
 }
 
-func validateExtraMountTarget(source, root, beadsPath, sandboxHome, target string) error {
+func validateExtraMountTarget(source, root, beadsPath, sandboxHome string, mount resolvedMount) error {
+	target := mount.target
 	name := fmt.Sprintf("%s.target %q", source, target)
 	if target == sandboxHome {
 		return fmt.Errorf("%s: must not override active sandbox HOME %s", name, sandboxHome)
@@ -532,7 +728,9 @@ func validateExtraMountTarget(source, root, beadsPath, sandboxHome, target strin
 		return nil
 	}
 	if strings.HasPrefix(target, "/home/") || target == "/home" {
-		return fmt.Errorf("%s: must not override critical sandbox path /home", name)
+		if !mount.envSourcedSamePathTarget || target == "/home" {
+			return fmt.Errorf("%s: must not override critical sandbox path /home", name)
+		}
 	}
 	if filepath.IsAbs(root) && pathIntersects(target, filepath.Clean(root)) {
 		return fmt.Errorf("%s: must not override the repository mount %s", name, filepath.Clean(root))

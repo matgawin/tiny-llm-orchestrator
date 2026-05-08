@@ -247,10 +247,8 @@ runtime directory, with `{dir}` substituted by the validated directory value.
 ## Sandbox Requirements
 
 Runtime sandbox requirements belong to the runtime descriptor under
-`sandbox.requirements`. Current runtime descriptors support simple static
-sandbox mounts. The extended env-sourced mount form below is the approved
-schema design for `main-b77.2`; it documents the contract to implement next,
-not behavior available in the current parser or sandbox resolver.
+`sandbox.requirements`. Runtime descriptors support simple static sandbox mounts
+and extended env-sourced mounts.
 
 `sandbox.requirements` design:
 
@@ -291,13 +289,15 @@ environment values. Runtime env requirements merge into sandbox env config;
 fixed values win over pass-through values with the same key. Static duplicate
 fixed values with different values are config-load conflicts.
 
-`sandbox.requirements.env.set_from_mount` will set sandbox environment variables
+`sandbox.requirements.env.set_from_mount` sets sandbox environment variables
 from resolved runtime mounts. Each map key is the sandbox environment variable
 name to set. Each value has `mount`, which references a mount `id` from the same
-runtime descriptor, and `value`, which initially supports only `target`.
+runtime descriptor, and `value`, which supports only `target`.
 Resolved values are computed while building the sandbox spec, after mount
 sources and targets are known. No source-path templating or arbitrary property
-selection is part of v1.
+selection is part of v1. If selected runtime requirements resolve different
+values for the same sandbox environment variable, sandbox spec construction
+fails instead of choosing one value by merge order.
 
 Environment variable names in `env.pass`, `env.set`, `source.env`, and
 `env.set_from_mount` must match `^[A-Za-z_][A-Za-z0-9_]*$`.
@@ -318,7 +318,7 @@ The simple form fields are `host`, `target`, `mode`, and optional `optional`.
 `target` must be a clean absolute sandbox path. Missing static host paths are
 errors unless `optional: true` is set, in which case the mount is skipped.
 
-The approved extended runtime-owned source form is:
+The extended runtime-owned source form is:
 
 ```yaml
 mounts:
@@ -360,12 +360,14 @@ set, Orc will create that directory; otherwise it fails unless the mount is
 optional.
 
 `target.env_same_as_source: true` means an absolute env-sourced path is mounted
-at the same absolute path inside the sandbox. `target.fallback.sandbox_home`
-means fallback sources are mounted under the resolved sandbox HOME. For example,
-with `sandbox_home: .codex`, synthetic-home mode targets `/home/orc/.codex`,
-while host-path home mode targets the resolved host HOME path plus `/.codex`.
-This preserves the current Codex home target behavior without Codex-specific
-fields in the generic schema.
+at the same absolute path inside the sandbox, including explicit paths under
+`/home/<name>` that are not the active sandbox HOME or one of its ancestors.
+`target.fallback.sandbox_home` means fallback sources are mounted under the
+resolved sandbox HOME. For example, with `sandbox_home: .codex`,
+synthetic-home mode targets `/home/orc/.codex`, while host-path home mode
+targets the resolved host HOME path plus `/.codex`. This preserves the current
+config-home target behavior without runtime-specific fields in the generic
+schema.
 
 Exactly one target strategy must apply after source resolution. Env-sourced
 absolute paths require `target.env_same_as_source: true` in v1. Fallback sources
@@ -476,12 +478,11 @@ Inside a verified Orc sandbox, Codex argv remains:
 codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
 ```
 
-Codex model values are pass-through because `allowed` is empty. Until
-`main-b77.2` implements extended runtime sandbox requirements, Codex home
+Codex model values are pass-through because `allowed` is empty. Codex home
 handling remains current sandbox compatibility behavior rather than descriptor
-data. After that implementation, the scaffolded descriptor should use the
-approved generic `config_home` mount shape above instead of relying on
-implementation-specific Codex handling.
+data until the follow-up `main-b77.3` migration. That migration should update
+the scaffolded descriptor to use the generic `config_home` mount shape
+above instead of relying on implementation-specific Codex handling.
 
 ## Validation Timing
 
@@ -495,8 +496,7 @@ Project config load validates:
 - model and directory capability self-consistency
 - static sandbox requirement conflicts
 
-After the approved `main-b77.2` schema is implemented, project config load
-should also validate extended runtime sandbox requirement shape:
+Project config load also validates extended runtime sandbox requirement shape:
 
 - mount id syntax and uniqueness
 - simple versus extended mount field exclusivity
@@ -512,11 +512,11 @@ Workflow validation validates:
 - `runtime_dirs` path shape
 - command/script rejection of `runtime`, `model`, and `runtime_dirs`
 
-Sandbox launch validates current host-dependent sandbox requirement behavior
-before starting bubblewrap. After `main-b77.2`, that launch-time validation
-should also cover env-sourced mount source resolution, home fallback
-resolution, explicit source creation, symlink resolution, mount collisions,
-protected target conflicts, and env-from-mount target values.
+Sandbox launch validates host-dependent sandbox requirement behavior before
+starting bubblewrap. That launch-time validation covers env-sourced mount source
+resolution, home fallback resolution, explicit source creation, symlink
+resolution, mount collisions, protected target conflicts, and env-from-mount
+target values.
 
 Worker launch validates only the selected runtime resolution that depends on
 the selected step and active run, selected prompt delivery, active sandbox mode
@@ -560,7 +560,7 @@ Implementation tasks must update or add tests for:
 - command/script rejection of `runtime`, `model`, and `runtime_dirs`
 - descriptor-built Codex normal and sandbox argv compatibility
 - launcher override bypass behavior
-- runtime sandbox requirements, simple mount compatibility, approved extended
+- runtime sandbox requirements, simple mount compatibility, extended
   env/fallback/create mount design, env-from-mount values, static conflicts,
   and host-dependent failures
 - end-to-end non-Codex runtime execution using real executable fixtures for
