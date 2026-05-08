@@ -132,9 +132,24 @@ sandbox:
   required: false
   requirements:
     env:
-      pass: [CODEX_HOME, OPENAI_API_KEY]
+      pass: [OPENAI_API_KEY]
       set: {}
-    mounts: []
+      set_from_mount:
+        CODEX_HOME:
+          mount: config_home
+          value: target
+    mounts:
+      - id: config_home
+        source:
+          env: CODEX_HOME
+          fallback:
+            host_home: .codex
+          create: true
+        target:
+          env_same_as_source: true
+          fallback:
+            sandbox_home: .codex
+        mode: rw
 `
 }
 

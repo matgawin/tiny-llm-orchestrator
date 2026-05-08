@@ -51,6 +51,9 @@ The scaffold includes these workflows:
   intentional production behavior changes.
 - `docs-update`: update durable docs and run docs review without the full
   implementation test and review chain.
+- `review-fix`: review an existing dirty working-copy change, route requested
+  fixes through the standard coder, rerun `task check` after fixes, and finish
+  the redundancy and readability review lanes.
 - `review-mechanical`: review a change for stale references, generated drift,
   config mismatch, and mechanical completeness.
 - `review-readability`: review changed code or docs for clarity and
@@ -90,22 +93,36 @@ sandbox:
   required: false
   requirements:
     env:
-      pass: [CODEX_HOME, OPENAI_API_KEY]
+      pass: [OPENAI_API_KEY]
       set: {}
-    mounts: []
+      set_from_mount:
+        CODEX_HOME:
+          mount: config_home
+          value: target
+    mounts:
+      - id: config_home
+        source:
+          env: CODEX_HOME
+          fallback:
+            host_home: .codex
+          create: true
+        target:
+          env_same_as_source: true
+          fallback:
+            sandbox_home: .codex
+        mode: rw
 ```
 
 This descriptor, not a launcher special case, preserves Codex argv behavior for
-new projects. Current sandboxed Codex config-home behavior remains compatibility
-logic until the follow-up Codex descriptor migration; the generic runtime
-sandbox requirement schema is documented in
+new projects. It also declares Codex config-home behavior through generic
+runtime sandbox requirements; the schema is documented in
 [configuration-runtimes.md](configuration-runtimes.md). Existing user-owned
 `.orc` directories are not automatically migrated when scaffold output changes.
 
 Implementation, bugfix, mechanical-change, and test-only workflows block dirty
 starts by default so unrelated pre-existing changes do not mix with new work.
-Review-only workflows allow dirty starts by default because their normal input
-is often the existing working-copy diff being reviewed.
+Review and review-fix workflows allow dirty starts by default because their
+normal input is often the existing working-copy diff being reviewed.
 
 Default scaffolded workflows keep skip points intentionally narrow. Only
 explicit human-judgment bypass points are skippable: review steps that have not
@@ -116,16 +133,18 @@ test design, and verification command steps are not general automation
 shortcuts and are not skippable by default.
 
 Skipped review routes to the next stage a human-approved bypass should reach.
-In review-only workflows, skipped review routes to `ready_for_human`. In the
-multi-review implementation workflow, skipped `review` routes to
-`redundancy-review`, skipped `redundancy-review` routes to
-`readability-review`, and skipped `readability-review` routes to
+In single-step review-only workflows, skipped review routes to
+`ready_for_human`. In the multi-review implementation and review-fix workflows,
+skipped `review` routes to `redundancy-review`, skipped `redundancy-review`
+routes to `readability-review`, and skipped `readability-review` routes to
 `ready_for_human`.
 
 Remediation steps selected after reviewer changes have explicit skip routes
 for the same human-bypass policy. In the implementation workflow, skipped
 `code` routes to `redundancy-review`, skipped `code_fixer` routes to
 `readability-review`, and skipped `code_cleaner` routes to `ready_for_human`.
+The review-fix workflow uses the same remediation and verification routing, but
+starts at review and allows dirty starts so it can finish an existing patch.
 In bugfix, mechanical-change, and test-only workflows, skipped remediation
 routes to `ready_for_human`. Because the shared `code`, `mechanical-code`, and
 `test-code` steps cannot distinguish whether they were selected for initial

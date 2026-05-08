@@ -461,9 +461,24 @@ sandbox:
   required: false
   requirements:
     env:
-      pass: [CODEX_HOME, OPENAI_API_KEY]
+      pass: [OPENAI_API_KEY]
       set: {}
-    mounts: []
+      set_from_mount:
+        CODEX_HOME:
+          mount: config_home
+          value: target
+    mounts:
+      - id: config_home
+        source:
+          env: CODEX_HOME
+          fallback:
+            host_home: .codex
+          create: true
+        target:
+          env_same_as_source: true
+          fallback:
+            sandbox_home: .codex
+        mode: rw
 ```
 
 With no effective model, Codex argv remains:
@@ -478,11 +493,11 @@ Inside a verified Orc sandbox, Codex argv remains:
 codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
 ```
 
-Codex model values are pass-through because `allowed` is empty. Codex home
-handling remains current sandbox compatibility behavior rather than descriptor
-data until the follow-up `main-b77.3` migration. That migration should update
-the scaffolded descriptor to use the generic `config_home` mount shape
-above instead of relying on implementation-specific Codex handling.
+Codex model values are pass-through because `allowed` is empty. Codex config
+home behavior is descriptor data: the `config_home` mount reads an absolute
+host `CODEX_HOME` when present, otherwise falls back to host HOME plus
+`.codex`, creates the source directory when missing, mounts it read-write, and
+sets sandbox `CODEX_HOME` from the resolved target path.
 
 ## Validation Timing
 
@@ -578,7 +593,7 @@ Related docs that must stay consistent with this contract:
 - [../features/worker-launching.md](../features/worker-launching.md) for
   descriptor-built worker commands
 - [../features/sandbox-run.md](../features/sandbox-run.md) for runtime sandbox
-  requirements and remaining compatibility behavior
+  requirements and bubblewrap behavior
 - [../architecture/service-boundaries.md](../architecture/service-boundaries.md)
   if package ownership changes while implementing runtime loading, sandbox
   integration, or launcher command construction

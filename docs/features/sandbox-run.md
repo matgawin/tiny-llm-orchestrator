@@ -99,15 +99,14 @@ orchestration. By default it includes:
 - a read-write bind of the repository root at the same absolute path
 - a read-write bind of `../.beads` from the repository root when that directory
   exists; missing Beads state is skipped as an optional default
-- a read-write Codex config bind as current compatibility behavior until the
-  follow-up Codex migration moves that policy into runtime descriptor data
 - a configurable sandbox home policy; the real host home directory is never
   bound wholesale by default
 - an optional `sandbox.path.mode: host_entries` policy that mounts existing
   absolute PATH directories read-only at their original sandbox paths
 - sandbox requirements declared by runtimes selected by loaded workflows:
-  required environment pass-through, fixed environment values, and
-  descriptor-owned static mounts
+  required environment pass-through, fixed environment values,
+  descriptor-owned static mounts, env-sourced mounts, and env values derived
+  from resolved mount targets
 - a private writable `/tmp` tmpfs instead of writable host `/tmp`
 - read-only binds for existing executable/system paths needed to start normal
   configured commands: `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`, and
@@ -120,14 +119,14 @@ orchestration. By default it includes:
 The sandbox does not pass the whole host environment. Orc clears the child
 environment and sets an allowlisted environment into bubblewrap. The default
 allowlist includes `PATH`, `HOME`, `TERM`, `LANG`, `LC_*`, `SHELL`, `USER`,
-`LOGNAME`, `CODEX_HOME`, `OPENAI_API_KEY`, `ORC_SANDBOX`, and
-`ORC_SANDBOX_ROOT`.
+`LOGNAME`, `OPENAI_API_KEY`, `ORC_SANDBOX`, and `ORC_SANDBOX_ROOT`.
 
 `sandbox.env.pass` adds explicit host variables by name when present.
 `sandbox.env.set` sets fixed values and wins over pass-through values with the
-same name. Orc-managed values for `HOME`, `CODEX_HOME`, `ORC_SANDBOX`, and
+same name. Orc-managed values for `HOME`, `ORC_SANDBOX`, and
 `ORC_SANDBOX_ROOT` are set to the resolved sandbox values after host allowlist,
-`sandbox.env.pass`, and `sandbox.env.set` processing.
+`sandbox.env.pass`, and `sandbox.env.set` processing. Runtime descriptors can
+derive additional env values from resolved runtime mounts.
 
 Runtime descriptor `sandbox.requirements.env` entries merge into the sandbox
 environment policy before bubblewrap starts. Static fixed-value conflicts fail
@@ -139,8 +138,7 @@ Runtime descriptor requirements support descriptor-owned env-sourced mounts and
 values can be derived from resolved mount targets while building the bubblewrap
 spec. See
 [../reference/configuration-runtimes.md](../reference/configuration-runtimes.md)
-for the schema. Codex config home handling remains compatibility behavior in
-the sandbox builder until the follow-up descriptor migration lands.
+for the schema.
 
 ## PATH Mount Policy
 
@@ -187,31 +185,22 @@ read-only mount.
 `synthetic` and `host_path`; omitting the field is the same as `synthetic`.
 
 In `synthetic` mode, Orc preserves the original v1 behavior. The sandboxed
-process sees `HOME=/home/orc`. Current Codex compatibility resolves the host
-home from `HOME` or the platform user-home fallback, creates the host `.codex`
-directory when needed, mounts that directory read-write at `/home/orc/.codex`,
-and sets `CODEX_HOME=/home/orc/.codex` in the sandbox.
+process sees `HOME=/home/orc`.
 
 In `host_path` mode, Orc preserves the resolved host HOME path inside
 bubblewrap without binding the whole host home directory. Host HOME is resolved
 from the host `HOME` environment variable when present, otherwise from the
 platform user-home fallback. The result must be absolute. Orc creates empty
 path directories for that HOME inside bubblewrap, sets `HOME` to that absolute
-path, and leaves the host home itself unbound. Current Codex compatibility
-creates host `$HOME/.codex` when needed, mounts it read-write at that same
-absolute path inside the sandbox, and sets `CODEX_HOME` to that path.
+path, and leaves the host home itself unbound.
 
-When host `CODEX_HOME` is set in either home mode, current compatibility
-requires an absolute path, mounts it read-write at the same absolute path inside
-the sandbox, and sets sandbox `CODEX_HOME` to that path.
-
-The generic runtime descriptor schema can represent this Codex-specific
-compatibility as data: use an absolute `CODEX_HOME` source when set, otherwise
-fall back to host HOME plus `.codex`, create the resolved source when requested,
-mount it read-write, and derive sandbox `CODEX_HOME` from the resolved target
-path. The follow-up Codex migration moves the current compatibility behavior
-into the scaffolded descriptor while preserving the same synthetic-home and
-host-path results described above.
+Selected runtime descriptors can add config-home behavior as data. The
+scaffolded Codex runtime uses an env-sourced mount that reads an absolute
+host `CODEX_HOME` when present, otherwise falls back to host HOME plus
+`.codex`, creates the resolved source when requested, mounts it read-write, and
+sets sandbox `CODEX_HOME` from the resolved target path. With synthetic HOME
+the fallback target is `/home/orc/.codex`; with `host_path` HOME the fallback
+target is the resolved host HOME plus `/.codex`.
 
 ## Extra Mounts
 

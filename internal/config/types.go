@@ -170,10 +170,9 @@ type BubblewrapConfig struct {
 
 // BubblewrapMountConfig stores named preset mount policies.
 type BubblewrapMountConfig struct {
-	Repo      string `yaml:"repo"`
-	Beads     string `yaml:"beads"`
-	CodexHome string `yaml:"codex_home"`
-	Tmp       string `yaml:"tmp"`
+	Repo  string `yaml:"repo"`
+	Beads string `yaml:"beads"`
+	Tmp   string `yaml:"tmp"`
 }
 
 // SandboxEnvConfig declares explicit environment passthrough and override

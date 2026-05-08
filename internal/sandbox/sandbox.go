@@ -146,7 +146,6 @@ func buildBwrapArgs(root, cwd string, sandboxConfig *config.SandboxConfig, polic
 	if policy.beadsPath != "" {
 		args = append(args, "--bind", policy.beadsPath, policy.beadsPath)
 	}
-	args = append(args, "--bind", policy.codexHostPath, policy.codexTargetPath)
 	for _, path := range minimalExecutableHostPaths {
 		if pathExists(path) {
 			args = append(args, "--ro-bind", path, path)
@@ -172,13 +171,11 @@ func buildBwrapArgs(root, cwd string, sandboxConfig *config.SandboxConfig, polic
 }
 
 type sandboxPolicy struct {
-	beadsPath       string
-	homePath        string
-	codexHostPath   string
-	codexTargetPath string
-	pathMounts      []resolvedMount
-	extraMounts     []resolvedMount
-	env             map[string]string
+	beadsPath   string
+	homePath    string
+	pathMounts  []resolvedMount
+	extraMounts []resolvedMount
+	env         map[string]string
 }
 
 type resolvedMount struct {
@@ -191,8 +188,7 @@ type resolvedMount struct {
 }
 
 const (
-	syntheticHome      = "/home/orc"
-	defaultCodexTarget = syntheticHome + "/.codex"
+	syntheticHome = "/home/orc"
 )
 
 var defaultEnvAllowlist = []string{
@@ -202,7 +198,6 @@ var defaultEnvAllowlist = []string{
 	"SHELL",
 	"USER",
 	"LOGNAME",
-	"CODEX_HOME",
 	"OPENAI_API_KEY",
 }
 
@@ -230,10 +225,6 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 			return sandboxPolicy{}, fmt.Errorf("resolve host HOME for sandbox path policy: %w", err)
 		}
 	}
-	codexHost, codexTarget, err := resolveCodexHome(sandboxConfig.Home.Mode, home, hostEnv, opts, pathExists)
-	if err != nil {
-		return sandboxPolicy{}, err
-	}
 	beadsPath := filepath.Clean(filepath.Join(root, "..", ".beads"))
 	sandboxEnv, sandboxMounts, setFromMount := mergeRuntimeSandboxRequirements(project, sandboxConfig)
 	extraMounts, resolvedByID, err := resolveExtraMounts(root, beadsPath, home, hostEnv, opts, sandboxMounts, pathExists, stat, evalSymlinks)
@@ -249,12 +240,10 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 		return sandboxPolicy{}, err
 	}
 	policy := sandboxPolicy{
-		homePath:        home,
-		codexHostPath:   codexHost,
-		codexTargetPath: codexTarget,
-		pathMounts:      pathMounts,
-		extraMounts:     extraMounts,
-		env:             resolveEnv(hostEnv, sandboxEnv, home, codexTarget, root),
+		homePath:    home,
+		pathMounts:  pathMounts,
+		extraMounts: extraMounts,
+		env:         resolveEnv(hostEnv, sandboxEnv, home, root),
 	}
 	if pathExists(beadsPath) {
 		policy.beadsPath = beadsPath
@@ -305,34 +294,6 @@ func resolveHostHome(hostEnv map[string]string, opts Options) (string, error) {
 		return "", fmt.Errorf("host HOME %q must resolve to an absolute path", home)
 	}
 	return filepath.Clean(home), nil
-}
-
-func resolveCodexHome(mode, sandboxHome string, hostEnv map[string]string, opts Options, pathExists func(string) bool) (string, string, error) {
-	if codexHome := hostEnv["CODEX_HOME"]; codexHome != "" {
-		if !filepath.IsAbs(codexHome) {
-			return "", "", fmt.Errorf("CODEX_HOME %q must be absolute for sandbox mounting", codexHome)
-		}
-		return filepath.Clean(codexHome), filepath.Clean(codexHome), nil
-	}
-	home, err := resolveHostHome(hostEnv, opts)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve home for default CODEX_HOME: %w", err)
-	}
-	codexHome := filepath.Join(home, ".codex")
-	if !pathExists(codexHome) {
-		mkdirAll := os.MkdirAll
-		if opts.MkdirAll != nil {
-			mkdirAll = opts.MkdirAll
-		}
-		if err := mkdirAll(codexHome, 0o700); err != nil {
-			return "", "", fmt.Errorf("create default CODEX_HOME %q: %w", codexHome, err)
-		}
-	}
-	target := defaultCodexTarget
-	if mode == config.SandboxHomeModeHostPath {
-		target = filepath.Join(sandboxHome, ".codex")
-	}
-	return filepath.Clean(codexHome), filepath.Clean(target), nil
 }
 
 func effectiveSandboxPath(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig) string {
@@ -752,7 +713,7 @@ func isStrictPathAncestor(parent, child string) bool {
 	return rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func resolveEnv(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig, home, codexTarget, root string) map[string]string {
+func resolveEnv(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig, home, root string) map[string]string {
 	env := make(map[string]string)
 	for _, name := range defaultEnvAllowlist {
 		if value, ok := hostEnv[name]; ok {
@@ -771,7 +732,6 @@ func resolveEnv(hostEnv map[string]string, sandboxEnv config.SandboxEnvConfig, h
 	}
 	maps.Copy(env, sandboxEnv.Set)
 	env["HOME"] = home
-	env["CODEX_HOME"] = codexTarget
 	env["ORC_SANDBOX"] = "1"
 	env["ORC_SANDBOX_ROOT"] = root
 	return env
@@ -785,7 +745,6 @@ func (p sandboxPolicy) setupDirs(root string) []string {
 	if p.beadsPath != "" {
 		appendAbsPathDirs(&dirs, seen, p.beadsPath, true)
 	}
-	appendAbsPathDirs(&dirs, seen, p.codexTargetPath, true)
 	for _, mount := range p.pathMounts {
 		appendAbsPathDirs(&dirs, seen, mount.target, false)
 	}

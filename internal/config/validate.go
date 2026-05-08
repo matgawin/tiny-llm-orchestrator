@@ -175,9 +175,6 @@ func validateBubblewrapMountConfig(mounts BubblewrapMountConfig) error {
 	if err := validatePresetMountMode("sandbox.bubblewrap.mounts.beads", mounts.Beads, true); err != nil {
 		return err
 	}
-	if err := validatePresetMountMode("sandbox.bubblewrap.mounts.codex_home", mounts.CodexHome, false); err != nil {
-		return err
-	}
 	if err := validatePresetMountMode("sandbox.bubblewrap.mounts.tmp", mounts.Tmp, false); err != nil {
 		return err
 	}

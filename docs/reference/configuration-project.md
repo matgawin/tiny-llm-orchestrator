@@ -81,9 +81,24 @@ sandbox:
   required: false
   requirements:
     env:
-      pass: [CODEX_HOME, OPENAI_API_KEY]
+      pass: [OPENAI_API_KEY]
       set: {}
-    mounts: []
+      set_from_mount:
+        CODEX_HOME:
+          mount: config_home
+          value: target
+    mounts:
+      - id: config_home
+        source:
+          env: CODEX_HOME
+          fallback:
+            host_home: .codex
+          create: true
+        target:
+          env_same_as_source: true
+          fallback:
+            sandbox_home: .codex
+        mode: rw
 ```
 
 Runtime descriptor validation rejects empty command executables, empty argv
@@ -148,11 +163,6 @@ sandbox:
   bubblewrap:
     enabled: true
     network: true
-    mounts:
-      repo: rw
-      beads: auto
-      codex_home: rw
-      tmp: rw
   env:
     pass: []
     set: {}
@@ -189,13 +199,9 @@ Codex/orchestrator session started through `orc sandbox run`.
 `sandbox.home.mode` is optional and defaults to `synthetic`. Allowed values are
 exactly `synthetic` and `host_path`. `synthetic` keeps sandbox `HOME` at
 `/home/orc`; `host_path` sets sandbox `HOME` to the resolved absolute host HOME
-path without binding the whole host home directory. Current Codex compatibility
-still maps the default host `.codex` directory to the matching sandbox home
-target, and an absolute host `CODEX_HOME` is mounted read-write at the same
-absolute path in both modes. The runtime descriptor schema can express that
-Codex config-home behavior as generic runtime sandbox requirement data; the
-follow-up Codex migration moves the current compatibility behavior into the
-descriptor.
+path without binding the whole host home directory. Runtime descriptors can add
+config-home mounts through generic sandbox requirements; the scaffolded Codex
+runtime descriptor maps `CODEX_HOME` and `.codex` behavior that way.
 See [../features/sandbox-run.md](../features/sandbox-run.md) for current HOME
 resolution and [configuration-runtimes.md](configuration-runtimes.md) for the
 descriptor schema.
@@ -216,9 +222,7 @@ behavior.
 `sandbox.bubblewrap.enabled` is reserved for bubblewrap policy selection; v1
 `orc sandbox run` always shells out to `bwrap` and never treats this field as
 permission to run unsandboxed. `sandbox.bubblewrap.network` accepts `true` or
-`false` and defaults to `true`. Preset `sandbox.bubblewrap.mounts` validates
-named mount policy declarations for the sandbox contract: `repo`, `codex_home`,
-and `tmp` accept `ro` or `rw`; `beads` accepts `auto`, `ro`, or `rw`.
+`false` and defaults to `true`.
 
 `sandbox.env.pass` is an optional list of environment variable names to pass
 from the host when present. `sandbox.env.set` is an optional map of fixed

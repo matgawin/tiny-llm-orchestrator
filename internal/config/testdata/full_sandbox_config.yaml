@@ -18,7 +18,6 @@ sandbox:
     mounts:
       repo: rw
       beads: auto
-      codex_home: rw
       tmp: rw
   env:
     pass: ["TERM"]

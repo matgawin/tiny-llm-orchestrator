@@ -23,16 +23,18 @@ const (
 func TestBuildSpecCreatesHomeDirsBeforeRepoBind(t *testing.T) {
 	root := "/home/tester/project"
 	codexHome := "/home/tester/.codex"
-	project := sandboxProject(root, config.SandboxConfig{
+	project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
 	spec, err := BuildSpec(project, Options{
-		RuntimeGOOS: "linux",
-		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(codexHome),
+		RuntimeGOOS:  "linux",
+		LookPath:     foundBwrap,
+		PathExists:   onlyHostPaths(codexHome),
+		Stat:         allPathsAreDirs,
+		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
 			return []string{"PATH=/usr/bin", "HOME=/home/tester", "CODEX_HOME=" + codexHome}
 		},
@@ -90,7 +92,8 @@ func TestBuildSpecSkipsMissingOptionalBeadsDir(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex")),
+		PathExists:  noHostPaths,
+		Stat:        allPathsAreDirs,
 		Environ:     testEnv(root),
 	})
 	if err != nil {
@@ -103,7 +106,7 @@ func TestBuildSpecSkipsMissingOptionalBeadsDir(t *testing.T) {
 
 func TestBuildSpecCreatesDefaultCodexHomeUnderSyntheticHome(t *testing.T) {
 	root := t.TempDir()
-	project := sandboxProject(root, config.SandboxConfig{
+	project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
@@ -117,7 +120,7 @@ func TestBuildSpecCreatesDefaultCodexHomeUnderSyntheticHome(t *testing.T) {
 		Environ:     testEnv(root),
 		MkdirAll: func(path string, _ os.FileMode) error {
 			created = path
-			return nil
+			return os.MkdirAll(path, 0o700)
 		},
 	})
 	if err != nil {
@@ -136,7 +139,7 @@ func TestBuildSpecCreatesDefaultCodexHomeUnderSyntheticHome(t *testing.T) {
 
 func TestBuildSpecExplicitSyntheticHomePreservesDefaultCodexHomeTarget(t *testing.T) {
 	root := t.TempDir()
-	project := sandboxProject(root, config.SandboxConfig{
+	project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeSynthetic},
@@ -144,10 +147,12 @@ func TestBuildSpecExplicitSyntheticHomePreservesDefaultCodexHomeTarget(t *testin
 	})
 
 	spec, err := BuildSpec(project, Options{
-		RuntimeGOOS: "linux",
-		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex")),
-		Environ:     testEnv(root),
+		RuntimeGOOS:  "linux",
+		LookPath:     foundBwrap,
+		PathExists:   onlyHostPaths(filepath.Join(root, ".codex")),
+		Stat:         allPathsAreDirs,
+		EvalSymlinks: identityEvalSymlinks,
+		Environ:      testEnv(root),
 	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
@@ -163,7 +168,7 @@ func TestBuildSpecHostPathHomeUsesHostHomeEnvAndSamePathDefaultCodexHome(t *test
 	root := t.TempDir()
 	home := filepath.Join(root, "host-home")
 	codexHome := filepath.Join(home, ".codex")
-	project := sandboxProject(root, config.SandboxConfig{
+	project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeHostPath},
@@ -171,10 +176,12 @@ func TestBuildSpecHostPathHomeUsesHostHomeEnvAndSamePathDefaultCodexHome(t *test
 	})
 
 	spec, err := BuildSpec(project, Options{
-		RuntimeGOOS: "linux",
-		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(codexHome),
-		Environ:     testEnv(home),
+		RuntimeGOOS:  "linux",
+		LookPath:     foundBwrap,
+		PathExists:   onlyHostPaths(codexHome),
+		Stat:         allPathsAreDirs,
+		EvalSymlinks: identityEvalSymlinks,
+		Environ:      testEnv(home),
 	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
@@ -196,7 +203,7 @@ func TestBuildSpecHostPathHomeFallsBackToUserHomeDir(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "fallback-home")
 	codexHome := filepath.Join(home, ".codex")
-	project := sandboxProject(root, config.SandboxConfig{
+	project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeHostPath},
@@ -204,9 +211,11 @@ func TestBuildSpecHostPathHomeFallsBackToUserHomeDir(t *testing.T) {
 	})
 
 	spec, err := BuildSpec(project, Options{
-		RuntimeGOOS: "linux",
-		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(codexHome),
+		RuntimeGOOS:  "linux",
+		LookPath:     foundBwrap,
+		PathExists:   onlyHostPaths(codexHome),
+		Stat:         allPathsAreDirs,
+		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
 			return []string{"PATH=/usr/bin"}
 		},
@@ -253,8 +262,8 @@ func TestBuildSpecExplicitCodexHomeUsesSamePathInBothHomeModes(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			codexHome := filepath.Join(root, "explicit-codex-home")
-			project := sandboxProject(root, config.SandboxConfig{
+			codexHome := "/home/tester/explicit-codex-home"
+			project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 				Command:    config.SandboxCommand{Argv: []string{"sh"}},
 				CWD:        ".",
 				Home:       config.SandboxHomeConfig{Mode: tt.mode},
@@ -262,9 +271,11 @@ func TestBuildSpecExplicitCodexHomeUsesSamePathInBothHomeModes(t *testing.T) {
 			})
 
 			spec, err := BuildSpec(project, Options{
-				RuntimeGOOS: "linux",
-				LookPath:    foundBwrap,
-				PathExists:  onlyHostPaths(codexHome),
+				RuntimeGOOS:  "linux",
+				LookPath:     foundBwrap,
+				PathExists:   onlyHostPaths(codexHome),
+				Stat:         allPathsAreDirs,
+				EvalSymlinks: identityEvalSymlinks,
 				Environ: func() []string {
 					return []string{"PATH=/usr/bin", "HOME=/home/tester", "CODEX_HOME=" + codexHome}
 				},
@@ -281,49 +292,58 @@ func TestBuildSpecExplicitCodexHomeUsesSamePathInBothHomeModes(t *testing.T) {
 	}
 }
 
-func TestBuildSpecRejectsRelativeExplicitCodexHome(t *testing.T) {
-	project := sandboxProject(t.TempDir(), config.SandboxConfig{
+func TestBuildSpecRelativeCodexHomeFallsBackToHostHome(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	codexHome := filepath.Join(home, ".codex")
+	project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
-		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeHostPath},
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	_, err := BuildSpec(project, Options{
-		RuntimeGOOS: "linux",
-		LookPath:    foundBwrap,
-		PathExists:  noHostPaths,
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS:  "linux",
+		LookPath:     foundBwrap,
+		PathExists:   onlyHostPaths(codexHome),
+		Stat:         allPathsAreDirs,
+		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
-			return []string{"PATH=/usr/bin", "HOME=/home/tester", "CODEX_HOME=.codex"}
+			return []string{"PATH=/usr/bin", "HOME=" + home, "CODEX_HOME=.codex"}
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), `CODEX_HOME ".codex" must be absolute`) {
-		t.Fatalf("BuildSpec error = %v, want relative CODEX_HOME error", err)
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+	if !containsSequence(spec.Args, "--bind", codexHome, "/home/orc/.codex") {
+		t.Fatalf("bwrap args = %#v, want fallback codex home mounted into synthetic home", spec.Args)
+	}
+	assertEnvContains(t, spec.Env, "CODEX_HOME=/home/orc/.codex")
 }
 
 func TestBuildSpecManagedHomeAndCodexHomeOverrideSandboxEnvSet(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "host-home")
 	codexHome := filepath.Join(home, ".codex")
-	project := sandboxProject(root, config.SandboxConfig{
+	project := sandboxProjectWithCodexRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeHostPath},
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		Env: config.SandboxEnvConfig{
-			Pass: []string{"HOME", "CODEX_HOME"},
+			Pass: []string{"HOME"},
 			Set: map[string]string{
-				"HOME":       "/wrong/home",
-				"CODEX_HOME": "/wrong/codex",
+				"HOME": "/wrong/home",
 			},
 		},
 	})
 
 	spec, err := BuildSpec(project, Options{
-		RuntimeGOOS: "linux",
-		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(codexHome),
+		RuntimeGOOS:  "linux",
+		LookPath:     foundBwrap,
+		PathExists:   onlyHostPaths(codexHome),
+		Stat:         allPathsAreDirs,
+		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
 			return []string{"PATH=/usr/bin", "HOME=" + home, "CODEX_HOME=" + codexHome}
 		},
@@ -334,14 +354,49 @@ func TestBuildSpecManagedHomeAndCodexHomeOverrideSandboxEnvSet(t *testing.T) {
 	assertEnvContains(t, spec.Env, "HOME="+home)
 	assertEnvContains(t, spec.Env, "CODEX_HOME="+codexHome)
 	assertEnvMissing(t, spec.Env, "HOME=/wrong/home")
-	assertEnvMissing(t, spec.Env, "CODEX_HOME=/wrong/codex")
+}
+
+func TestBuildSpecNonCodexRuntimeDoesNotAddCodexMountOrEnv(t *testing.T) {
+	root := t.TempDir()
+	codexHome := filepath.Join(root, ".codex")
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+	project.Workflows = map[string]config.Workflow{
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "recorder"},
+			Steps: map[string]config.Step{
+				"code": {Agent: "coder"},
+			},
+		},
+	}
+	project.Runtimes = map[string]config.Runtime{
+		"recorder": {ID: "recorder", Sandbox: config.RuntimeSandbox{Supported: true}},
+	}
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(codexHome),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CODEX_HOME=" + codexHome}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	if containsSequence(spec.Args, "--bind", codexHome, "/home/orc/.codex") || containsSequence(spec.Args, "--bind", codexHome, codexHome) {
+		t.Fatalf("bwrap args = %#v, want no Codex mount for non-Codex runtime", spec.Args)
+	}
+	assertEnvMissing(t, spec.Env, "CODEX_HOME=")
 }
 
 func TestBuildSpecHostPathHomeAllowsExplicitSubpathMount(t *testing.T) {
 	root := t.TempDir()
 	home := testHomePath
 	hostBun := filepath.Join(root, "bun")
-	codexHome := filepath.Join(home, ".codex")
 	project := sandboxProject(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
@@ -355,7 +410,7 @@ func TestBuildSpecHostPathHomeAllowsExplicitSubpathMount(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(hostBun, codexHome),
+		PathExists:  onlyHostPaths(hostBun),
 		Environ:     testEnv(home),
 	})
 	if err != nil {
@@ -380,7 +435,6 @@ func TestBuildSpecHostPathHomeRejectsHomeTargetAndAncestors(t *testing.T) {
 			root := t.TempDir()
 			home := testHomePath
 			hostMount := filepath.Join(root, "mount")
-			codexHome := filepath.Join(home, ".codex")
 			project := sandboxProject(root, config.SandboxConfig{
 				Command:    config.SandboxCommand{Argv: []string{"sh"}},
 				CWD:        ".",
@@ -394,7 +448,7 @@ func TestBuildSpecHostPathHomeRejectsHomeTargetAndAncestors(t *testing.T) {
 			_, err := BuildSpec(project, Options{
 				RuntimeGOOS: "linux",
 				LookPath:    foundBwrap,
-				PathExists:  onlyHostPaths(hostMount, codexHome),
+				PathExists:  onlyHostPaths(hostMount),
 				Environ:     testEnv(home),
 			})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -414,7 +468,7 @@ func TestBuildSpecDefaultPathModeDoesNotAddAutomaticPathMounts(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex"),
+		PathExists:  noHostPaths,
 		Stat:        fakePathStat(map[string]bool{"/opt/tool/bin": true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			"/opt/tool/bin": "/opt/tool/bin",
@@ -456,7 +510,7 @@ func TestBuildSpecPathHostEntriesMountsEffectivePathEntries(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex"),
+		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
 			"/opt/tool/bin":          true,
 			"/profile/bin":           true,
@@ -511,7 +565,7 @@ func TestBuildSpecPathHostEntriesWorksInHostPathHomeMode(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex"),
+		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
 			"/home/user/.bun/bin": true,
 		}),
@@ -545,7 +599,7 @@ func TestBuildSpecPathHostEntriesUsesSandboxEnvSetPath(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex"),
+		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
 			"/host/bin":   true,
 			"/custom/bin": true,
@@ -593,7 +647,7 @@ func TestBuildSpecPathHostEntriesRejectsUnsafeTargets(t *testing.T) {
 			_, err := BuildSpec(project, Options{
 				RuntimeGOOS: "linux",
 				LookPath:    foundBwrap,
-				PathExists:  onlyHostPaths("/home/user/.codex"),
+				PathExists:  noHostPaths,
 				Stat:        fakePathStat(map[string]bool{tt.path: true}),
 				EvalSymlinks: fakeEvalSymlinks(map[string]string{
 					tt.path: tt.path,
@@ -620,7 +674,7 @@ func TestBuildSpecPathHostEntriesSkipsPathsAlreadyUnderSystemMounts(t *testing.T
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex"),
+		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
 			"/etc":                            true,
 			"/etc/profiles/per-user/matt/bin": true,
@@ -656,7 +710,7 @@ func TestBuildSpecPathHostEntriesSkipsPathsAlreadyUnderMountedTrees(t *testing.T
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex", "/repo/.beads"),
+		PathExists:  onlyHostPaths("/repo/.beads"),
 		Stat: fakePathStat(map[string]bool{
 			"/repo/project/.direnv/bin": true,
 			"/repo/.beads/bin":          true,
@@ -693,7 +747,7 @@ func TestBuildSpecPathHostEntriesRejectsExplicitMountConflict(t *testing.T) {
 	_, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex", "/elsewhere/bin"),
+		PathExists:  onlyHostPaths("/elsewhere/bin"),
 		Stat:        fakePathStat(map[string]bool{"/opt/tool/bin": true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			"/opt/tool/bin": "/opt/tool/bin",
@@ -721,7 +775,7 @@ func TestBuildSpecPathHostEntriesEmitsAutomaticMountsBeforeExplicitMounts(t *tes
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths("/home/user/.codex", "/elsewhere/bin"),
+		PathExists:  onlyHostPaths("/elsewhere/bin"),
 		Stat:        fakePathStat(map[string]bool{"/opt/tool/bin": true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			"/opt/tool/bin": "/opt/tool/bin",
@@ -754,7 +808,7 @@ func TestBuildSpecSkipsMissingOptionalExtraMount(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex")),
+		PathExists:  noHostPaths,
 		Environ:     testEnv(root),
 	})
 	if err != nil {
@@ -802,7 +856,7 @@ func TestBuildSpecIncludesSelectedRuntimeSandboxRequirements(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), runtimeCache),
+		PathExists:  onlyHostPaths(runtimeCache),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			root:         root,
 			runtimeCache: runtimeCache,
@@ -853,7 +907,7 @@ func TestBuildSpecRejectsMissingRequiredRuntimeSandboxMount(t *testing.T) {
 	_, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex")),
+		PathExists:  noHostPaths,
 		Environ:     testEnv(root),
 	})
 	if err == nil || !strings.Contains(err.Error(), `runtime "custom" sandbox.requirements.mounts[0].host ".orc/cache/missing" does not exist`) {
@@ -932,7 +986,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
 			_, err := BuildSpec(project, Options{
 				RuntimeGOOS: "linux",
 				LookPath:    foundBwrap,
-				PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), runtimeCache),
+				PathExists:  onlyHostPaths(runtimeCache),
 				Environ:     testEnv(root),
 			})
 			if err == nil || !strings.Contains(err.Error(), `runtime "custom" sandbox.requirements.mounts[0].target`) || !strings.Contains(err.Error(), tt.want) {
@@ -976,7 +1030,7 @@ func TestBuildSpecResolvesEnvSourcedRuntimeSandboxMount(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		PathExists:  onlyHostPaths(source),
 		Stat:        fakePathStat(map[string]bool{source: true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			source: source,
@@ -1007,7 +1061,7 @@ func TestBuildSpecAllowsEnvSourcedSamePathRuntimeSandboxMountUnderHome(t *testin
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		PathExists:  onlyHostPaths(source),
 		Stat:        fakePathStat(map[string]bool{source: true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			source: source,
@@ -1038,7 +1092,7 @@ func TestBuildSpecRejectsEnvSourcedSamePathRuntimeSandboxMountOverRepository(t *
 	_, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		PathExists:  onlyHostPaths(source),
 		Stat:        fakePathStat(map[string]bool{source: true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			source: source,
@@ -1090,7 +1144,7 @@ func TestBuildSpecEnvFromMountUsesRuntimeScopedMountID(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), customSource, recorderSource),
+		PathExists:  onlyHostPaths(customSource, recorderSource),
 		Stat: fakePathStat(map[string]bool{
 			customSource:   true,
 			recorderSource: true,
@@ -1153,7 +1207,7 @@ func TestBuildSpecRejectsConflictingEnvFromMountNamesAcrossRuntimes(t *testing.T
 	_, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), customSource, recorderSource),
+		PathExists:  onlyHostPaths(customSource, recorderSource),
 		Stat: fakePathStat(map[string]bool{
 			customSource:   true,
 			recorderSource: true,
@@ -1191,7 +1245,7 @@ func TestBuildSpecEnvFromMountResolvesDeduplicatedRuntimeMount(t *testing.T) {
 	spec, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		PathExists:  onlyHostPaths(source),
 		Stat:        fakePathStat(map[string]bool{source: true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			source: source,
@@ -1447,7 +1501,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountAutomaticPathConflict(t *testing.T) 
 	_, err := BuildSpec(project, Options{
 		RuntimeGOOS: "linux",
 		LookPath:    foundBwrap,
-		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), source),
+		PathExists:  onlyHostPaths(source),
 		Stat:        fakePathStat(map[string]bool{source: true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
 			source: source,
@@ -1574,6 +1628,28 @@ func sandboxProject(root string, sandboxConfig config.SandboxConfig) *config.Pro
 	}
 }
 
+func sandboxProjectWithCodexRuntime(root string, sandboxConfig config.SandboxConfig) *config.Project {
+	project := sandboxProject(root, sandboxConfig)
+	project.Workflows = map[string]config.Workflow{
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "codex"},
+			Steps: map[string]config.Step{
+				"code": {Agent: "coder"},
+			},
+		},
+	}
+	project.Runtimes = map[string]config.Runtime{
+		"codex": {
+			ID: "codex",
+			Sandbox: config.RuntimeSandbox{
+				Supported:    true,
+				Requirements: codexRuntimeRequirements(),
+			},
+		},
+	}
+	return project
+}
+
 func sandboxProjectWithRuntime(root string, sandboxConfig config.SandboxConfig, requirements config.RuntimeSandboxRequirements) *config.Project {
 	project := sandboxProject(root, sandboxConfig)
 	project.Workflows = map[string]config.Workflow{
@@ -1594,6 +1670,33 @@ func sandboxProjectWithRuntime(root string, sandboxConfig config.SandboxConfig, 
 		},
 	}
 	return project
+}
+
+func codexRuntimeRequirements() config.RuntimeSandboxRequirements {
+	return config.RuntimeSandboxRequirements{
+		Env: config.RuntimeSandboxEnvConfig{
+			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
+				"CODEX_HOME": {Mount: "config_home", Value: "target"},
+			},
+		},
+		Mounts: []config.RuntimeSandboxMount{
+			{
+				ID: "config_home",
+				Source: config.RuntimeSandboxMountSource{
+					Env:    "CODEX_HOME",
+					Create: true,
+					Fallback: config.RuntimeSandboxMountSourceFallback{
+						HostHome: ".codex",
+					},
+				},
+				Target: config.RuntimeSandboxMountTarget{
+					EnvSameAsSource: true,
+					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: ".codex"},
+				},
+				Mode: "rw",
+			},
+		},
+	}
 }
 
 func runtimeRequirementsWithEnvMount(envName string) config.RuntimeSandboxRequirements {
@@ -1665,6 +1768,14 @@ func onlyHostPaths(paths ...string) func(string) bool {
 	return func(path string) bool {
 		return slices.Contains(paths, path)
 	}
+}
+
+func allPathsAreDirs(path string) (os.FileInfo, error) {
+	return fakeFileInfo{name: filepath.Base(path), dir: true}, nil
+}
+
+func identityEvalSymlinks(path string) (string, error) {
+	return path, nil
 }
 
 type fakeFileInfo struct {
