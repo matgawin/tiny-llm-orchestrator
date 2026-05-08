@@ -116,7 +116,7 @@ command:
   executable: codex
   normal_args: [--ask-for-approval, never]
   sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
-  args: [exec, --skip-git-repo-check, -]
+  args: [exec, --skip-git-repo-check, "-"]
 prompt:
   delivery: stdin
 model:

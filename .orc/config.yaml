@@ -48,3 +48,5 @@ agents:
   readability-reviewer: agents/readability-reviewer.md
   redundancy-reviewer: agents/redundancy-reviewer.md
   docs-reviewer: agents/docs-reviewer.md
+runtimes:
+  codex: runtimes/codex.yaml

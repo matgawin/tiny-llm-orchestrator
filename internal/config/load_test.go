@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -77,6 +78,30 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	}
 	if got := workflow.ReferencedAgents["planner"].Path; got != "agents/planner.md" {
 		t.Fatalf("planner workflow agent path = %q, want agents/planner.md", got)
+	}
+}
+
+func TestLoadCurrentRepositoryConfigUsesExplicitCodexRuntime(t *testing.T) {
+	project, err := Load(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if got := project.Config.Runtimes[testRuntimeCodex]; got != "runtimes/codex.yaml" {
+		t.Fatalf("config runtimes.codex = %q, want runtimes/codex.yaml", got)
+	}
+	codex, ok := project.Runtimes[testRuntimeCodex]
+	if !ok {
+		t.Fatal("runtime codex was not loaded")
+	}
+	wantArgs := []string{"exec", "--skip-git-repo-check", "-"}
+	if !slices.Equal(codex.Command.Args, wantArgs) {
+		t.Fatalf("codex command args = %#v, want %#v", codex.Command.Args, wantArgs)
+	}
+	for name, workflow := range project.Workflows {
+		if got := workflow.Defaults.Runtime; got != testRuntimeCodex {
+			t.Fatalf("workflow %s defaults.runtime = %q, want codex", name, got)
+		}
 	}
 }
 
