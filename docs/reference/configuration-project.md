@@ -194,7 +194,7 @@ symlink.
 `true`, `orc worker launch-next` refuses to run unless the process has
 `ORC_SANDBOX=1` and `ORC_SANDBOX_ROOT` matches the current repository root.
 Enable it for projects that expect workers to be launched only by a top-level
-Codex/orchestrator session started through `orc sandbox run`.
+orchestrator session started through `orc sandbox run`.
 
 `sandbox.home.mode` is optional and defaults to `synthetic`. Allowed values are
 exactly `synthetic` and `host_path`. `synthetic` keeps sandbox `HOME` at
@@ -239,6 +239,11 @@ home-local tool directories such as `/home/user/.bun` or
 `/home/user/.cache/tool` must be mounted explicitly with concrete absolute
 targets strictly under the active sandbox HOME path; the active HOME itself and
 its ancestors are rejected.
+
+These mounts are generic project-level sandbox inputs for tools, caches, and
+external worktrees. They merge with sandbox requirements from the runtimes
+selected by loaded workflows before bubblewrap starts; they are not tied to any
+specific runtime and worker launch does not add additional mounts dynamically.
 
 Sandbox config values are not shell-expanded or interpolated. `$HOME`,
 `${HOME}`, `~`, `$(which codex)`, and backtick command substitutions are

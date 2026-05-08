@@ -9,7 +9,7 @@ prompt:
 model:
   supported: true
   required: false
-  allowed: []
+  allowed: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"]
   args: [--model, "{model}"]
 directories:
   supported: true

@@ -44,7 +44,7 @@ in {
       shellHook
       + ''
         if [ "''${ORC_SANDBOX}" == "1" ]; then
-          exec codex --dangerously-bypass-approvals-and-sandbox
+          exec codex --dangerously-bypass-approvals-and-sandbox --model gpt-5.5
         fi
       '';
   };

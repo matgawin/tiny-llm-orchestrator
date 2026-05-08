@@ -12,6 +12,7 @@ defaults:
   timeout: 30m
   report_exit_grace: 30s
   runtime: codex
+  model: gpt-5.5
   retries:
     failed/missing_report: 1
     failed/timeout: 0

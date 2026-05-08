@@ -393,17 +393,25 @@ to files, symlink resolution failures, host paths that escape allowed roots,
 protected target conflicts, mount collisions with project mounts or automatic
 mounts, and `env.set_from_mount` reference resolution.
 
-Worker launch does not add mounts to an already-running sandbox. It only checks
-the selected runtime's `sandbox.supported` and `sandbox.required` policy
-against the active verified Orc sandbox markers.
+Worker launch does not add mounts to an already-running sandbox. It checks the
+selected runtime's `sandbox.supported` and `sandbox.required` policy against
+the active verified Orc sandbox markers, then verifies any effective
+`runtime_dirs` against the sandbox coverage marker described below before
+process start.
 
 In sandbox mode, `runtime_dirs` must already resolve inside an available
 sandbox mount or be covered by project or runtime sandbox mount requirements.
-Static path-shape errors fail during workflow validation. Missing host paths or
-unavailable sandbox coverage fail while building the sandbox spec. If a worker
-is launched inside a verified sandbox whose selected runtime requires a
-directory that is not visible in the active sandbox, the launcher fails before
-process start with a runtime directory sandbox coverage error.
+Static path-shape errors fail during workflow validation. `orc sandbox run`
+builds `ORC_SANDBOX_RUNTIME_DIR_COVERAGE` from the repository mount plus
+resolved project `sandbox.mounts` and selected runtime
+`sandbox.requirements.mounts`. If a worker is launched inside a verified
+sandbox, the launcher resolves each effective `runtime_dirs` entry exactly as
+it will be passed in argv, requires that resolved path to be covered by that
+marker, and stats it from inside the active sandbox. Missing, non-directory, or
+uncovered runtime directories fail before worker process start with a runtime
+directory sandbox coverage error naming the step id, runtime id, original
+`runtime_dirs` value, and resolved path. Non-sandboxed launches keep the
+existing validation and argv behavior and do not gain existence checks.
 
 ## Launcher Overrides
 
@@ -530,15 +538,17 @@ Workflow validation validates:
 Sandbox launch validates host-dependent sandbox requirement behavior before
 starting bubblewrap. That launch-time validation covers env-sourced mount source
 resolution, home fallback resolution, explicit source creation, symlink
-resolution, mount collisions, protected target conflicts, and env-from-mount
-target values.
+resolution, mount collisions, protected target conflicts, env-from-mount target
+values, and construction of the runtime directory coverage marker from the
+mounts that will exist inside the sandbox.
 
 Worker launch validates only the selected runtime resolution that depends on
 the selected step and active run, selected prompt delivery, active sandbox mode
-compatibility, placeholder value availability, and override bypass behavior. It
-must fail before process start for missing selected runtime data, unsupported
-prompt delivery, missing required placeholder values, or active sandbox policy
-conflicts.
+compatibility, runtime directory visibility in verified sandbox mode,
+placeholder value availability, and override bypass behavior. It must fail
+before process start for missing selected runtime data, unsupported prompt
+delivery, missing required placeholder values, uncovered or invisible
+`runtime_dirs`, or active sandbox policy conflicts.
 
 ## Scope Exclusions
 

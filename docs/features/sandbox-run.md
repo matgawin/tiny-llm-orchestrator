@@ -222,12 +222,15 @@ Runtime sandbox requirements are selected from loaded workflows before
 bubblewrap starts. Static conflicts that do not require host inspection fail
 during project config load. Host-dependent failures, including missing required
 host paths, source paths that point to files, symlink resolution failures,
-protected target conflicts that depend on resolved paths, mount collisions with
-project or automatic mounts, and unavailable sandbox coverage for selected
-`runtime_dirs`, fail during sandbox launch preparation. Worker launch does not
-add mounts to an already-running sandbox; it only verifies that the selected
-runtime is compatible with the active sandbox markers and that required runtime
-directories are visible through existing sandbox coverage.
+protected target conflicts that depend on resolved paths, and mount collisions
+with project or automatic mounts, fail during sandbox launch preparation. That
+same preparation records runtime directory coverage from the repository mount
+plus resolved project `sandbox.mounts` and selected runtime requirements.
+Worker launch does not add mounts to an already-running sandbox; it only
+verifies that the selected runtime is compatible with the active sandbox
+markers and that required runtime directories are covered and visible through
+existing sandbox coverage before process start. Non-sandboxed worker launches
+keep the existing `runtime_dirs` argv behavior and do not add existence checks.
 
 Writable repo-relative host paths must stay inside the repository and must not
 escape through traversal or symlinks. Mount targets must be clean absolute

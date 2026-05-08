@@ -229,6 +229,14 @@ markers select normal runtime args unless `sandbox.require_for_workers: true`
 or the selected runtime's `sandbox.required: true` requires a verified sandbox,
 in which case launch is refused before process start.
 
+When sandbox mode is verified, the launcher also checks effective
+`runtime_dirs` before building the final worker process. It resolves each entry
+the same way it will substitute `{dir}`, requires the resolved path to be
+covered by the active sandbox's repository mount, project `sandbox.mounts`, or
+selected runtime sandbox requirements, and stats the path from inside the
+sandbox. Missing, non-directory, or uncovered paths fail before process start;
+the launcher never adds mounts dynamically for `runtime_dirs`.
+
 The command runs from the project root and resolves `command.executable` from
 the effective worker environment. In the Nix development shell, `codex` is the
 repo wrapper that adds the Beads directory before invoking the underlying Codex
