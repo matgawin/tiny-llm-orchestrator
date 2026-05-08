@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
@@ -114,7 +115,7 @@ func TestRunProcessZeroExitNonReaderWithLargePromptRecordsMissingReport(t *testi
 		RunID:   runID,
 		Command: []string{"sh", "-c", "exit 0"},
 		Time:    fixedLauncherTime(),
-	}, attempt, prompt, fixedLauncherTime(), nil)
+	}, attempt, promptrender.Result{Content: prompt}, fixedLauncherTime(), nil)
 	if err != nil {
 		t.Fatalf("runProcess returned error: %v", err)
 	}
@@ -425,7 +426,7 @@ func TestRunProcessCancellationBeforeLogSetupTerminalizesWithoutSpawn(t *testing
 		RunID:   runID,
 		Command: []string{"sh", "-c", "touch " + shellQuote(markerPath)},
 		Time:    fixedLauncherTime(),
-	}, attempt, []byte("prompt\n"), fixedLauncherTime(), nil)
+	}, attempt, promptrender.Result{Content: []byte("prompt\n")}, fixedLauncherTime(), nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("runProcess error = %v, want context.Canceled", err)
 	}
@@ -452,7 +453,7 @@ func TestRunProcessCancellationBeforeStartTerminalizesWithoutSpawn(t *testing.T)
 			RunID:   runID,
 			Command: []string{"sh", "-c", "touch " + shellQuote(markerPath)},
 			Time:    fixedLauncherTime(),
-		}, attempt, []byte("prompt\n"), fixedLauncherTime(), nil)
+		}, attempt, promptrender.Result{Content: []byte("prompt\n")}, fixedLauncherTime(), nil)
 		done <- launchOutcome{result: Result{Attempt: result, Launched: launched}, err: err}
 	})
 	outcome := <-done
@@ -505,7 +506,7 @@ func TestRunProcessCancellationWhileProcessMetadataBlockedDoesNotReleaseWorkerEx
 			RunID:   runID,
 			Command: []string{"sh", "-c", "touch " + shellQuote(markerPath)},
 			Time:    fixedLauncherTime(),
-		}, attempt, []byte("prompt\n"), fixedLauncherTime(), nil)
+		}, attempt, promptrender.Result{Content: []byte("prompt\n")}, fixedLauncherTime(), nil)
 		done <- launchOutcome{result: Result{Attempt: result, Launched: launched}, err: err}
 	})
 	outcome := <-done

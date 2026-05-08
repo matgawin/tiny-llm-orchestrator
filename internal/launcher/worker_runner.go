@@ -8,10 +8,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"slices"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
@@ -20,14 +23,14 @@ import (
 const (
 	warningKindPostReportGraceTerminated = "post_report_grace_terminated"
 	warningKindPostReportProcessExit     = "post_report_process_exit"
+
+	runtimePromptDeliveryStdin = "stdin"
+	runtimePromptDeliveryFile  = "file"
 )
 
-var (
-	defaultCommand        = []string{"codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check", "-"}
-	sandboxDefaultCommand = []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check", "-"}
-)
+var runtimeArgPlaceholderRegex = regexp.MustCompile(`\{[^{}]+\}`)
 
-func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt []byte, at time.Time, progressEnv map[string]string) (runstore.Attempt, runstore.ArtifactRef, bool, error) {
+func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, prompt promptrender.Result, at time.Time, progressEnv map[string]string) (runstore.Attempt, runstore.ArtifactRef, bool, error) {
 	runner := workerRunner{
 		ctx:         ctx,
 		loaded:      loaded,
@@ -45,10 +48,11 @@ type workerRunner struct {
 	loaded      runcontext.Context
 	opts        Options
 	attempt     runstore.Attempt
-	prompt      []byte
+	prompt      promptrender.Result
 	at          time.Time
 	progressEnv map[string]string
 	command     []string
+	promptMode  string
 	workerEnv   []string
 	logRef      runstore.ArtifactRef
 	logFile     *os.File
@@ -88,7 +92,14 @@ func (r *workerRunner) run() (runstore.Attempt, runstore.ArtifactRef, bool, erro
 func (r *workerRunner) selectCommand() (runstore.Attempt, error) {
 	r.command = r.opts.Command
 	if len(r.command) == 0 {
-		r.command = r.defaultCommand()
+		command, promptMode, err := r.runtimeCommand()
+		if err != nil {
+			return r.finishPreStart(exitStateInvalidCommand, runstore.ArtifactRef{}, err)
+		}
+		r.command = command
+		r.promptMode = promptMode
+	} else {
+		r.promptMode = runtimePromptDeliveryStdin
 	}
 	if r.command[0] == "" {
 		err := errors.New("worker command is required")
@@ -100,11 +111,149 @@ func (r *workerRunner) selectCommand() (runstore.Attempt, error) {
 	return runstore.Attempt{}, nil
 }
 
-func (r *workerRunner) defaultCommand() []string {
-	if r.loaded.Project.Config.Sandbox != nil && verifyWorkerRepoSandbox(r.loaded.Project.Root) == nil {
-		return slices.Clone(sandboxDefaultCommand)
+func (r *workerRunner) runtimeCommand() ([]string, string, error) {
+	step, ok := r.loaded.Workflow.Steps[r.attempt.StepID]
+	if !ok {
+		return nil, "", fmt.Errorf("step %q is not configured", r.attempt.StepID)
 	}
-	return slices.Clone(defaultCommand)
+	runtimeID := r.loaded.Workflow.EffectiveRuntime(step)
+	if runtimeID == "" {
+		return nil, "", fmt.Errorf("step %q has no effective runtime", r.attempt.StepID)
+	}
+	runtime, ok := r.loaded.Project.Runtimes[runtimeID]
+	if !ok {
+		return nil, "", fmt.Errorf("step %q references missing runtime %q", r.attempt.StepID, runtimeID)
+	}
+	promptMode := runtime.Prompt.Delivery
+	if promptMode != runtimePromptDeliveryStdin && promptMode != runtimePromptDeliveryFile {
+		return nil, "", fmt.Errorf("runtime %q prompt.delivery %q is unsupported by launcher", runtimeID, promptMode)
+	}
+	sandboxMode := r.loaded.Project.Config.Sandbox != nil && verifyWorkerRepoSandbox(r.loaded.Project.Root) == nil
+	if sandboxMode && !runtime.Sandbox.Supported {
+		return nil, "", fmt.Errorf("runtime %q does not support sandbox worker launches", runtimeID)
+	}
+	if !sandboxMode && runtime.Sandbox.Required {
+		return nil, "", fmt.Errorf("runtime %q requires sandbox worker launch but Orc sandbox markers are not verified", runtimeID)
+	}
+
+	values := runtimePlaceholderValues{
+		model:      r.loaded.Workflow.EffectiveModel(step, runtime),
+		promptFile: r.prompt.Path,
+		agentID:    r.attempt.AgentID,
+		stepID:     r.attempt.StepID,
+		attemptID:  r.attempt.AttemptID,
+		runID:      r.loaded.Run.ID,
+	}
+	if runtime.Model.Required && values.model == "" {
+		return nil, "", fmt.Errorf("runtime %q requires a model but no effective model resolved", runtimeID)
+	}
+	if values.model != "" && !runtime.Model.Supported {
+		return nil, "", fmt.Errorf("runtime %q does not support model arguments", runtimeID)
+	}
+	runtimeDirs := r.loaded.Workflow.EffectiveRuntimeDirs(step)
+	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
+		return nil, "", fmt.Errorf("runtime %q does not support runtime_dirs", runtimeID)
+	}
+	if len(runtimeDirs) > 0 && len(runtime.Directories.Args) == 0 {
+		return nil, "", fmt.Errorf("runtime %q directories.args are required for runtime_dirs", runtimeID)
+	}
+	if promptMode == runtimePromptDeliveryFile && values.promptFile == "" {
+		return nil, "", fmt.Errorf("runtime %q prompt.delivery=file requires a persisted prompt artifact path", runtimeID)
+	}
+
+	command := []string{runtime.Command.Executable}
+	if sandboxMode {
+		command = append(command, runtime.Command.SandboxArgs...)
+	} else {
+		command = append(command, runtime.Command.NormalArgs...)
+	}
+	command = append(command, runtime.Command.Args...)
+	if values.model != "" {
+		command = append(command, runtime.Model.Args...)
+	}
+	var err error
+	command, err = substituteRuntimePlaceholders(command, values)
+	if err != nil {
+		return nil, "", fmt.Errorf("runtime %q command args: %w", runtimeID, err)
+	}
+	for _, dir := range runtimeDirs {
+		dirValues := values
+		dirValues.dir = effectiveRuntimeDir(r.loaded.Project.Root, dir)
+		dirArgs, err := substituteRuntimePlaceholders(runtime.Directories.Args, dirValues)
+		if err != nil {
+			return nil, "", fmt.Errorf("runtime %q directories args: %w", runtimeID, err)
+		}
+		command = append(command, dirArgs...)
+	}
+	return command, promptMode, nil
+}
+
+type runtimePlaceholderValues struct {
+	model      string
+	promptFile string
+	agentID    string
+	stepID     string
+	attemptID  string
+	runID      string
+	dir        string
+}
+
+func effectiveRuntimeDir(root, dir string) string {
+	if filepath.IsAbs(dir) {
+		return filepath.Clean(dir)
+	}
+	return filepath.Join(root, filepath.FromSlash(dir))
+}
+
+func substituteRuntimePlaceholders(args []string, values runtimePlaceholderValues) ([]string, error) {
+	out := make([]string, len(args))
+	for i, arg := range args {
+		var err error
+		out[i], err = substituteRuntimeArgPlaceholders(arg, values)
+		if err != nil {
+			return nil, fmt.Errorf("argv[%d]: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+func substituteRuntimeArgPlaceholders(arg string, values runtimePlaceholderValues) (string, error) {
+	result := arg
+	for _, placeholder := range runtimeArgPlaceholderRegex.FindAllString(arg, -1) {
+		value, ok := runtimePlaceholderValue(placeholder, values)
+		if !ok {
+			return "", fmt.Errorf("unknown placeholder %s", placeholder)
+		}
+		if value == "" {
+			return "", fmt.Errorf("placeholder %s has no value", placeholder)
+		}
+		result = strings.ReplaceAll(result, placeholder, value)
+	}
+	if strings.ContainsAny(runtimeArgPlaceholderRegex.ReplaceAllString(arg, ""), "{}") {
+		return "", errors.New("malformed placeholder syntax")
+	}
+	return result, nil
+}
+
+func runtimePlaceholderValue(placeholder string, values runtimePlaceholderValues) (string, bool) {
+	switch placeholder {
+	case "{model}":
+		return values.model, true
+	case "{prompt_file}":
+		return values.promptFile, true
+	case "{agent_id}":
+		return values.agentID, true
+	case "{step_id}":
+		return values.stepID, true
+	case "{attempt_id}":
+		return values.attemptID, true
+	case "{run_id}":
+		return values.runID, true
+	case "{dir}":
+		return values.dir, true
+	default:
+		return "", false
+	}
 }
 
 func (r *workerRunner) openLog() (runstore.Attempt, error) {
@@ -141,11 +290,13 @@ func (r *workerRunner) prepareWorkerCommand() (runstore.Attempt, error) {
 }
 
 func (r *workerRunner) startWorker() (runstore.Attempt, error) {
-	stdin, err := r.cmd.StdinPipe()
-	if err != nil {
-		return r.finishLoggedStartFailure(exitStateStartFailed, err)
+	if r.promptMode == runtimePromptDeliveryStdin {
+		stdin, err := r.cmd.StdinPipe()
+		if err != nil {
+			return r.finishLoggedStartFailure(exitStateStartFailed, err)
+		}
+		r.stdin = stdin
 	}
-	r.stdin = stdin
 	if err := r.cmd.Start(); err != nil {
 		return r.finishLoggedStartFailure(exitStateStartFailed, err)
 	}
@@ -178,11 +329,15 @@ func (r *workerRunner) recordProcessAndRelease() (runstore.Attempt, error) {
 
 func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
 	promptWriteDone := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(r.stdin, bytes.NewReader(r.prompt))
-		closeErr := r.stdin.Close()
-		promptWriteDone <- errors.Join(err, closeErr)
-	}()
+	if r.promptMode == runtimePromptDeliveryStdin {
+		go func() {
+			_, err := io.Copy(r.stdin, bytes.NewReader(r.prompt.Content))
+			closeErr := r.stdin.Close()
+			promptWriteDone <- errors.Join(err, closeErr)
+		}()
+	} else {
+		promptWriteDone <- nil
+	}
 	waitResult := r.waitWithTimeoutAndReport()
 	promptWriteErr := <-promptWriteDone
 	if promptWriteErr != nil && waitResult.err != nil {

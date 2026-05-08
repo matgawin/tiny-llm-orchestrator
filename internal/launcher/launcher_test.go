@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
@@ -543,7 +544,7 @@ func runProcessWithScheduledReadyReport(t *testing.T, scenario scheduledReadyRep
 		RunID:   runID,
 		Command: scenario.Command,
 		Time:    fixedLauncherTime(),
-	}, attempt, prompt, fixedLauncherTime(), nil)
+	}, attempt, promptrender.Result{Content: prompt}, fixedLauncherTime(), nil)
 	elapsed := time.Since(started)
 	waitForReport()
 	if err != nil {

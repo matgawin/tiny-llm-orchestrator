@@ -222,7 +222,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, Prompt: prompt.Ref, SoftCap: softCap}, finishErr)
 	}
 
-	attempt, logRef, launched, err := runProcess(ctx, loaded, opts, attempt, prompt.Content, at, progressDisplay.Env())
+	attempt, logRef, launched, err := runProcess(ctx, loaded, opts, attempt, prompt, at, progressDisplay.Env())
 	result := Result{RunID: opts.RunID, Attempt: attempt, Prompt: prompt.Ref, Log: logRef, Launched: launched, SoftCap: softCap}
 	_ = progressDisplay.Close()
 	if err != nil {
