@@ -39,6 +39,24 @@ func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 	if len(cfg.Agents) == 0 {
 		return errors.New("config must declare at least one agent")
 	}
+	for id, relPath := range cfg.Runtimes {
+		if err := validateConfigID("runtime id", id); err != nil {
+			return err
+		}
+		if relPath == "" {
+			return fmt.Errorf("runtime %q path is required", id)
+		}
+		clean := filepath.Clean(relPath)
+		if filepath.IsAbs(relPath) {
+			return fmt.Errorf("runtime %q path %q: path must be relative to .orc", id, relPath)
+		}
+		if invalidBaseRelativePath(clean) {
+			return fmt.Errorf("runtime %q path %q: path must not escape .orc", id, relPath)
+		}
+		if !strings.HasPrefix(clean, "runtimes"+string(filepath.Separator)) {
+			return fmt.Errorf("runtime %q path %q must be under runtimes/", id, relPath)
+		}
+	}
 	if err := validateLoopCapsConfig("defaults.loop_caps", cfg.Defaults.LoopCaps); err != nil {
 		return err
 	}

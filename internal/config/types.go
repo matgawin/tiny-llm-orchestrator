@@ -68,6 +68,7 @@ type Project struct {
 	Config     ProjectConfig
 	Workflows  map[string]Workflow
 	Agents     map[string]Agent
+	Runtimes   map[string]Runtime
 }
 
 // ProjectConfig is the schema stored in .orc/config.yaml.
@@ -76,6 +77,7 @@ type ProjectConfig struct {
 	Defaults  ProjectDefaults              `yaml:"defaults"`
 	Workflows map[string]WorkflowReference `yaml:"workflows"`
 	Agents    map[string]string            `yaml:"agents"`
+	Runtimes  map[string]string            `yaml:"runtimes"`
 	Sandbox   *SandboxConfig               `yaml:"sandbox"`
 }
 
@@ -187,6 +189,58 @@ type SandboxMount struct {
 	Target   string       `yaml:"target"`
 	Mode     string       `yaml:"mode"`
 	Optional RequiredBool `yaml:"optional"`
+}
+
+// Runtime is a validated project-local executable runtime descriptor.
+type Runtime struct {
+	ID          string
+	Command     RuntimeCommand
+	Prompt      RuntimePrompt
+	Model       RuntimeModel
+	Directories RuntimeDirectories
+	Sandbox     RuntimeSandbox
+	SourcePath  string
+}
+
+// RuntimeCommand declares the base argv fragments for a runtime.
+type RuntimeCommand struct {
+	Executable  string   `yaml:"executable"`
+	Args        []string `yaml:"args"`
+	NormalArgs  []string `yaml:"normal_args"`
+	SandboxArgs []string `yaml:"sandbox_args"`
+}
+
+// RuntimePrompt declares how a runtime receives rendered worker prompts.
+type RuntimePrompt struct {
+	Delivery string `yaml:"delivery"`
+}
+
+// RuntimeModel declares model-selection capability and argv behavior.
+type RuntimeModel struct {
+	Supported bool     `yaml:"supported"`
+	Required  bool     `yaml:"required"`
+	Default   string   `yaml:"default"`
+	Allowed   []string `yaml:"allowed"`
+	Args      []string `yaml:"args"`
+}
+
+// RuntimeDirectories declares runtime directory capability and argv behavior.
+type RuntimeDirectories struct {
+	Supported bool     `yaml:"supported"`
+	Args      []string `yaml:"args"`
+}
+
+// RuntimeSandbox declares runtime sandbox compatibility and static requirements.
+type RuntimeSandbox struct {
+	Supported    bool                       `yaml:"supported"`
+	Required     bool                       `yaml:"required"`
+	Requirements RuntimeSandboxRequirements `yaml:"requirements"`
+}
+
+// RuntimeSandboxRequirements declares runtime-owned sandbox inputs.
+type RuntimeSandboxRequirements struct {
+	Env    SandboxEnvConfig `yaml:"env"`
+	Mounts []SandboxMount   `yaml:"mounts"`
 }
 
 // EffectiveLoopCaps is the resolved workflow loop-cap policy.

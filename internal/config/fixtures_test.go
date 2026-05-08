@@ -16,6 +16,7 @@ type projectFixture struct {
 	config   string
 	workflow string
 	agents   map[string]string
+	runtimes map[string]string
 }
 
 func workflowYAML(t *testing.T, mutate func(Workflow) Workflow) string {
@@ -81,6 +82,9 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o755); err != nil {
 		t.Fatalf("create workflows dir: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o755); err != nil {
+		t.Fatalf("create runtimes dir: %v", err)
+	}
 
 	agents := fixture.agents
 	if agents == nil {
@@ -99,6 +103,9 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 	writeFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), workflow)
 	for id, descriptor := range agents {
 		writeFile(t, filepath.Join(orcDir, "agents", id+".md"), descriptor)
+	}
+	for id, descriptor := range fixture.runtimes {
+		writeFile(t, filepath.Join(orcDir, "runtimes", id+".yaml"), descriptor)
 	}
 
 	return root

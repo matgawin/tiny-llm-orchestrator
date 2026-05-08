@@ -1,0 +1,578 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoadValidRuntimeDescriptors(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{
+		config: configWithRuntimes(map[string]string{
+			"codex":  "runtimes/codex.yaml",
+			"fileai": "runtimes/fileai.yaml",
+		}),
+		runtimes: map[string]string{
+			"codex":  validCodexRuntimeDescriptor(),
+			"fileai": validFilePromptRuntimeDescriptor(),
+		},
+	})
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	codex := project.Runtimes["codex"]
+	if codex.ID != "codex" {
+		t.Fatalf("codex runtime id = %q, want codex", codex.ID)
+	}
+	if got, want := codex.Command.Executable, "codex"; got != want {
+		t.Fatalf("codex executable = %q, want %q", got, want)
+	}
+	if !codex.Model.Supported {
+		t.Fatal("codex model.supported = false, want true")
+	}
+	if len(codex.Model.Allowed) != 0 {
+		t.Fatalf("codex model.allowed = %v, want empty pass-through list", codex.Model.Allowed)
+	}
+	if got, want := project.Runtimes["fileai"].Prompt.Delivery, "file"; got != want {
+		t.Fatalf("fileai prompt.delivery = %q, want %q", got, want)
+	}
+	if got, want := project.Runtimes["fileai"].Sandbox.Requirements.Env.Set["ORC_RUNTIME"], "fileai"; got != want {
+		t.Fatalf("fileai sandbox env = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRuntimeModelAllowlistValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		descriptor string
+		contains   []string
+	}{
+		{
+			name: "missing allowed means pass through",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  default: gpt-9
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+		},
+		{
+			name: "empty allowed means pass through",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  default: gpt-9
+  allowed: []
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+		},
+		{
+			name: "default constrained by allowlist",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  default: gpt-9
+  allowed: [gpt-5]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `model.default "gpt-9" is not allowed by model.allowed`},
+		},
+		{
+			name: "empty allowlist entry",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  allowed: [""]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`model.allowed[0] is empty`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{
+				config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
+				runtimes: map[string]string{"codex": tt.descriptor},
+			})
+			if len(tt.contains) == 0 {
+				if _, err := Load(root); err != nil {
+					t.Fatalf("Load returned error: %v", err)
+				}
+				return
+			}
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
+	}
+}
+
+func TestLoadRejectsInvalidRuntimeDescriptors(t *testing.T) {
+	tests := []struct {
+		name       string
+		descriptor string
+		contains   []string
+	}{
+		{
+			name: "id mismatch",
+			descriptor: `id: other
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `id "other" does not match runtime map key`},
+		},
+		{
+			name: "empty executable",
+			descriptor: `id: codex
+command:
+  executable: ""
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.executable: is required`},
+		},
+		{
+			name: "executable placeholder",
+			descriptor: `id: codex
+command:
+  executable: codex-{model}
+prompt:
+  delivery: stdin
+model:
+  supported: true
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.executable: must not contain placeholders`},
+		},
+		{
+			name: "empty command arg",
+			descriptor: `id: codex
+command:
+  executable: codex
+  normal_args: [""]
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.normal_args[0] is empty`},
+		},
+		{
+			name: "invalid prompt delivery",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: pipe
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`prompt.delivery "pipe" is invalid; allowed: stdin, file`},
+		},
+		{
+			name: "unknown placeholder",
+			descriptor: `id: codex
+command:
+  executable: codex
+  args: ["--task={task}"]
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.args[0] contains unknown placeholder {task}`},
+		},
+		{
+			name: "unknown model arg placeholder",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  args: ["--model", "{provider_model}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`model.args[1] contains unknown placeholder {provider_model}`},
+		},
+		{
+			name: "malformed placeholder",
+			descriptor: `id: codex
+command:
+  executable: codex
+  args: ["--model={model"]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.args[0] contains malformed placeholder syntax`},
+		},
+		{
+			name: "unknown directory arg placeholder",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: true
+  args: ["--dir", "{dir}", "--label", "{label}"]
+sandbox:
+  supported: true
+`,
+			contains: []string{`directories.args[3] contains unknown placeholder {label}`},
+		},
+		{
+			name: "prompt file placeholder requires file delivery",
+			descriptor: `id: codex
+command:
+  executable: codex
+  args: ["--prompt", "{prompt_file}"]
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.args[1] placeholder {prompt_file} requires prompt.delivery=file`},
+		},
+		{
+			name: "model placeholder requires model support",
+			descriptor: `id: codex
+command:
+  executable: codex
+  args: ["--model", "{model}"]
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.args[1] placeholder {model} requires model.supported=true`},
+		},
+		{
+			name: "dir placeholder only in directory args",
+			descriptor: `id: codex
+command:
+  executable: codex
+  args: ["--add-dir", "{dir}"]
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: true
+  args: ["--add-dir", "{dir}"]
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.args[1] placeholder {dir} is valid only in directories.args`},
+		},
+		{
+			name: "unsupported model rejects model fields",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+  default: gpt-5
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`model.default requires model.supported=true`},
+		},
+		{
+			name: "unsupported directories rejects args",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+  args: ["--add-dir", "{dir}"]
+sandbox:
+  supported: true
+`,
+			contains: []string{`directories.args requires directories.supported=true`},
+		},
+		{
+			name: "supported directories require args",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: true
+sandbox:
+  supported: true
+`,
+			contains: []string{`directories.args must include {dir} when directories.supported=true`},
+		},
+		{
+			name: "supported directories require dir placeholder",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: true
+  args: ["--add-dir"]
+sandbox:
+  supported: true
+`,
+			contains: []string{`directories.args must include {dir} when directories.supported=true`},
+		},
+		{
+			name: "sandbox required needs support",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: false
+  required: true
+`,
+			contains: []string{`sandbox.required requires sandbox.supported=true`},
+		},
+		{
+			name: "invalid sandbox requirement env",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+  requirements:
+    env:
+      pass: [BAD-NAME]
+`,
+			contains: []string{`sandbox.requirements.env: sandbox.env.pass[0]: environment variable name "BAD-NAME" is invalid`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{
+				config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
+				runtimes: map[string]string{"codex": tt.descriptor},
+			})
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
+	}
+}
+
+func TestLoadRejectsUnsafeRuntimeReferences(t *testing.T) {
+	t.Run("missing file", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			config: configWithRuntimes(map[string]string{"codex": "runtimes/missing.yaml"}),
+		})
+		assertLoadErrorContains(t, root, `runtime "codex" path "runtimes/missing.yaml"`)
+	})
+
+	t.Run("absolute path", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			config: configWithRuntimes(map[string]string{"codex": filepath.Join(t.TempDir(), "codex.yaml")}),
+		})
+		assertLoadErrorContains(t, root, `runtime "codex" path`, `path must be relative to .orc`)
+	})
+
+	t.Run("traversal path", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			config: configWithRuntimes(map[string]string{"codex": "../codex.yaml"}),
+		})
+		assertLoadErrorContains(t, root, `runtime "codex" path "../codex.yaml": path must not escape .orc`)
+	})
+
+	t.Run("outside runtimes directory", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			config: configWithRuntimes(map[string]string{"codex": "agents/planner.md"}),
+		})
+		assertLoadErrorContains(t, root, `runtime "codex" path "agents/planner.md" must be under runtimes/`)
+	})
+
+	t.Run("symlink escape", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
+			runtimes: map[string]string{"codex": validCodexRuntimeDescriptor()},
+		})
+		outside := filepath.Join(t.TempDir(), "codex.yaml")
+		writeFile(t, outside, validCodexRuntimeDescriptor())
+		runtimePath := filepath.Join(root, ".orc", "runtimes", "codex.yaml")
+		if err := os.Remove(runtimePath); err != nil {
+			t.Fatalf("remove runtime fixture: %v", err)
+		}
+		if err := os.Symlink(outside, runtimePath); err != nil {
+			t.Fatalf("create symlink: %v", err)
+		}
+		assertLoadErrorContains(t, root, `runtime "codex" path "runtimes/codex.yaml": path must not escape .orc`)
+	})
+}
+
+func configWithRuntimes(runtimes map[string]string) string {
+	var config strings.Builder
+	config.WriteString(`version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+runtimes:
+`)
+	for id, path := range runtimes {
+		config.WriteString("  " + id + ": " + path + "\n")
+	}
+	return config.String()
+}
+
+func validCodexRuntimeDescriptor() string {
+	return `id: codex
+command:
+  executable: codex
+  normal_args: [--ask-for-approval, never]
+  sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
+  args: [exec, --skip-git-repo-check, -]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  allowed: []
+  args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--add-dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+`
+}
+
+func validFilePromptRuntimeDescriptor() string {
+	return `id: fileai
+command:
+  executable: fileai
+  args: [run, --prompt-file, "{prompt_file}", --agent, "{agent_id}", --attempt, "{attempt_id}"]
+prompt:
+  delivery: file
+model:
+  supported: true
+  required: true
+  default: model-a
+  allowed: [model-a, model-b]
+  args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+  requirements:
+    env:
+      pass: [OPENAI_API_KEY]
+      set:
+        ORC_RUNTIME: fileai
+    mounts:
+      - host: .orc/cache/fileai
+        target: /workspace/.orc/cache/fileai
+        mode: rw
+        optional: true
+`
+}

@@ -178,8 +178,7 @@ violate field validation.
 
 `{prompt_file}` is valid only when `prompt.delivery: file`. `{model}` is valid
 only in `model.args` or command argv for runtimes with `model.supported: true`.
-`directories.args` must include `{dir}` when `directories.supported: true` and
-directory args are configured.
+`directories.args` must include `{dir}` when `directories.supported: true`.
 
 ## Resolution Rules
 

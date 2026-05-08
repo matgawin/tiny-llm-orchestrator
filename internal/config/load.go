@@ -8,8 +8,8 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// Load reads .orc/config.yaml, all referenced workflows, and all referenced
-// agent descriptors from projectRoot.
+// Load reads .orc/config.yaml, all referenced runtimes, all referenced
+// workflows, and all referenced agent descriptors from projectRoot.
 func Load(projectRoot string) (*Project, error) {
 	if projectRoot == "" {
 		return nil, errors.New("project root is required")
@@ -33,6 +33,10 @@ func Load(projectRoot string) (*Project, error) {
 		return nil, err
 	}
 
+	runtimes, err := loadRuntimes(orcDir, realOrcDir, cfg.Runtimes)
+	if err != nil {
+		return nil, err
+	}
 	agents, err := loadAgents(orcDir, realOrcDir, cfg.Agents)
 	if err != nil {
 		return nil, err
@@ -49,7 +53,27 @@ func Load(projectRoot string) (*Project, error) {
 		Config:     cfg,
 		Workflows:  workflows,
 		Agents:     agents,
+		Runtimes:   runtimes,
 	}, nil
+}
+
+func loadRuntimes(orcDir, realOrcDir string, refs map[string]string) (map[string]Runtime, error) {
+	runtimes := make(map[string]Runtime, len(refs))
+	for id, relPath := range refs {
+		path, err := resolveConfigRef(orcDir, realOrcDir, "runtime", id, relPath)
+		if err != nil {
+			return nil, err
+		}
+		runtime, err := loadRuntime(realOrcDir, path)
+		if err != nil {
+			return nil, fmt.Errorf("runtime %q file %q: %w", id, relPath, err)
+		}
+		if runtime.ID != id {
+			return nil, fmt.Errorf("runtime %q file %q: id %q does not match runtime map key", id, relPath, runtime.ID)
+		}
+		runtimes[id] = runtime
+	}
+	return runtimes, nil
 }
 
 func loadAgents(orcDir, realOrcDir string, refs map[string]string) (map[string]Agent, error) {
