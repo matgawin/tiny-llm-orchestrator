@@ -20,13 +20,15 @@ defaults:
 steps:
   mechanical-review:
     agent: mechanical-reviewer
+    skippable: true
     allowed_results:
-      done: [approved, changes_requested]
+      done: [approved, changes_requested, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/approved: ready_for_human
       done/changes_requested: ready_for_human
+      done/skipped: ready_for_human
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human

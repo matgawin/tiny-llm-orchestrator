@@ -34,12 +34,14 @@ steps:
       failed/process_error: blocked_for_human
   code:
     agent: coder
+    skippable: true
     allowed_results:
-      done: [ready]
+      done: [ready, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/ready: test
+      done/skipped: redundancy-review
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
@@ -62,13 +64,15 @@ steps:
       failed/process_error: blocked_for_human
   review:
     agent: reviewer
+    skippable: true
     allowed_results:
-      done: [approved, changes_requested]
+      done: [approved, changes_requested, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/approved: redundancy-review
       done/changes_requested: code
+      done/skipped: redundancy-review
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
@@ -77,13 +81,15 @@ steps:
       failed/process_error: blocked_for_human
   redundancy-review:
     agent: redundancy-reviewer
+    skippable: true
     allowed_results:
-      done: [approved, changes_requested]
+      done: [approved, changes_requested, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/approved: readability-review
       done/changes_requested: code_fixer
+      done/skipped: readability-review
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
@@ -92,12 +98,14 @@ steps:
       failed/process_error: blocked_for_human
   code_fixer:
     agent: coder
+    skippable: true
     allowed_results:
-      done: [ready]
+      done: [ready, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/ready: test-redundancy
+      done/skipped: readability-review
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
@@ -120,13 +128,15 @@ steps:
       failed/process_error: blocked_for_human
   readability-review:
     agent: readability-reviewer
+    skippable: true
     allowed_results:
-      done: [approved, changes_requested]
+      done: [approved, changes_requested, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/approved: ready_for_human
       done/changes_requested: code_cleaner
+      done/skipped: ready_for_human
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
@@ -135,12 +145,14 @@ steps:
       failed/process_error: blocked_for_human
   code_cleaner:
     agent: coder
+    skippable: true
     allowed_results:
-      done: [ready]
+      done: [ready, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/ready: test-readability
+      done/skipped: ready_for_human
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human

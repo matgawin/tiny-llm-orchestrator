@@ -75,6 +75,12 @@ engine evaluates that pair exactly like any other declared outcome pair. Skipped
 review is not implicitly approved; it follows the configured `done/skipped`
 transition, which may or may not target the same state as approval.
 
+The default repo-local and scaffolded workflows use skip routing only for
+explicit human-judgment bypasses: skipped reviews advance to the next configured
+review or human handoff, and skipped remediation after reviewer changes advances
+to the next review or human handoff. Planning and verification command steps
+are not skippable by default.
+
 ## Decisions
 
 The engine returns one of these decision kinds:

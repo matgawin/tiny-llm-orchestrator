@@ -86,6 +86,60 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultScaffoldSkippablePolicy(t *testing.T) {
+	project, err := Load(validScaffoldPath())
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	tests := []struct {
+		workflow string
+		step     string
+		target   string
+	}{
+		{workflow: "implementation", step: "code", target: "redundancy-review"},
+		{workflow: "implementation", step: "review", target: "redundancy-review"},
+		{workflow: "implementation", step: "redundancy-review", target: "readability-review"},
+		{workflow: "implementation", step: "code_fixer", target: "readability-review"},
+		{workflow: "implementation", step: "readability-review", target: testTerminalReadyForHuman},
+		{workflow: "implementation", step: "code_cleaner", target: testTerminalReadyForHuman},
+		{workflow: "bugfix", step: "code", target: testTerminalReadyForHuman},
+		{workflow: "bugfix", step: "review", target: testTerminalReadyForHuman},
+		{workflow: "mechanical-change", step: "mechanical-code", target: testTerminalReadyForHuman},
+		{workflow: "mechanical-change", step: "mechanical-review", target: testTerminalReadyForHuman},
+		{workflow: "test-only", step: "test-code", target: testTerminalReadyForHuman},
+		{workflow: "test-only", step: "review", target: testTerminalReadyForHuman},
+		{workflow: "review-mechanical", step: "mechanical-review", target: testTerminalReadyForHuman},
+		{workflow: "review-readability", step: "readability-review", target: testTerminalReadyForHuman},
+		{workflow: "review-redundancy", step: "redundancy-review", target: testTerminalReadyForHuman},
+		{workflow: "review-docs", step: "docs-review", target: testTerminalReadyForHuman},
+	}
+	for _, tt := range tests {
+		t.Run(tt.workflow+"/"+tt.step, func(t *testing.T) {
+			assertSkippableStep(t, project.Workflows[tt.workflow].Steps[tt.step], tt.target)
+		})
+	}
+
+	nonSkippable := map[string][]string{
+		"implementation":     {"plan", "test", "test-redundancy", "test-readability"},
+		"bugfix":             {"reproduce", "plan", "test"},
+		"mechanical-change":  {"plan", "test"},
+		"test-only":          {"plan", "test-design", "test-run"},
+		"review-mechanical":  {},
+		"review-readability": {},
+		"review-redundancy":  {},
+		"review-docs":        {},
+	}
+	for workflowName, stepNames := range nonSkippable {
+		workflow := project.Workflows[workflowName]
+		for _, stepName := range stepNames {
+			t.Run(workflowName+"/"+stepName, func(t *testing.T) {
+				assertNotSkippableStep(t, workflow.Steps[stepName])
+			})
+		}
+	}
+}
+
 func TestLoadWorkflowPreservesStepDeclarationOrder(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
@@ -1171,6 +1225,34 @@ This descriptor is outside .orc.
 
 func validScaffoldPath() string {
 	return filepath.Join("..", "initconfig", "scaffold")
+}
+
+func assertSkippableStep(t *testing.T, step Step, target string) {
+	t.Helper()
+
+	if !step.Skippable {
+		t.Fatalf("step skippable = false, want true")
+	}
+	if !slices.Contains(step.AllowedResults[SystemSkipStatus], SystemSkipResult) {
+		t.Fatalf("step allowed %s results = %v, want %s", SystemSkipStatus, step.AllowedResults[SystemSkipStatus], SystemSkipResult)
+	}
+	if got := step.On[SystemSkipPair]; got != target {
+		t.Fatalf("step %s transition = %q, want %q", SystemSkipPair, got, target)
+	}
+}
+
+func assertNotSkippableStep(t *testing.T, step Step) {
+	t.Helper()
+
+	if step.Skippable {
+		t.Fatal("step skippable = true, want false")
+	}
+	if slices.Contains(step.AllowedResults[SystemSkipStatus], SystemSkipResult) {
+		t.Fatalf("step allowed %s results = %v, want no %s", SystemSkipStatus, step.AllowedResults[SystemSkipStatus], SystemSkipResult)
+	}
+	if _, ok := step.On[SystemSkipPair]; ok {
+		t.Fatalf("step declares %s transition, want none", SystemSkipPair)
+	}
 }
 
 type projectFixture struct {

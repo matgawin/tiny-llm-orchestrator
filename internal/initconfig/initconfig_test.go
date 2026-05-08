@@ -51,6 +51,7 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 		t.Fatalf("generated config did not validate: %v", err)
 	}
 	assertGeneratedScaffoldMatchesFixture(t, root)
+	assertGeneratedSkippableWorkflowPolicy(t, root)
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4")
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "# Optional sandbox runner for Codex yolo mode.")
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "#   require_for_workers: true")
@@ -479,6 +480,25 @@ func assertGeneratedScaffoldMatchesFixture(t *testing.T, root string) {
 	t.Helper()
 	for _, path := range scaffoldPaths() {
 		assertFileMatchesFixture(t, root, path)
+	}
+}
+
+func assertGeneratedSkippableWorkflowPolicy(t *testing.T, root string) {
+	t.Helper()
+
+	project, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("load generated config: %v", err)
+	}
+	step := project.Workflows["implementation"].Steps["review"]
+	if !step.Skippable {
+		t.Fatal("generated implementation review skippable = false, want true")
+	}
+	if got := step.On[config.SystemSkipPair]; got != "redundancy-review" {
+		t.Fatalf("generated implementation review %s transition = %q, want redundancy-review", config.SystemSkipPair, got)
+	}
+	if project.Workflows["implementation"].Steps["test"].Skippable {
+		t.Fatal("generated implementation test skippable = true, want false")
 	}
 }
 

@@ -48,12 +48,14 @@ steps:
       failed/process_error: blocked_for_human
   code:
     agent: coder
+    skippable: true
     allowed_results:
-      done: [ready]
+      done: [ready, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/ready: test
+      done/skipped: ready_for_human
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
@@ -74,13 +76,15 @@ steps:
       failed/process_error: blocked_for_human
   review:
     agent: reviewer
+    skippable: true
     allowed_results:
-      done: [approved, changes_requested]
+      done: [approved, changes_requested, skipped]
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
       done/approved: ready_for_human
       done/changes_requested: code
+      done/skipped: ready_for_human
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human

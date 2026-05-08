@@ -8,7 +8,7 @@ tasks:
   tests:
     aliases: ["t"]
     cmds:
-      - go test ./...
+      - go test ./... -count=1
 
   tests-race:
     aliases: ["tr"]
@@ -17,7 +17,7 @@ tasks:
 
   test-unit-race:
     cmds:
-      - go test -race ./...
+      - go test -race ./... -count=1
 
   build:
     aliases: ["b"]

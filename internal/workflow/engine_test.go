@@ -53,6 +53,16 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 			wantStep: "redundancy-review",
 		},
 		{
+			name:     "review skipped",
+			outcome:  Outcome{Step: "review", Status: ReportStatusDone, Result: "skipped"},
+			wantStep: "redundancy-review",
+		},
+		{
+			name:     "code skipped after review changes requested",
+			outcome:  Outcome{Step: "code", Status: ReportStatusDone, Result: "skipped"},
+			wantStep: "redundancy-review",
+		},
+		{
 			name:     "redundancy review changes requested",
 			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "changes_requested"},
 			wantStep: "code_fixer",
@@ -75,6 +85,16 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 		{
 			name:     "redundancy review approved",
 			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "approved"},
+			wantStep: "readability-review",
+		},
+		{
+			name:     "redundancy review skipped",
+			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "skipped"},
+			wantStep: "readability-review",
+		},
+		{
+			name:     "code fixer skipped after redundancy review changes requested",
+			outcome:  Outcome{Step: "code_fixer", Status: ReportStatusDone, Result: "skipped"},
 			wantStep: "readability-review",
 		},
 		{
@@ -109,11 +129,31 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 }
 
 func TestEvaluateImplementationWorkflowRoutesTerminalOutcomes(t *testing.T) {
-	workflow := implementationWorkflow(t)
-	outcome := Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "approved"}
+	tests := []struct {
+		name    string
+		outcome Outcome
+	}{
+		{
+			name:    "readability review approved",
+			outcome: Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "approved"},
+		},
+		{
+			name:    "readability review skipped",
+			outcome: Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "skipped"},
+		},
+		{
+			name:    "code cleaner skipped after readability review changes requested",
+			outcome: Outcome{Step: "code_cleaner", Status: ReportStatusDone, Result: "skipped"},
+		},
+	}
 
-	decision := evaluateRunningOutcome(t, workflow, outcome, RetryLineage{})
-	assertTerminalDecision(t, decision, RunStatusReadyForHuman)
+	workflow := implementationWorkflow(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision := evaluateRunningOutcome(t, workflow, tt.outcome, RetryLineage{})
+			assertTerminalDecision(t, decision, RunStatusReadyForHuman)
+		})
+	}
 }
 
 func TestEvaluateRoutesTrustedSkippedOutcome(t *testing.T) {

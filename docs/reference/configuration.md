@@ -74,6 +74,32 @@ starts by default so unrelated pre-existing changes do not mix with new work.
 Review-only workflows allow dirty starts by default because their normal input
 is often the existing working-copy diff being reviewed.
 
+Default scaffolded workflows keep skip points intentionally narrow. Only
+explicit human-judgment bypass points are skippable: review steps that have not
+run yet, and remediation steps selected after reviewer-requested changes when a
+human decides not to implement those requested changes. Planning steps, normal
+initial coding steps except where the same step is also the remediation target,
+test design, and verification command steps are not general automation
+shortcuts and are not skippable by default.
+
+Skipped review routes to the next stage a human-approved bypass should reach.
+In review-only workflows, skipped review routes to `ready_for_human`. In the
+multi-review implementation workflow, skipped `review` routes to
+`redundancy-review`, skipped `redundancy-review` routes to
+`readability-review`, and skipped `readability-review` routes to
+`ready_for_human`.
+
+Remediation steps selected after reviewer changes have explicit skip routes
+for the same human-bypass policy. In the implementation workflow, skipped
+`code` routes to `redundancy-review`, skipped `code_fixer` routes to
+`readability-review`, and skipped `code_cleaner` routes to `ready_for_human`.
+In bugfix, mechanical-change, and test-only workflows, skipped remediation
+routes to `ready_for_human`. Because the shared `code`, `mechanical-code`, and
+`test-code` steps cannot distinguish whether they were selected for initial
+work or reviewer remediation, the skippable route is available whenever those
+steps are selected; the required human skip reason is the audit record for why
+the bypass was appropriate.
+
 The scaffold includes detailed descriptors for these agents:
 
 - `planner`
@@ -391,6 +417,22 @@ Configuration validation rejects `skippable: true` unless both declarations are
 present. It also rejects `done/skipped` in either `allowed_results` or `on` for
 non-skippable steps. This keeps skip routing discoverable in workflow config
 and prevents workers from accidentally authoring the reserved skip outcome.
+
+Reviewer-requested remediation uses the same contract. For example, the
+implementation workflow lets a human bypass a selected remediation step and
+continue to the next review lane:
+
+```yaml
+steps:
+  code_fixer:
+    agent: coder
+    skippable: true
+    allowed_results:
+      done: [ready, skipped]
+    on:
+      done/ready: test-redundancy
+      done/skipped: readability-review
+```
 
 Worker-authored reports may use workflow-declared outcome pairs except reserved
 system-owned results. `orc report` rejects `done/skipped`, `failed/error`,
