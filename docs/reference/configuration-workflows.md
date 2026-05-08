@@ -163,6 +163,11 @@ run `task check` through GNU `timeout` with a 5-minute wall-clock limit and a
 10-second forced-kill grace. This keeps hung package tests from occupying a run
 until the broader workflow attempt timeout expires.
 
+The bundled `docs-update` workflow is intentionally lighter: it edits durable
+docs and routes directly to docs review. It does not run a command verification
+step by default, so use it only when the task is documentation-only and does not
+need code, generated artifact, or scaffold validation.
+
 Script steps declare a repository-relative executable path plus optional args:
 
 ```yaml

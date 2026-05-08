@@ -49,6 +49,8 @@ The scaffold includes these workflows:
   verification, and complete mechanical review.
 - `test-only`: plan, design tests, edit tests, run tests, and review without
   intentional production behavior changes.
+- `docs-update`: update durable docs and run docs review without the full
+  implementation test and review chain.
 - `review-mechanical`: review a change for stale references, generated drift,
   config mismatch, and mechanical completeness.
 - `review-readability`: review changed code or docs for clarity and
@@ -127,6 +129,11 @@ routes to `ready_for_human`. Because the shared `code`, `mechanical-code`, and
 work or reviewer remediation, the skippable route is available whenever those
 steps are selected; the required human skip reason is the audit record for why
 the bypass was appropriate.
+
+The `docs-update` workflow is the narrow default for documentation-only tasks.
+It starts with a docs edit step using the standard coder agent, then routes to
+`docs-review`. Reviewer-requested changes loop back to the docs edit step.
+Skipped docs review routes directly to `ready_for_human`.
 
 The scaffold includes detailed descriptors for these agents:
 

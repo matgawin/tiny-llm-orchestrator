@@ -560,6 +560,7 @@ func scaffoldPaths() []string {
 		".orc/workflows/bugfix.yaml",
 		".orc/workflows/mechanical-change.yaml",
 		".orc/workflows/test-only.yaml",
+		".orc/workflows/docs-update.yaml",
 		".orc/workflows/review-mechanical.yaml",
 		".orc/workflows/review-readability.yaml",
 		".orc/workflows/review-redundancy.yaml",
