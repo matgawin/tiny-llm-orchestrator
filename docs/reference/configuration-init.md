@@ -96,8 +96,11 @@ sandbox:
 ```
 
 This descriptor, not a launcher special case, preserves Codex argv behavior for
-new projects. Existing user-owned `.orc` directories are not automatically
-migrated when scaffold output changes.
+new projects. Current sandboxed Codex config-home behavior remains compatibility
+logic until extended runtime sandbox requirements are implemented; the approved
+schema design is documented in
+[configuration-runtimes.md](configuration-runtimes.md). Existing user-owned
+`.orc` directories are not automatically migrated when scaffold output changes.
 
 Implementation, bugfix, mechanical-change, and test-only workflows block dirty
 starts by default so unrelated pre-existing changes do not mix with new work.

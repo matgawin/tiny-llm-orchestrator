@@ -247,7 +247,12 @@ runtime directory, with `{dir}` substituted by the validated directory value.
 ## Sandbox Requirements
 
 Runtime sandbox requirements belong to the runtime descriptor under
-`sandbox.requirements`:
+`sandbox.requirements`. Current runtime descriptors support simple static
+sandbox mounts. The extended env-sourced mount form below is the approved
+schema design for `main-b77.2`; it documents the contract to implement next,
+not behavior available in the current parser or sandbox resolver.
+
+`sandbox.requirements` design:
 
 ```yaml
 sandbox:
@@ -255,10 +260,25 @@ sandbox:
   required: false
   requirements:
     env:
-      pass: [CODEX_HOME]
+      pass: [OPENAI_API_KEY]
       set:
         ORC_RUNTIME: codex
+      set_from_mount:
+        CODEX_HOME:
+          mount: config_home
+          value: target
     mounts:
+      - id: config_home
+        source:
+          env: CODEX_HOME
+          fallback:
+            host_home: .codex
+          create: true
+        target:
+          env_same_as_source: true
+          fallback:
+            sandbox_home: .codex
+        mode: rw
       - host: .orc/cache/codex
         target: /workspace/.orc/cache/codex
         mode: rw
@@ -271,21 +291,105 @@ environment values. Runtime env requirements merge into sandbox env config;
 fixed values win over pass-through values with the same key. Static duplicate
 fixed values with different values are config-load conflicts.
 
-`sandbox.requirements.mounts` entries use the same fields and path semantics as
-project `sandbox.mounts`: `host`, `target`, `mode`, and optional `optional`.
+`sandbox.requirements.env.set_from_mount` will set sandbox environment variables
+from resolved runtime mounts. Each map key is the sandbox environment variable
+name to set. Each value has `mount`, which references a mount `id` from the same
+runtime descriptor, and `value`, which initially supports only `target`.
+Resolved values are computed while building the sandbox spec, after mount
+sources and targets are known. No source-path templating or arbitrary property
+selection is part of v1.
+
+Environment variable names in `env.pass`, `env.set`, `source.env`, and
+`env.set_from_mount` must match `^[A-Za-z_][A-Za-z0-9_]*$`.
+
+`sandbox.requirements.mounts` keeps the existing simple static form compatible
+with project `sandbox.mounts`:
+
+```yaml
+mounts:
+  - host: .orc/cache/tool
+    target: /workspace/.orc/cache/tool
+    mode: rw
+    optional: true
+```
+
+The simple form fields are `host`, `target`, `mode`, and optional `optional`.
 `mode` is `ro` or `rw`. `host` may be repository-relative or absolute.
-`target` must be a clean absolute sandbox path. Runtime requirement values are
-not shell-expanded.
+`target` must be a clean absolute sandbox path. Missing static host paths are
+errors unless `optional: true` is set, in which case the mount is skipped.
+
+The approved extended runtime-owned source form is:
+
+```yaml
+mounts:
+  - id: config_home
+    source:
+      env: CODEX_HOME
+      fallback:
+        host_home: .codex
+      create: true
+    target:
+      env_same_as_source: true
+      fallback:
+        sandbox_home: .codex
+    mode: rw
+```
+
+`id` is required when a mount is referenced by `env.set_from_mount`. Mount ids
+must be unique within one runtime descriptor and use the same conservative id
+syntax as runtime and workflow ids: `^[A-Za-z][A-Za-z0-9_-]*$`. A mount without
+`id` is valid only when no later field needs to reference it.
+
+`source.env` names exactly one host environment variable. If that host variable
+is set to an absolute path, that path is the source. If it is unset, empty, or
+set to a non-absolute path, the mount uses `source.fallback` when present.
+Without a fallback, those cases are errors during sandbox spec construction.
+The non-absolute value is never expanded or interpreted.
+
+`source.fallback.host_home` resolves against the resolved host HOME. Its value
+must be a clean relative path with no `..`, shell syntax, environment syntax,
+tilde syntax, command substitution, or absolute path. Host HOME resolution is
+host-dependent and happens while building the sandbox spec.
+
+`source.create: true` permits Orc to create the resolved source directory when
+it is missing. `source.create: false` or an omitted `create` treats a missing
+resolved source as an error unless the mount has `optional: true`. If the
+resolved source exists and is not a directory, spec construction fails. If an
+absolute `source.env` value points at a missing directory and `create: true` is
+set, Orc will create that directory; otherwise it fails unless the mount is
+optional.
+
+`target.env_same_as_source: true` means an absolute env-sourced path is mounted
+at the same absolute path inside the sandbox. `target.fallback.sandbox_home`
+means fallback sources are mounted under the resolved sandbox HOME. For example,
+with `sandbox_home: .codex`, synthetic-home mode targets `/home/orc/.codex`,
+while host-path home mode targets the resolved host HOME path plus `/.codex`.
+This preserves the current Codex home target behavior without Codex-specific
+fields in the generic schema.
+
+Exactly one target strategy must apply after source resolution. Env-sourced
+absolute paths require `target.env_same_as_source: true` in v1. Fallback sources
+require `target.fallback.sandbox_home` in v1. The target fallback value follows
+the same clean relative path restrictions as `source.fallback.host_home`.
+
+Runtime requirement values are not shell-expanded. Values such as `$HOME`,
+`${HOME}`, `~`, `~/path`, `$(cmd)`, and backtick command substitutions are not
+supported in mount sources, targets, fallbacks, ids, or env-derived values.
 
 Static sandbox requirement conflicts fail during config load when they can be
-known without the host filesystem: invalid env names, invalid modes, unclean
-paths, protected targets, duplicate targets with incompatible declarations, and
-fixed env conflicts.
+known without the host filesystem: schema shape, mutually exclusive simple and
+extended source fields, required fields, invalid mount ids, duplicate mount ids,
+invalid env names, invalid modes, clean relative fallback paths, clean absolute
+static targets, unsupported expansion syntax, duplicate static targets with
+incompatible declarations, and fixed env conflicts.
 
 Host-dependent sandbox requirement failures occur while building
-`orc sandbox run` bubblewrap specs: missing required host paths, symlink
-resolution failures, host paths that escape allowed roots, and conflicts with
-automatic mounts or protected targets that depend on resolved host paths.
+`orc sandbox run` bubblewrap specs: host HOME resolution, `source.env`
+resolution, missing required resolved source paths, optional missing source
+skips, explicitly requested source directory creation, source paths that point
+to files, symlink resolution failures, host paths that escape allowed roots,
+protected target conflicts, mount collisions with project mounts or automatic
+mounts, and `env.set_from_mount` reference resolution.
 
 Worker launch does not add mounts to an already-running sandbox. It only checks
 the selected runtime's `sandbox.supported` and `sandbox.required` policy
@@ -372,10 +476,12 @@ Inside a verified Orc sandbox, Codex argv remains:
 codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
 ```
 
-Codex model values are pass-through because `allowed` is empty. Downstream
-implementation may keep existing sandbox Codex home compatibility temporarily
-only if it is documented and tested as compatibility behavior while runtime
-sandbox requirements are introduced.
+Codex model values are pass-through because `allowed` is empty. Until
+`main-b77.2` implements extended runtime sandbox requirements, Codex home
+handling remains current sandbox compatibility behavior rather than descriptor
+data. After that implementation, the scaffolded descriptor should use the
+approved generic `config_home` mount shape above instead of relying on
+implementation-specific Codex handling.
 
 ## Validation Timing
 
@@ -389,6 +495,14 @@ Project config load validates:
 - model and directory capability self-consistency
 - static sandbox requirement conflicts
 
+After the approved `main-b77.2` schema is implemented, project config load
+should also validate extended runtime sandbox requirement shape:
+
+- mount id syntax and uniqueness
+- simple versus extended mount field exclusivity
+- env-derived mount source and target shape
+- env-from-mount references that can be checked without host state
+
 Workflow validation validates:
 
 - agent steps have an effective declared runtime
@@ -398,8 +512,11 @@ Workflow validation validates:
 - `runtime_dirs` path shape
 - command/script rejection of `runtime`, `model`, and `runtime_dirs`
 
-Sandbox launch validates host-dependent sandbox requirement behavior before
-starting bubblewrap.
+Sandbox launch validates current host-dependent sandbox requirement behavior
+before starting bubblewrap. After `main-b77.2`, that launch-time validation
+should also cover env-sourced mount source resolution, home fallback
+resolution, explicit source creation, symlink resolution, mount collisions,
+protected target conflicts, and env-from-mount target values.
 
 Worker launch validates only the selected runtime resolution that depends on
 the selected step and active run, selected prompt delivery, active sandbox mode
@@ -443,8 +560,9 @@ Implementation tasks must update or add tests for:
 - command/script rejection of `runtime`, `model`, and `runtime_dirs`
 - descriptor-built Codex normal and sandbox argv compatibility
 - launcher override bypass behavior
-- runtime sandbox requirements, static conflicts, host-dependent failures, and
-  remaining Codex home compatibility behavior
+- runtime sandbox requirements, simple mount compatibility, approved extended
+  env/fallback/create mount design, env-from-mount values, static conflicts,
+  and host-dependent failures
 - end-to-end non-Codex runtime execution using real executable fixtures for
   stdin and file prompt delivery
 

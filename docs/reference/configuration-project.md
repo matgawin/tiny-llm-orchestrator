@@ -188,14 +188,15 @@ Codex/orchestrator session started through `orc sandbox run`.
 
 `sandbox.home.mode` is optional and defaults to `synthetic`. Allowed values are
 exactly `synthetic` and `host_path`. `synthetic` keeps sandbox `HOME` at
-`/home/orc` and maps the default host `.codex` directory to
-`/home/orc/.codex`. `host_path` sets sandbox `HOME` to the resolved absolute
-host HOME path without binding the whole host home directory, and maps default
-host `$HOME/.codex` to that same absolute path inside the sandbox. When host
-`CODEX_HOME` is set, it must be absolute and is mounted read-write at the same
-absolute path in both modes. See [../features/sandbox-run.md](../features/sandbox-run.md)
-for runtime HOME resolution, automatic `.codex` handling, and host-home subpath
-mount rules.
+`/home/orc`; `host_path` sets sandbox `HOME` to the resolved absolute host HOME
+path without binding the whole host home directory. Current Codex compatibility
+still maps the default host `.codex` directory to the matching sandbox home
+target, and an absolute host `CODEX_HOME` is mounted read-write at the same
+absolute path in both modes. The approved runtime descriptor schema will move
+that Codex config-home behavior into generic runtime sandbox requirement data.
+See [../features/sandbox-run.md](../features/sandbox-run.md) for current HOME
+resolution and [configuration-runtimes.md](configuration-runtimes.md) for the
+approved descriptor schema design.
 
 `sandbox.path.mode` is optional and defaults to `none`. Allowed values are
 exactly `none` and `host_entries`. `none` preserves the existing PATH and mount
