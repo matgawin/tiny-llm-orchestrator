@@ -22,7 +22,7 @@ Contributors changing worker process launch, active-attempt state, no-report out
 - [run-inspection.md](run-inspection.md)
 - [../reference/run-store.md](../reference/run-store.md)
 - [../reference/workflow-engine.md](../reference/workflow-engine.md)
-- [../reference/configuration.md](../reference/configuration.md)
+- [../reference/configuration-workflows.md](../reference/configuration-workflows.md)
 
 ## Command Shape
 

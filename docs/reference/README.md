@@ -20,7 +20,10 @@ Contributors and maintainers who need quick factual lookup docs rather than narr
 
 ## Docs
 
-- [configuration.md](configuration.md): code-backed `.orc` config reference and schema notes
+- [configuration.md](configuration.md): code-backed `.orc` config landing page, loaders, and environment-variable notes
+- [configuration-init.md](configuration-init.md): `orc init` scaffold files, overwrite prompts, `.gitignore`, `.orc/runs/`, and scaffolded workflow and agent inventory
+- [configuration-project.md](configuration-project.md): `.orc/config.yaml`, project config validation, loop caps, and sandbox config schema
+- [configuration-workflows.md](configuration-workflows.md): workflow files, step contracts, report outcomes, terminal states, and agent descriptor files
 - [run-store.md](run-store.md): durable `.orc/runs/<run-id>` contract landing page and reader-task index
 - [run-store-layout.md](run-store-layout.md): run ID, directory layout, and filesystem safety contract
 - [run-store-events.md](run-store-events.md): append-only event log and v1 event payload contract

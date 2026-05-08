@@ -76,7 +76,7 @@ Entrypoints:
 - worker prompt rendering: `internal/promptrender` and [docs/features/worker-prompt-rendering.md](docs/features/worker-prompt-rendering.md)
 - worker launching and process supervision: `internal/launcher` and [docs/features/worker-launching.md](docs/features/worker-launching.md)
 - live worker progress contract: [docs/features/live-worker-progress.md](docs/features/live-worker-progress.md)
-- project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md)
+- project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md), [docs/reference/configuration-init.md](docs/reference/configuration-init.md), [docs/reference/configuration-project.md](docs/reference/configuration-project.md), and [docs/reference/configuration-workflows.md](docs/reference/configuration-workflows.md)
 - deterministic workflow transition logic: `internal/workflow` and [docs/reference/workflow-engine.md](docs/reference/workflow-engine.md)
 - run persistence: `internal/runstore` and [docs/reference/run-store.md](docs/reference/run-store.md)
 - local setup and troubleshooting: [docs/getting-started/README.md](docs/getting-started/README.md)
@@ -109,7 +109,7 @@ Use these docs instead of treating this page as the only setup guide:
 
 - [docs/getting-started/local-development.md](docs/getting-started/local-development.md): local toolchain and commands
 - [docs/getting-started/project-layout.md](docs/getting-started/project-layout.md): where code and docs live
-- [docs/reference/configuration.md](docs/reference/configuration.md): `.orc` config files and schema surfaces
+- [docs/reference/configuration.md](docs/reference/configuration.md): `.orc` config files and contract-page index
 - [docs/testing/local-test-workflows.md](docs/testing/local-test-workflows.md): test commands and config fixture policy
 
 The shortest local-start sequence is:

@@ -112,10 +112,10 @@ Use this category for:
 
 If you are:
 
-- setting up locally: read [getting-started/local-development.md](getting-started/local-development.md), then [reference/configuration.md](reference/configuration.md)
+- setting up locally: read [getting-started/local-development.md](getting-started/local-development.md), then [reference/configuration-init.md](reference/configuration-init.md)
 - changing package wiring or config flow: read [architecture/system-overview.md](architecture/system-overview.md) and [architecture/service-boundaries.md](architecture/service-boundaries.md)
 - changing durable CLI, parsing, or validation behavior: start with [features/README.md](features/README.md)
 - changing worker launch or process supervision: read [features/worker-launching.md](features/worker-launching.md), then [reference/run-store.md](reference/run-store.md)
 - changing tests: read [testing/strategy.md](testing/strategy.md), then [testing/local-test-workflows.md](testing/local-test-workflows.md)
-- changing runtime config: read [reference/configuration.md](reference/configuration.md)
+- changing runtime config: read [reference/configuration.md](reference/configuration.md), then [reference/configuration-project.md](reference/configuration-project.md) or [reference/configuration-workflows.md](reference/configuration-workflows.md)
 - changing run persistence: read [reference/run-store.md](reference/run-store.md), then [architecture/service-boundaries.md](architecture/service-boundaries.md) if the change touches package ownership

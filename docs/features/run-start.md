@@ -17,7 +17,7 @@ Contributors changing run creation, task-context capture, or Beads integration.
 ## Related Docs
 
 - [../reference/run-store.md](../reference/run-store.md)
-- [../reference/configuration.md](../reference/configuration.md)
+- [../reference/configuration-workflows.md](../reference/configuration-workflows.md)
 - [../architecture/service-boundaries.md](../architecture/service-boundaries.md)
 
 ## Command Shape
@@ -59,7 +59,7 @@ After task context is resolved and before any run directory is created, run
 start inspects the project working copy with read-only VCS commands and applies
 workflow `vcs` policy. Detection prefers `jj`, then `git`, then records that no
 supported VCS was detected. See
-[../reference/configuration.md](../reference/configuration.md) for option
+[../reference/configuration-workflows.md](../reference/configuration-workflows.md) for option
 defaults and allowed values.
 
 VCS inspection never reverts, resets, checks out, stages, commits, or otherwise

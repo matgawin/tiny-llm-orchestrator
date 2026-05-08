@@ -537,26 +537,26 @@ func configWithSandbox(sandbox string) string {
 func documentedSandboxConfig(t *testing.T) string {
 	t.Helper()
 
-	docPath := filepath.Join("..", "..", "docs", "reference", "configuration.md")
+	docPath := filepath.Join("..", "..", "docs", "reference", "configuration-project.md")
 	content, err := os.ReadFile(docPath)
 	if err != nil {
-		t.Fatalf("read configuration reference: %v", err)
+		t.Fatalf("read project configuration reference: %v", err)
 	}
 
 	const intro = "Project config may also declare an Orc-managed sandbox command contract:"
 	afterIntro, ok := cutAfter(string(content), intro)
 	if !ok {
-		t.Fatalf("configuration reference missing sandbox sample intro %q", intro)
+		t.Fatalf("project configuration reference missing sandbox sample intro %q", intro)
 	}
 
 	const fence = "```yaml\n"
 	afterFence, ok := cutAfter(afterIntro, fence)
 	if !ok {
-		t.Fatal("configuration reference sandbox sample is missing opening YAML fence")
+		t.Fatal("project configuration reference sandbox sample is missing opening YAML fence")
 	}
 	sample, _, ok := strings.Cut(afterFence, "\n```")
 	if !ok {
-		t.Fatal("configuration reference sandbox sample is missing closing YAML fence")
+		t.Fatal("project configuration reference sandbox sample is missing closing YAML fence")
 	}
 	return sample
 }

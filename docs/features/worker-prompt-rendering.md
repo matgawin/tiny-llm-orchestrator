@@ -21,7 +21,7 @@ or run-store prompt artifacts.
 - [live-worker-progress.md](live-worker-progress.md)
 - [run-start.md](run-start.md)
 - [run-inspection.md](run-inspection.md)
-- [../reference/configuration.md](../reference/configuration.md)
+- [../reference/configuration-workflows.md](../reference/configuration-workflows.md)
 - [../reference/run-store.md](../reference/run-store.md)
 - [../reference/workflow-engine.md](../reference/workflow-engine.md)
 

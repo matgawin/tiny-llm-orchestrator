@@ -23,7 +23,7 @@ Contributors navigating the codebase or deciding where new code and docs should 
 
 - `cmd/orc`: CLI process entrypoint.
 - `internal/cli`: command parsing, help/version output, and CLI stream handling.
-- `internal/initconfig`: project scaffold planning; see [../reference/configuration.md](../reference/configuration.md).
+- `internal/initconfig`: project scaffold planning; see [../reference/configuration-init.md](../reference/configuration-init.md).
 - `internal/config`: `.orc` project config loading, YAML parsing, path safety, workflow validation, and agent descriptor validation.
 - `internal/workflow`: deterministic workflow graph transition logic.
 - `internal/runstore`: persistent orchestration run state.

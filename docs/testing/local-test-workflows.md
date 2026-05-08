@@ -60,7 +60,7 @@ task check
 ## Fixtures
 
 - Config tests use `internal/initconfig/scaffold/.orc` as the canonical valid
-  scaffold source; see [../reference/configuration.md](../reference/configuration.md).
+  scaffold source; see [../reference/configuration-init.md](../reference/configuration-init.md).
 - Tests under `internal/config` create additional temporary invalid projects for validation coverage.
 
 ## If You Changed X, Run Y

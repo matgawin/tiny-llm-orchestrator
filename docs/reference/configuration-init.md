@@ -1,0 +1,111 @@
+# Configuration Init Reference
+
+## Purpose
+
+Document the `orc init` scaffold contract and the v1 scaffold files generated from `internal/initconfig/scaffold/.orc`.
+
+## Audience
+
+Contributors and maintainers changing scaffold source, init behavior, or generated project-local `.orc` files.
+
+## Read This When
+
+- You are updating scaffold source or generated init output.
+- You need the scaffolded workflow and agent inventory.
+- You are checking `orc init` dry-run, prompt, `.gitignore`, or instruction-file behavior.
+
+## Related Docs
+
+- [configuration.md](configuration.md)
+- [configuration-project.md](configuration-project.md)
+- [configuration-workflows.md](configuration-workflows.md)
+- [run-store-layout.md](run-store-layout.md)
+
+## Init Scaffolding
+
+`orc init` scaffolds the v1 `.orc` configuration shape into the current working
+directory:
+
+- `orc init --dry-run` previews planned files without writing.
+- `orc init --yes` creates missing scaffold files noninteractively.
+- Interactive `orc init` prompts before overwriting differing scaffold files and
+  before creating a missing `.gitignore`.
+- Instruction files: interactive init prompts before creating or updating
+  `AGENTS.md`; `--yes` skips `AGENTS.md` creation or update; v1 only supports
+  `AGENTS.md`.
+- `orc init` creates and ignores `.orc/runs/`.
+- Persistent files under `.orc/` are user-owned and reviewable; runtime run
+  state belongs under the ignored `.orc/runs/` directory; see
+  [run-store-layout.md](run-store-layout.md) for the durable file contract.
+- If `.gitignore` broadly ignores `.orc`, `orc init` fails and asks you to
+  replace that broad rule with `.orc/runs/` so persistent config remains
+  trackable.
+
+The scaffold includes these workflows:
+
+- `implementation`: plan, code, test, and review a general change.
+- `bugfix`: reproduce the bug before planning, coding, testing, and review.
+- `mechanical-change`: plan, apply low-judgment mechanical edits, run focused
+  verification, and complete mechanical review.
+- `test-only`: plan, design tests, edit tests, run tests, and review without
+  intentional production behavior changes.
+- `review-mechanical`: review a change for stale references, generated drift,
+  config mismatch, and mechanical completeness.
+- `review-readability`: review changed code or docs for clarity and
+  maintainability.
+- `review-redundancy`: review for duplicated logic, duplicated docs, unused
+  scaffold, and unnecessary surface area.
+- `review-docs`: review durable docs, indexes, examples, and links for
+  contract accuracy.
+
+Implementation, bugfix, mechanical-change, and test-only workflows block dirty
+starts by default so unrelated pre-existing changes do not mix with new work.
+Review-only workflows allow dirty starts by default because their normal input
+is often the existing working-copy diff being reviewed.
+
+Default scaffolded workflows keep skip points intentionally narrow. Only
+explicit human-judgment bypass points are skippable: review steps that have not
+run yet, and remediation steps selected after reviewer-requested changes when a
+human decides not to implement those requested changes. Planning steps, normal
+initial coding steps except where the same step is also the remediation target,
+test design, and verification command steps are not general automation
+shortcuts and are not skippable by default.
+
+Skipped review routes to the next stage a human-approved bypass should reach.
+In review-only workflows, skipped review routes to `ready_for_human`. In the
+multi-review implementation workflow, skipped `review` routes to
+`redundancy-review`, skipped `redundancy-review` routes to
+`readability-review`, and skipped `readability-review` routes to
+`ready_for_human`.
+
+Remediation steps selected after reviewer changes have explicit skip routes
+for the same human-bypass policy. In the implementation workflow, skipped
+`code` routes to `redundancy-review`, skipped `code_fixer` routes to
+`readability-review`, and skipped `code_cleaner` routes to `ready_for_human`.
+In bugfix, mechanical-change, and test-only workflows, skipped remediation
+routes to `ready_for_human`. Because the shared `code`, `mechanical-code`, and
+`test-code` steps cannot distinguish whether they were selected for initial
+work or reviewer remediation, the skippable route is available whenever those
+steps are selected; the required human skip reason is the audit record for why
+the bypass was appropriate.
+
+The scaffold includes detailed descriptors for these agents:
+
+- `planner`
+- `coder`
+- `mechanical-coder`
+- `bug-reproducer`
+- `tester`
+- `test-designer`
+- `reviewer`
+- `mechanical-reviewer`
+- `readability-reviewer`
+- `redundancy-reviewer`
+- `docs-reviewer`
+
+Each scaffold descriptor is written for the full rendered worker prompt, not as
+a standalone instruction. Descriptors explicitly tell workers how to use
+`Attempt Metadata`, `Task Context`, `Prior Report Context`, and `Report
+Contract`, which are injected by the prompt renderer at worker launch time.
+They also allow workers to use available repo-local skills and bounded
+subagents when the active worker runtime exposes those capabilities.

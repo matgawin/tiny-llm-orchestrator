@@ -63,7 +63,7 @@ Use package tests when the behavior needs real package wiring but not a full pro
 - `internal/cli` command output and errors
 - `internal/config` loading and validation
 - config behavior backed by `internal/initconfig/scaffold/.orc`; see
-  [../reference/configuration.md](../reference/configuration.md)
+  [../reference/configuration-init.md](../reference/configuration-init.md)
 
 ### Integration Behavior
 

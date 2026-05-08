@@ -44,7 +44,7 @@ Project-local Tiny Orc configuration is expected under `.orc/` in the project be
 
 Create or preview project-local scaffold changes with `orc init`. For dry-run,
 prompt, `.gitignore`, and `AGENTS.md` behavior, see
-[../reference/configuration.md](../reference/configuration.md).
+[../reference/configuration-init.md](../reference/configuration-init.md).
 The default scaffold includes workflows for general implementation, bugfixes,
 mechanical edits, test-only work, and focused review-only tasks, plus detailed
 agent prompts for each role.

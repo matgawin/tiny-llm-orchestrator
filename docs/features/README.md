@@ -34,7 +34,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 - Sandbox command execution: [sandbox-run.md](sandbox-run.md)
 - Run-store behavior: [../reference/run-store.md](../reference/run-store.md)
 - CLI command behavior: [../../README.md](../../README.md) and `internal/cli`
-- `.orc` config schema and validation: [../reference/configuration.md](../reference/configuration.md)
-- Workflow behavior: package boundaries in [../architecture/system-overview.md](../architecture/system-overview.md). Config schema lives in [../reference/configuration.md](../reference/configuration.md); transition rules live in [../reference/workflow-engine.md](../reference/workflow-engine.md).
+- `.orc` config schema and validation: [../reference/configuration-project.md](../reference/configuration-project.md)
+- Workflow behavior: package boundaries in [../architecture/system-overview.md](../architecture/system-overview.md). Workflow file schema lives in [../reference/configuration-workflows.md](../reference/configuration-workflows.md); transition rules live in [../reference/workflow-engine.md](../reference/workflow-engine.md).
 
 Add a dedicated feature doc here when another behavior area grows beyond what belongs in the root README or reference docs.
