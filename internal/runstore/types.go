@@ -29,6 +29,7 @@ const (
 	eventWorkflowSoftCap         = "workflow.loop_soft_cap"
 	eventWorkflowHardCap         = "workflow.loop_hard_cap"
 	eventWorkflowHardCapOverride = "workflow.loop_hard_cap_override"
+	eventWorkflowStepSkipped     = "workflow.step_skipped"
 
 	KindTaskContext  ArtifactKind = "task_context"
 	KindTaskSnapshot ArtifactKind = "task_snapshot"
@@ -116,6 +117,7 @@ type Status struct {
 	RetryLineage  *RetryLineage    `json:"retry_lineage,omitempty"`
 	Warnings      []AttemptWarning `json:"warnings"`
 	WorkflowLoop  WorkflowLoop     `json:"workflow_loop"`
+	SkippedSteps  []SkippedStep    `json:"skipped_steps,omitempty"`
 	Continued     *RunContinuation `json:"continued,omitempty"`
 }
 
@@ -180,6 +182,7 @@ type Attempt struct {
 	SupersededBy     string       `json:"superseded_by,omitempty"`
 	SupersededAt     *time.Time   `json:"superseded_at,omitempty"`
 	SupersededReason string       `json:"superseded_reason,omitempty"`
+	ConsumedByEvent  int          `json:"consumed_by_event,omitempty"`
 }
 
 const (
@@ -240,6 +243,17 @@ type RunContinuation struct {
 }
 
 const ContinueModeResolveBlock = "resolve_block"
+
+// SkippedStep records an audited human decision to bypass a workflow step.
+type SkippedStep struct {
+	StepID        string    `json:"step_id"`
+	Status        string    `json:"status"`
+	Result        string    `json:"result"`
+	Reason        string    `json:"reason"`
+	EventSequence int       `json:"event_sequence"`
+	Time          time.Time `json:"timestamp"`
+	Source        string    `json:"source,omitempty"`
+}
 
 // AttemptWarning records a process fact that does not change the authoritative
 // terminal outcome of a worker attempt.
@@ -515,6 +529,36 @@ type workflowLoopHardCapPayload struct {
 type workflowLoopHardCapOverridePayload struct {
 	Override WorkflowLoopHardCapOverride `json:"override"`
 	State    string                      `json:"state"`
+}
+
+// RecordStepSkipRequest describes a trusted, system-owned skip event to append.
+type RecordStepSkipRequest struct {
+	StepID string
+	Reason string
+	Source string
+	Time   time.Time
+}
+
+// StepSkipTransition describes the already-validated transition that a skip
+// should apply atomically with the audit event.
+type StepSkipTransition struct {
+	State              string
+	WorkflowStateEntry WorkflowStateEntryRequest
+}
+
+// StepSkipValidator validates the locked status and returns the transition to
+// materialize. Workflow/config eligibility stays in the caller.
+type StepSkipValidator func(Status) (StepSkipTransition, error)
+
+type workflowStepSkippedPayload struct {
+	StepID             string              `json:"step_id"`
+	Status             string              `json:"status"`
+	Result             string              `json:"result"`
+	Reason             string              `json:"reason"`
+	Source             string              `json:"source,omitempty"`
+	ConsumeAttemptID   string              `json:"consume_attempt_id,omitempty"`
+	State              string              `json:"state"`
+	WorkflowStateEntry *WorkflowStateEntry `json:"workflow_state_entry,omitempty"`
 }
 
 // StatusMaterializationError means durable event/artifact state committed, but status.json was not refreshed.

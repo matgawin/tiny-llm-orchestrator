@@ -50,6 +50,7 @@ metadata-only `.lock` file before reading state.
 The renderer reads:
 
 - `status.json` and append-only events through the Run Store.
+- `status.skipped_steps` for audited human skip decisions.
 - `task/context.md` for task context.
 - structured `status.attempts[].report` fields for worker summaries, changed
   paths, commands, tests, risks, and structured report follow-ups.
@@ -84,7 +85,9 @@ state label, and last sequence.
 `Task Context` renders a bounded Markdown excerpt from `task/context.md`.
 
 `Workflow Path` renders workflow steps using the declaration order from State
-Sources. Attempts are counted under their declared step. The current workflow
+Sources. Attempts are counted under their declared step. Audited skips are
+rendered in this section with the exact wording
+`step <step-id> skipped by human decision: <reason>`. The current workflow
 decision and terminal reason are included when applicable.
 
 `Worker Reports` renders reported attempts with these rules:

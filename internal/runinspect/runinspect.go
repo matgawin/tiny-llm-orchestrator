@@ -169,6 +169,7 @@ func renderStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run
 	_, _ = fmt.Fprintf(w, "active_attempt: %s\n", activeAttemptValue(run.Status.ActiveAttempt))
 	_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", terminalReason(decision))
 	printDecisionOutcomeDetails(w, workflowConfig, run, decision)
+	printSkippedSteps(w, run.Status.SkippedSteps)
 	printWorkflowLoopStatus(w, workflowConfig, run)
 	reports := reportPaths(run.Status.Artifacts)
 	printReportPaths(w, reports)
@@ -206,6 +207,25 @@ func printWorkflowLoopStatus(w io.Writer, workflowConfig config.Workflow, run *r
 		if override := run.Status.WorkflowLoop.PendingHardCapOverride; override != nil && override.TargetState == state {
 			_, _ = fmt.Fprintf(w, "      pending_override: %s\n", override.HumanAction)
 			_, _ = fmt.Fprintf(w, "      pending_override_count_after: %d\n", override.CountAfterOverride)
+		}
+	}
+}
+
+func printSkippedSteps(w io.Writer, skipped []runstore.SkippedStep) {
+	_, _ = fmt.Fprintln(w, "skipped_steps:")
+	if len(skipped) == 0 {
+		_, _ = fmt.Fprintln(w, "  none")
+		return
+	}
+	for _, step := range skipped {
+		_, _ = fmt.Fprintf(w, "  - step_id: %s\n", step.StepID)
+		_, _ = fmt.Fprintf(w, "    status: %s\n", step.Status)
+		_, _ = fmt.Fprintf(w, "    result: %s\n", step.Result)
+		_, _ = fmt.Fprintf(w, "    reason: %s\n", quoteScalar(step.Reason))
+		_, _ = fmt.Fprintf(w, "    event_sequence: %d\n", step.EventSequence)
+		_, _ = fmt.Fprintf(w, "    timestamp: %s\n", formatTime(step.Time))
+		if step.Source != "" {
+			_, _ = fmt.Fprintf(w, "    source: %s\n", quoteScalar(step.Source))
 		}
 	}
 }
@@ -338,6 +358,7 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 		}
 		_, _ = fmt.Fprintf(w, "  attempts: %d\n", countStepAttempts(run.Status.Attempts, stepID))
 	}
+	renderSkippedSteps(w, run.Status.SkippedSteps)
 	printStringField(w, "decision", string(inspection.decision.Kind))
 	if inspection.decision.Kind == workflow.DecisionSelectStep {
 		printStringField(w, "selected_step", inspection.decision.Step)
@@ -383,6 +404,16 @@ func renderWorkerReports(w io.Writer, attempts []runstore.Attempt) {
 		printOptionalStringField(w, "report_artifact", attempt.ReportRef)
 	}
 	_, _ = fmt.Fprintln(w)
+}
+
+func renderSkippedSteps(w io.Writer, skipped []runstore.SkippedStep) {
+	for _, step := range skipped {
+		_, _ = fmt.Fprintf(w, "- %s\n", skippedStepWording(step))
+	}
+}
+
+func skippedStepWording(step runstore.SkippedStep) string {
+	return fmt.Sprintf("step %s skipped by human decision: %s", step.StepID, step.Reason)
 }
 
 func renderChanges(w io.Writer, fields reportFields, paths vcsPathSummary, combinedChangedPaths []string) {

@@ -243,6 +243,48 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	})
 }
 
+func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n\nBuild prompt rendering.\n", fixedPromptTime().Add(time.Minute))
+	if _, _, err := store.RecordStepSkip(runID, runstore.RecordStepSkipRequest{
+		StepID: "plan",
+		Reason: "not worth another review",
+		Time:   fixedPromptTime().Add(2 * time.Minute),
+	}, func(runstore.Status) (runstore.StepSkipTransition, error) {
+		return runstore.StepSkipTransition{
+			State: workflow.RunStatusRunning,
+			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+				State:         "test",
+				PreviousState: "plan",
+				TriggerStatus: "done",
+				TriggerResult: "skipped",
+			},
+		}, nil
+	}); err != nil {
+		t.Fatalf("RecordStepSkip returned error: %v", err)
+	}
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "test",
+		AgentID:   "tester",
+		AttemptID: "attempt-002",
+		Time:      fixedPromptTime().Add(3 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	prompt := string(result.Content)
+	assertPromptContainsAll(t, prompt, []string{
+		"### step plan skipped\n",
+		"step plan skipped by human decision: not worth another review",
+	})
+}
+
 func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)

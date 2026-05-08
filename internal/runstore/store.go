@@ -621,6 +621,95 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 	return status, event, nil
 }
 
+// RecordStepSkip persists an audited system-owned done/skipped transition.
+func (s *Store) RecordStepSkip(runID string, req RecordStepSkipRequest, validate StepSkipValidator) (Status, Event, error) {
+	if err := validateRunID(runID); err != nil {
+		return Status{}, Event{}, err
+	}
+	if validate == nil {
+		return Status{}, Event{}, errors.New("step skip validator is required")
+	}
+	req.StepID = strings.TrimSpace(req.StepID)
+	if req.StepID == "" {
+		return Status{}, Event{}, errors.New("step id is required")
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	if req.Reason == "" {
+		return Status{}, Event{}, errors.New("skip reason is required")
+	}
+	req.Source = strings.TrimSpace(req.Source)
+	req.Time = normalizeTime(req.Time)
+	var status Status
+	var event Event
+	err := s.withRunLock(runID, func() error {
+		run, err := s.load(runID)
+		if err != nil {
+			return err
+		}
+		transition, err := validate(run.Status)
+		if err != nil {
+			return err
+		}
+		if transition.State == "" {
+			return errors.New("step skip transition state is required")
+		}
+		consumeAttemptID := ""
+		if attempt, ok := LatestConsumableOutcome(run.Status); ok {
+			consumeAttemptID = attempt.AttemptID
+		}
+		var workflowEntry *WorkflowStateEntry
+		if transition.WorkflowStateEntry.State != "" {
+			entry, err := nextWorkflowStateEntry(run.Status, transition.WorkflowStateEntry)
+			if err != nil {
+				return err
+			}
+			workflowEntry = &entry
+		}
+		payload, err := marshalPayload(workflowStepSkippedPayload{
+			StepID:             req.StepID,
+			Status:             "done",
+			Result:             "skipped",
+			Reason:             req.Reason,
+			Source:             req.Source,
+			ConsumeAttemptID:   consumeAttemptID,
+			State:              transition.State,
+			WorkflowStateEntry: workflowEntry,
+		})
+		if err != nil {
+			return err
+		}
+		event = Event{Time: req.Time, Type: eventWorkflowStepSkipped, Payload: payload}
+		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			if workflowEntry != nil {
+				applyWorkflowStateEntry(status, *workflowEntry)
+			}
+			applyAttemptOutcomeConsumption(status, event, consumeAttemptID)
+			applyStepSkipped(status, SkippedStep{
+				StepID:        req.StepID,
+				Status:        "done",
+				Result:        "skipped",
+				Reason:        req.Reason,
+				EventSequence: event.Sequence,
+				Time:          event.Time,
+				Source:        req.Source,
+			})
+			status.State = transition.State
+			status.RetryLineage = nil
+			status.Continued = nil
+			status.UpdatedAt = event.Time
+			status.LastSequence = event.Sequence
+		})
+		return err
+	})
+	if err != nil {
+		if statusBackedEventPossiblyCommitted(err) {
+			return status, event, err
+		}
+		return Status{}, Event{}, err
+	}
+	return status, event, nil
+}
+
 // ResolveHumanBlock records human attestation that an external blocker was
 // resolved and returns a non-loop blocked_for_human run to running.
 func (s *Store) ResolveHumanBlock(runID, reason string, at time.Time) (Status, Event, error) {
@@ -1874,6 +1963,9 @@ func unconsumedLauncherAttemptOutcome(attempt Attempt) bool {
 }
 
 func terminalRoutingOutcome(attempt Attempt) bool {
+	if attempt.ConsumedByEvent != 0 {
+		return false
+	}
 	if attempt.SupersededBy != "" {
 		return false
 	}
@@ -1902,6 +1994,18 @@ func applyAttemptStartRouting(status *Status, at time.Time, newAttemptID string,
 		}
 	}
 	status.RetryLineage = cloneRetryLineagePtr(routing.RetryLineage)
+}
+
+func applyAttemptOutcomeConsumption(status *Status, event Event, attemptID string) {
+	if attemptID == "" {
+		return
+	}
+	for i := len(status.Attempts) - 1; i >= 0; i-- {
+		if status.Attempts[i].AttemptID == attemptID {
+			status.Attempts[i].ConsumedByEvent = event.Sequence
+			return
+		}
+	}
 }
 
 func validateRetryLineage(retry RetryLineage) error {
@@ -1948,6 +2052,20 @@ func validateAttemptStartRouting(status Status, routing attemptStartRouting) err
 		if err := validateRetryLineage(*routing.RetryLineage); err != nil {
 			return fmt.Errorf("retry lineage: %w", err)
 		}
+	}
+	return nil
+}
+
+func validateAttemptOutcomeConsumption(status Status, attemptID string) error {
+	if attemptID == "" {
+		return nil
+	}
+	latest, ok := LatestConsumableOutcome(status)
+	if !ok {
+		return fmt.Errorf("latest outcome attempt is not %q", attemptID)
+	}
+	if latest.AttemptID != attemptID {
+		return fmt.Errorf("latest outcome attempt is %q, want %q", latest.AttemptID, attemptID)
 	}
 	return nil
 }
@@ -2085,7 +2203,7 @@ func statusBackedEventPossiblyCommitted(err error) bool {
 
 func reservedEventType(eventType string) bool {
 	switch eventType {
-	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventRunContinued, eventWorkflowSoftCap, eventWorkflowHardCap, eventWorkflowHardCapOverride:
+	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventRunContinued, eventWorkflowSoftCap, eventWorkflowHardCap, eventWorkflowHardCapOverride, eventWorkflowStepSkipped:
 		return true
 	default:
 		return false
@@ -2141,6 +2259,10 @@ func applyWorkflowLoopHardCapOverride(status *Status, override WorkflowLoopHardC
 	status.WorkflowLoop.HardCapBlock = nil
 }
 
+func applyStepSkipped(status *Status, skipped SkippedStep) {
+	status.SkippedSteps = append(status.SkippedSteps, skipped)
+}
+
 func applyRunContinued(status *Status, payload runContinuedPayload) {
 	status.State = payload.NewState
 	status.Continued = &RunContinuation{
@@ -2183,6 +2305,40 @@ func validateRunContinuedPayload(status Status, payload runContinuedPayload) err
 		return errors.New("run continued resolved attempt fields do not match latest terminal blocked attempt")
 	}
 	return nil
+}
+
+func validateWorkflowStepSkippedPayload(status Status, event Event, payload workflowStepSkippedPayload) (SkippedStep, error) {
+	reason := strings.TrimSpace(payload.Reason)
+	switch {
+	case payload.StepID == "":
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped step_id is required", event.Sequence)
+	case payload.Status != "done":
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped status = %q, want done", event.Sequence, payload.Status)
+	case payload.Result != "skipped":
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped result = %q, want skipped", event.Sequence, payload.Result)
+	case reason == "":
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped reason is required", event.Sequence)
+	case payload.Reason != reason:
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped reason must be trimmed", event.Sequence)
+	case payload.State == "":
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped state is required", event.Sequence)
+	case status.ActiveAttempt != nil:
+		return SkippedStep{}, fmt.Errorf("event %d skips step while attempt %q is active", event.Sequence, status.ActiveAttempt.AttemptID)
+	case status.State != stateRunning:
+		return SkippedStep{}, fmt.Errorf("event %d skips step while run state is %q, want %q", event.Sequence, status.State, stateRunning)
+	}
+	if err := validateAttemptOutcomeConsumption(status, payload.ConsumeAttemptID); err != nil {
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped consume_attempt_id: %w", event.Sequence, err)
+	}
+	return SkippedStep{
+		StepID:        payload.StepID,
+		Status:        payload.Status,
+		Result:        payload.Result,
+		Reason:        payload.Reason,
+		EventSequence: event.Sequence,
+		Time:          event.Time,
+		Source:        payload.Source,
+	}, nil
 }
 
 func validateWorkflowLoopSoftCap(loopCap WorkflowLoopSoftCap) error {
@@ -2681,6 +2837,23 @@ func replayStatus(events []Event, status Status) (Status, error) {
 				return Status{}, fmt.Errorf("event %d run.continued payload: %w", event.Sequence, err)
 			}
 			applyRunContinued(&replayed, payload)
+		case eventWorkflowStepSkipped:
+			var payload workflowStepSkippedPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return Status{}, fmt.Errorf("event %d workflow.step_skipped payload: %w", event.Sequence, err)
+			}
+			skipped, err := validateWorkflowStepSkippedPayload(replayed, event, payload)
+			if err != nil {
+				return Status{}, err
+			}
+			if err := applyReplayedWorkflowStateEntry(&replayed, event, payload.WorkflowStateEntry); err != nil {
+				return Status{}, err
+			}
+			applyAttemptOutcomeConsumption(&replayed, event, payload.ConsumeAttemptID)
+			applyStepSkipped(&replayed, skipped)
+			replayed.State = payload.State
+			replayed.RetryLineage = nil
+			replayed.Continued = nil
 		case eventWorkflowSoftCap:
 			var payload workflowLoopSoftCapPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {

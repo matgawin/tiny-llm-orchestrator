@@ -84,6 +84,11 @@ state with prospective count when a hard-cap human decision is active. If a
 human-reviewed loop-cap override is pending, the status output shows the
 pending override action and the one allowed count-after value.
 
+`orc run show`/`status` also include audited `skipped_steps` materialized from
+`workflow.step_skipped` events. Each skipped step shows step id, `done/skipped`,
+reason, event sequence, timestamp, and source when recorded. Skipped steps are
+not worker attempts and do not appear in `status.attempts`.
+
 For `ready_for_human` and `blocked_for_human`, inspection identifies:
 
 - the run directory for current summary context

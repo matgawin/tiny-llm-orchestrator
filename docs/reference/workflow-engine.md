@@ -75,6 +75,13 @@ engine evaluates that pair exactly like any other declared outcome pair. Skipped
 review is not implicitly approved; it follows the configured `done/skipped`
 transition, which may or may not target the same state as approval.
 
+The internal skip service supplies `done/skipped` only for the current
+`select_step` decision and rejects active attempts, retry or wait decisions,
+terminal runs, non-skippable steps, undeclared skip contracts, and blank
+reasons. The service persists the accepted transition as an already-applied
+run-store mutation; future workflow evaluation does not consume the skip as a
+pending worker outcome.
+
 The default repo-local and scaffolded workflows use skip routing only for
 explicit human-judgment bypasses: skipped reviews advance to the next configured
 review or human handoff, and skipped remediation after reviewer changes advances

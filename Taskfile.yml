@@ -13,10 +13,6 @@ tasks:
   tests-race:
     aliases: ["tr"]
     cmds:
-      - task test-unit-race
-
-  test-unit-race:
-    cmds:
       - go test -race ./... -count=1
 
   build:
@@ -37,6 +33,7 @@ tasks:
       - task format
       - task lint
       - task tests
+      - task tests-race
       - task build
 
   goimports:

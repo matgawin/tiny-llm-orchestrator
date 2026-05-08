@@ -79,6 +79,62 @@ func TestNextShowsSelectedStepWithoutLaunching(t *testing.T) {
 	}
 }
 
+func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	if _, err := store.WriteArtifact(runID, runstore.Artifact{
+		Kind:    runstore.KindTaskContext,
+		Name:    "task",
+		Content: []byte("# Task\n"),
+		Time:    fixedTime().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteArtifact returned error: %v", err)
+	}
+	if _, _, err := store.RecordStepSkip(runID, runstore.RecordStepSkipRequest{
+		StepID: "plan",
+		Reason: "not worth another review",
+		Time:   fixedTime().Add(2 * time.Minute),
+	}, func(runstore.Status) (runstore.StepSkipTransition, error) {
+		return runstore.StepSkipTransition{
+			State: workflow.RunStatusReadyForHuman,
+			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+				State:         workflow.RunStatusReadyForHuman,
+				PreviousState: "plan",
+				TriggerStatus: "done",
+				TriggerResult: "skipped",
+			},
+		}, nil
+	}); err != nil {
+		t.Fatalf("RecordStepSkip returned error: %v", err)
+	}
+
+	var statusOut bytes.Buffer
+	if err := Status(context.Background(), Options{Root: root, RunID: runID, Stdout: &statusOut}); err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	assertContainsAll(t, "status", statusOut.String(), []string{
+		"skipped_steps:\n",
+		"  - step_id: plan\n",
+		"    status: done\n",
+		"    result: skipped\n",
+		"    reason: \"not worth another review\"\n",
+	})
+
+	var summaryOut bytes.Buffer
+	if err := SummaryContext(context.Background(), Options{Root: root, RunID: runID, Stdout: &summaryOut}); err != nil {
+		t.Fatalf("SummaryContext returned error: %v", err)
+	}
+	wording := "step plan skipped by human decision: not worth another review"
+	if got := strings.Count(summaryOut.String(), wording); got != 1 {
+		t.Fatalf("summary skip wording count = %d, want 1\n%s", got, summaryOut.String())
+	}
+}
+
 func TestStatusAndNextShowActiveAttempt(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)

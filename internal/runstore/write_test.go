@@ -17,6 +17,7 @@ import (
 const (
 	testWorkflowName      = "implementation"
 	testWorkflowStateCode = "code"
+	testWorkflowSkip      = "skipped"
 )
 
 func TestAppendEventPreservesOrderedLogAndUpdatesStatus(t *testing.T) {
@@ -1962,6 +1963,100 @@ func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 	}
 	if got := loaded.Status.WorkflowLoop.Counts[readyForHumanState]; got != 1 {
 		t.Fatalf("loaded terminal count = %d, want 1", got)
+	}
+}
+
+func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
+	root := t.TempDir()
+	store := openStore(t, root)
+	run, err := store.Create(CreateRunRequest{RunID: "skip-step", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	at := time.Date(2026, 5, 8, 10, 15, 0, 0, time.UTC)
+
+	status, event, err := store.RecordStepSkip(run.ID, RecordStepSkipRequest{
+		StepID: testWorkflowStateCode,
+		Reason: "not needed after human review",
+		Source: "test",
+		Time:   at,
+	}, func(locked Status) (StepSkipTransition, error) {
+		if len(locked.Attempts) != 0 {
+			t.Fatalf("locked attempts = %d, want 0", len(locked.Attempts))
+		}
+		return StepSkipTransition{
+			State: stateRunning,
+			WorkflowStateEntry: WorkflowStateEntryRequest{
+				State:         "review",
+				PreviousState: testWorkflowStateCode,
+				TriggerStatus: "done",
+				TriggerResult: testWorkflowSkip,
+			},
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("RecordStepSkip returned error: %v", err)
+	}
+
+	if event.Type != eventWorkflowStepSkipped || event.Sequence != 2 {
+		t.Fatalf("event = %+v, want workflow.step_skipped sequence 2", event)
+	}
+	if len(status.Attempts) != 0 || status.ActiveAttempt != nil {
+		t.Fatalf("attempts = %d active=%+v, want unchanged empty attempts", len(status.Attempts), status.ActiveAttempt)
+	}
+	if got := status.WorkflowLoop.Counts["review"]; got != 1 {
+		t.Fatalf("review loop count = %d, want 1", got)
+	}
+	entry := status.WorkflowLoop.Entries[1]
+	if entry.State != "review" || entry.PreviousState != testWorkflowStateCode || entry.TriggerStatus != "done" || entry.TriggerResult != testWorkflowSkip {
+		t.Fatalf("workflow entry = %+v, want skip transition to review", entry)
+	}
+	if len(status.SkippedSteps) != 1 {
+		t.Fatalf("skipped steps = %d, want 1", len(status.SkippedSteps))
+	}
+	skipped := status.SkippedSteps[0]
+	if skipped.StepID != testWorkflowStateCode || skipped.Status != "done" || skipped.Result != testWorkflowSkip || skipped.Reason != "not needed after human review" || skipped.EventSequence != event.Sequence || !skipped.Time.Equal(at) || skipped.Source != "test" {
+		t.Fatalf("skipped = %+v, want audited skip", skipped)
+	}
+	var payload workflowStepSkippedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal workflow.step_skipped payload: %v", err)
+	}
+	if payload.StepID != testWorkflowStateCode || payload.Status != "done" || payload.Result != testWorkflowSkip || payload.Reason != skipped.Reason || payload.WorkflowStateEntry == nil || *payload.WorkflowStateEntry != entry {
+		t.Fatalf("payload = %+v, want skip payload with workflow entry %+v", payload, entry)
+	}
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0] != skipped {
+		t.Fatalf("replayed skipped steps = %+v, want %+v", loaded.Status.SkippedSteps, skipped)
+	}
+	if got := loaded.Status.WorkflowLoop.Entries[1]; got != entry {
+		t.Fatalf("replayed workflow entry = %+v, want %+v", got, entry)
+	}
+}
+
+func TestRecordStepSkipRejectsBlankReasonWithoutMutation(t *testing.T) {
+	root := t.TempDir()
+	store := openStore(t, root)
+	run, err := store.Create(CreateRunRequest{RunID: "blank-skip", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	before := run.Status
+
+	_, _, err = store.RecordStepSkip(run.ID, RecordStepSkipRequest{StepID: testWorkflowStateCode, Reason: " \t "}, func(Status) (StepSkipTransition, error) {
+		t.Fatal("validator called for blank reason")
+		return StepSkipTransition{}, nil
+	})
+	requireErrorContains(t, err, "skip reason is required")
+	after, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if after.Status.LastSequence != before.LastSequence || len(after.Status.SkippedSteps) != 0 {
+		t.Fatalf("status after rejection = %+v, want unchanged sequence %d and no skips", after.Status, before.LastSequence)
 	}
 }
 

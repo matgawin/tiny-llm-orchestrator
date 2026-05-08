@@ -322,6 +322,12 @@ type reportContext struct {
 
 func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]reportContext, error) {
 	var reports []reportContext
+	for _, skipped := range renderCtx.run.Status.SkippedSteps {
+		reports = append(reports, reportContext{
+			heading: fmt.Sprintf("step %s skipped", skipped.StepID),
+			excerpt: fmt.Sprintf("step %s skipped by human decision: %s", skipped.StepID, skipped.Reason),
+		})
+	}
 	attemptReportDetailPaths := attemptReportDetailArtifactPaths(renderCtx.run.Status.Attempts)
 	attemptReportDetailByPath := make(map[string][]byte)
 	for _, ref := range renderCtx.run.Status.Artifacts {

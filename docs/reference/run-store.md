@@ -124,8 +124,11 @@ Latest-state changes are recorded as `status.updated` events and then materializ
 Callers may append custom events with non-reserved event types. Reserved event
 types are `run.created`, `status.updated`, `artifact.written`,
 `attempt.started`, `attempt.prompted`, `attempt.logged`, `attempt.process_started`,
-`attempt.finished`, `attempt.recovered`, `attempt.reported`, `attempt.warning`, and
-`report.ignored`; those are written only through the dedicated store APIs.
+`attempt.finished`, `attempt.recovered`, `attempt.reported`, `attempt.warning`,
+`report.ignored`, `run.continued`, `workflow.loop_soft_cap`,
+`workflow.loop_hard_cap`, `workflow.loop_hard_cap_override`, and
+`workflow.step_skipped`; those are written only through the dedicated store
+APIs.
 
 For caller events, callers provide:
 
@@ -250,8 +253,43 @@ are added beside the `attempt` object:
 Workflow state entries are counted by state name. The initial workflow start
 state is recorded at run creation with count `1`. Later counts increment only
 when routing is accepted into durable run state: a selected worker state in
-`attempt.started`, or a terminal/human state in `status.updated`. Failed report
-validation and `report.ignored` events do not increment these counters.
+`attempt.started`, a terminal/human state in `status.updated`, or an audited
+skip transition in `workflow.step_skipped`. Failed report validation and
+`report.ignored` events do not increment these counters.
+
+`workflow.step_skipped` is written by the internal trusted skip service when a
+human decision bypasses the currently selected skippable step. It records the
+system-owned accepted outcome `done/skipped`, applies the configured transition
+in the same locked mutation, clears retry lineage, and does not create an
+active attempt, terminal attempt, worker report, or `status.attempts` entry.
+When the skipped step was selected by routing a previous terminal attempt
+outcome, `consume_attempt_id` records that outcome so replay and future
+workflow evaluation do not consume it again.
+
+```json
+{
+  "step_id": "review",
+  "status": "done",
+  "result": "skipped",
+  "reason": "not worth another review",
+  "source": "human",
+  "consume_attempt_id": "20260504T120000Z-plan-a1b2c3",
+  "state": "running",
+  "workflow_state_entry": {
+    "workflow": "implementation",
+    "state": "redundancy-review",
+    "count": 1,
+    "previous_state": "review",
+    "trigger_status": "done",
+    "trigger_result": "skipped"
+  }
+}
+```
+
+When the configured `done/skipped` transition targets a terminal run state,
+`state` is that terminal state and the workflow state entry records that
+terminal state. The append-only event remains the source of truth; `status.json`
+materializes `skipped_steps` from these events.
 
 `workflow.loop_soft_cap` is written once per workflow state when a
 worker-selecting transition reaches prospective count `soft + 1`. The launcher
@@ -554,6 +592,14 @@ workflow/report layers own the allowed-state policy.
   records the human reason and resolved attempt fields needed to retry the same
   blocked step after process restart without losing workflow-loop accounting
   for the retry.
+- Audited step skips are materialized in `skipped_steps`. Each entry is
+  reconstructed from `workflow.step_skipped` and includes `step_id`, `status`,
+  `result`, `reason`, `event_sequence`, `timestamp`, and optional `source`.
+  Skips do not add entries to `attempts`; the paired workflow transition is
+  visible through `workflow_loop.entries`.
+- When `workflow.step_skipped` consumes the latest terminal attempt outcome,
+  that existing attempt is materialized with `consumed_by_event` set to the
+  skip event sequence.
 
 The history entry below is abbreviated; entries use the same attempt object
 shape as `active_attempt`.
