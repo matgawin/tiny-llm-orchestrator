@@ -243,6 +243,7 @@ func writeCLIImplementationProject(t *testing.T, root string) {
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("mkdir agents: %v", err)
 	}
+	writeCLIRuntime(t, orcDir)
 	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
 workflows:
   implementation: workflows/implementation.yaml
@@ -251,6 +252,8 @@ agents:
   coder: agents/coder.md
   tester: agents/tester.md
   reviewer: agents/reviewer.md
+runtimes:
+  codex: runtimes/codex.yaml
 `)
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "planner.md"), cliAgentDescriptor("planner", "Creates implementation plans."))
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "coder.md"), cliAgentDescriptor("coder", "Implements code changes."))
@@ -268,12 +271,15 @@ func writeCLISkipStepProject(t *testing.T, root string, reviewSkippable bool) {
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("mkdir agents: %v", err)
 	}
+	writeCLIRuntime(t, orcDir)
 	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
 workflows:
   implementation: workflows/implementation.yaml
 agents:
   reviewer: agents/reviewer.md
   coder: agents/coder.md
+runtimes:
+  codex: runtimes/codex.yaml
 `)
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), cliAgentDescriptor("reviewer", "Reviews completed work."))
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "coder.md"), cliAgentDescriptor("coder", "Implements code changes."))
@@ -295,6 +301,7 @@ task_context:
 defaults:
   timeout: 30m
   report_exit_grace: 30s
+  runtime: codex
   retries:
     failed/error: 1
 steps:
@@ -329,11 +336,14 @@ func writeCLIAdvanceCommandProject(t *testing.T, root, reviewStep, loopCaps stri
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("mkdir agents: %v", err)
 	}
+	writeCLIRuntime(t, orcDir)
 	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
 workflows:
   implementation: workflows/implementation.yaml
 agents:
   reviewer: agents/reviewer.md
+runtimes:
+  codex: runtimes/codex.yaml
 `)
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), cliAgentDescriptor("reviewer", "Reviews completed work."))
 	if strings.TrimSpace(reviewStep) == "" {
@@ -359,6 +369,7 @@ task_context:
 defaults:
   timeout: 5s
   report_exit_grace: 30ms
+  runtime: codex
   retries: {}
 `+caps.String()+`steps:
   plan:
@@ -427,6 +438,14 @@ description: %s
 
 %s role instructions.
 `, id, id, description, id)
+}
+
+func writeCLIRuntime(t *testing.T, orcDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
+		t.Fatalf("mkdir runtimes: %v", err)
+	}
+	writeCLIFile(t, filepath.Join(orcDir, "runtimes", "codex.yaml"), testutil.CodexRuntimeYAML())
 }
 
 func openCLIStore(t *testing.T, root string) *runstore.Store {

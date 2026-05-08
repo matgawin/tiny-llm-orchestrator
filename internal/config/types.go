@@ -303,6 +303,37 @@ type Defaults struct {
 	Timeout         Duration       `yaml:"timeout"`
 	ReportExitGrace Duration       `yaml:"report_exit_grace"`
 	Retries         map[string]int `yaml:"retries"`
+	Runtime         string         `yaml:"runtime"`
+	Model           string         `yaml:"model"`
+	RuntimeDirs     []string       `yaml:"runtime_dirs"`
+}
+
+// EffectiveRuntime returns the runtime selected for an agent step.
+func (w Workflow) EffectiveRuntime(step Step) string {
+	if step.Runtime != "" {
+		return step.Runtime
+	}
+	return w.Defaults.Runtime
+}
+
+// EffectiveModel returns the model selected for an agent step and runtime.
+func (w Workflow) EffectiveModel(step Step, runtime Runtime) string {
+	if step.Model != "" {
+		return step.Model
+	}
+	if w.Defaults.Model != "" {
+		return w.Defaults.Model
+	}
+	return runtime.Model.Default
+}
+
+// EffectiveRuntimeDirs returns workflow default runtime directories followed
+// by step runtime directories, preserving configured order.
+func (w Workflow) EffectiveRuntimeDirs(step Step) []string {
+	dirs := make([]string, 0, len(w.Defaults.RuntimeDirs)+len(step.RuntimeDirs))
+	dirs = append(dirs, w.Defaults.RuntimeDirs...)
+	dirs = append(dirs, step.RuntimeDirs...)
+	return dirs
 }
 
 // Duration wraps time.Duration for YAML values such as "30m".
@@ -385,6 +416,9 @@ func (i OptionalInt) MarshalYAML() (any, error) {
 type Step struct {
 	Kind           string              `yaml:"kind"`
 	Agent          string              `yaml:"agent"`
+	Runtime        string              `yaml:"runtime"`
+	Model          string              `yaml:"model"`
+	RuntimeDirs    []string            `yaml:"runtime_dirs"`
 	Command        CommandStep         `yaml:"command"`
 	Script         ScriptStep          `yaml:"script"`
 	CWD            string              `yaml:"cwd"`

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
 func TestLoadValidRuntimeDescriptors(t *testing.T) {
@@ -523,26 +525,7 @@ runtimes:
 }
 
 func validCodexRuntimeDescriptor() string {
-	return `id: codex
-command:
-  executable: codex
-  normal_args: [--ask-for-approval, never]
-  sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
-  args: [exec, --skip-git-repo-check, -]
-prompt:
-  delivery: stdin
-model:
-  supported: true
-  required: false
-  allowed: []
-  args: [--model, "{model}"]
-directories:
-  supported: true
-  args: [--add-dir, "{dir}"]
-sandbox:
-  supported: true
-  required: false
-`
+	return testutil.CodexRuntimeYAML()
 }
 
 func validFilePromptRuntimeDescriptor() string {
@@ -574,5 +557,62 @@ sandbox:
         target: /workspace/.orc/cache/fileai
         mode: rw
         optional: true
+`
+}
+
+func validNoModelRuntimeDescriptor(id string) string {
+	return `id: ` + id + `
+command:
+  executable: ` + id + `
+  args: [run]
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: true
+  args: [--dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+`
+}
+
+func validNoDirsRuntimeDescriptor(id string) string {
+	return `id: ` + id + `
+command:
+  executable: ` + id + `
+  args: [run]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  args: [--model, "{model}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+  required: false
+`
+}
+
+func validRequiredModelRuntimeDescriptor(id string) string {
+	return `id: ` + id + `
+command:
+  executable: ` + id + `
+  args: [run]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: true
+  args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
 `
 }

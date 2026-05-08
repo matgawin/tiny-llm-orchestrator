@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
@@ -533,6 +534,9 @@ func writePromptProject(t *testing.T, root string) {
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
+		t.Fatalf("create runtimes dir: %v", err)
+	}
 	writePromptFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
 workflows:
   implementation: workflows/implementation.yaml
@@ -540,7 +544,10 @@ agents:
   planner: agents/planner.md
   tester: agents/tester.md
   reviewer: agents/reviewer.md
+runtimes:
+  codex: runtimes/codex.yaml
 `)
+	writePromptFile(t, filepath.Join(orcDir, "runtimes", "codex.yaml"), testutil.CodexRuntimeYAML())
 	writePromptFile(t, filepath.Join(orcDir, "agents", "planner.md"), `---
 id: planner
 role: planner

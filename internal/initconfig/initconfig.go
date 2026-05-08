@@ -564,6 +564,7 @@ func scaffoldPaths() []string {
 		".orc/workflows/review-readability.yaml",
 		".orc/workflows/review-redundancy.yaml",
 		".orc/workflows/review-docs.yaml",
+		".orc/runtimes/codex.yaml",
 		".orc/agents/planner.md",
 		".orc/agents/coder.md",
 		".orc/agents/mechanical-coder.md",

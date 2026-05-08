@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+const (
+	testRuntimeCodex  = "codex"
+	testRuntimeFileAI = "fileai"
+	testModelGPT5     = "gpt-5"
+)
+
 func TestLoadAcceptsCommandAndScriptSteps(t *testing.T) {
 	workflow := readConfigTestdata(t, "command_script_workflow.yaml")
 	root := writeMinimalProject(t, projectFixture{workflow: workflow})
@@ -55,6 +61,74 @@ func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
+	t.Run("step override wins over workflow defaults", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			config: configWithRuntimes(map[string]string{
+				testRuntimeCodex:  "runtimes/codex.yaml",
+				testRuntimeFileAI: "runtimes/fileai.yaml",
+			}),
+			runtimes: map[string]string{
+				testRuntimeCodex:  validCodexRuntimeDescriptor(),
+				testRuntimeFileAI: validFilePromptRuntimeDescriptor(),
+			},
+			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+				workflow.Defaults.Runtime = testRuntimeCodex
+				workflow.Defaults.RuntimeDirs = []string{"shared"}
+				step := workflow.Steps["plan"]
+				step.Runtime = testRuntimeFileAI
+				step.Model = "model-b"
+				step.RuntimeDirs = []string{"/tmp/external-worktree"}
+				workflow.Steps["plan"] = step
+				return workflow
+			}),
+		})
+
+		project, err := Load(root)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+		workflow := project.Workflows["implementation"]
+		step := workflow.Steps["plan"]
+		if got := workflow.EffectiveRuntime(step); got != testRuntimeFileAI {
+			t.Fatalf("effective runtime = %q, want fileai", got)
+		}
+		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeFileAI]); got != "model-b" {
+			t.Fatalf("effective model = %q, want model-b", got)
+		}
+		if got, want := workflow.EffectiveRuntimeDirs(step), []string{"shared", "/tmp/external-worktree"}; !slices.Equal(got, want) {
+			t.Fatalf("effective runtime dirs = %v, want %v", got, want)
+		}
+		if got := step.EffectiveAgentID(); got != "planner" {
+			t.Fatalf("effective agent id = %q, want planner", got)
+		}
+	})
+
+	t.Run("workflow defaults supply agent-only step", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+				workflow.Defaults.Runtime = testRuntimeCodex
+				workflow.Defaults.Model = testModelGPT5
+				workflow.Defaults.RuntimeDirs = []string{"src"}
+				return workflow
+			}),
+		})
+
+		project, err := Load(root)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+		workflow := project.Workflows["implementation"]
+		step := workflow.Steps["plan"]
+		if got := workflow.EffectiveRuntime(step); got != testRuntimeCodex {
+			t.Fatalf("effective runtime = %q, want codex", got)
+		}
+		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeCodex]); got != testModelGPT5 {
+			t.Fatalf("effective model = %q, want gpt-5", got)
+		}
+	})
+}
+
 func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 	tests := []invalidWorkflowCase{
 		generatedWorkflowCase(t, "skippable missing allowed result", func(workflow Workflow) Workflow {
@@ -94,6 +168,95 @@ func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
+	tests := []invalidWorkflowCase{
+		generatedWorkflowCase(t, "missing effective runtime", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = ""
+			return workflow
+		}, `step "plan" runtime is required for agent steps`),
+		generatedWorkflowCase(t, "missing runtime reference", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "missing"
+			return workflow
+		}, `step "plan" references missing runtime "missing"`),
+		generatedWorkflowCase(t, "missing required model", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "requiredmodel"
+			return workflow
+		}, `step "plan" runtime "requiredmodel" requires a model`),
+		generatedWorkflowCase(t, "step model unsupported", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "nomodel"
+			step := workflow.Steps["plan"]
+			step.Model = testModelGPT5
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" model requires runtime "nomodel" model.supported=true`),
+		generatedWorkflowCase(t, "default model unsupported", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "nomodel"
+			workflow.Defaults.Model = testModelGPT5
+			return workflow
+		}, `step "plan" defaults.model requires runtime "nomodel" model.supported=true`),
+		generatedWorkflowCase(t, "allowlist rejects step model", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = testRuntimeFileAI
+			step := workflow.Steps["plan"]
+			step.Model = "model-z"
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" model "model-z" is not allowed by runtime "fileai" model.allowed`),
+		generatedWorkflowCase(t, "allowlist rejects default model", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = testRuntimeFileAI
+			workflow.Defaults.Model = "model-z"
+			return workflow
+		}, `step "plan" defaults.model "model-z" is not allowed by runtime "fileai" model.allowed`),
+		generatedWorkflowCase(t, "runtime dirs unsupported", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "nodirs"
+			step := workflow.Steps["plan"]
+			step.RuntimeDirs = []string{"extra"}
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" runtime_dirs require runtime "nodirs" directories.supported=true`),
+		generatedWorkflowCase(t, "empty default runtime dir", func(workflow Workflow) Workflow {
+			workflow.Defaults.RuntimeDirs = []string{""}
+			return workflow
+		}, `defaults.runtime_dirs[0] is empty`),
+		generatedWorkflowCase(t, "unclean default runtime dir", func(workflow Workflow) Workflow {
+			workflow.Defaults.RuntimeDirs = []string{"work/../work"}
+			return workflow
+		}, `defaults.runtime_dirs[0] "work/../work" must be clean`),
+		generatedWorkflowCase(t, "env default runtime dir", func(workflow Workflow) Workflow {
+			workflow.Defaults.RuntimeDirs = []string{"$WORKTREE"}
+			return workflow
+		}, `defaults.runtime_dirs[0] "$WORKTREE" must not use shell, environment, or tilde expansion`),
+		generatedWorkflowCase(t, "traversal step runtime dir", func(workflow Workflow) Workflow {
+			step := workflow.Steps["plan"]
+			step.RuntimeDirs = []string{"../outside"}
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" runtime_dirs[0] "../outside" must be repo-relative or absolute and stay under repository root`),
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{
+				config: configWithRuntimes(map[string]string{
+					testRuntimeCodex:  "runtimes/codex.yaml",
+					testRuntimeFileAI: "runtimes/fileai.yaml",
+					"nomodel":         "runtimes/nomodel.yaml",
+					"nodirs":          "runtimes/nodirs.yaml",
+					"requiredmodel":   "runtimes/requiredmodel.yaml",
+				}),
+				workflow: tt.workflow,
+				runtimes: map[string]string{
+					testRuntimeCodex:  validCodexRuntimeDescriptor(),
+					testRuntimeFileAI: validFilePromptRuntimeDescriptor(),
+					"nomodel":         validNoModelRuntimeDescriptor("nomodel"),
+					"nodirs":          validNoDirsRuntimeDescriptor("nodirs"),
+					"requiredmodel":   validRequiredModelRuntimeDescriptor("requiredmodel"),
+				},
+			})
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
+	}
+}
+
 func TestLoadRejectsInvalidStepKinds(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -109,6 +272,30 @@ command:
 			contains: []string{`kind command must not set agent`},
 		},
 		{
+			name: "command with runtime",
+			stepYAML: `kind: command
+runtime: codex
+command:
+  argv: ["task", "check"]`,
+			contains: []string{`kind command must not set runtime`},
+		},
+		{
+			name: "command with model",
+			stepYAML: `kind: command
+model: gpt-5
+command:
+  argv: ["task", "check"]`,
+			contains: []string{`kind command must not set model`},
+		},
+		{
+			name: "command with runtime dirs",
+			stepYAML: `kind: command
+runtime_dirs: ["src"]
+command:
+  argv: ["task", "check"]`,
+			contains: []string{`kind command must not set runtime_dirs`},
+		},
+		{
 			name: "command missing argv",
 			stepYAML: `kind: command
 command: {}`,
@@ -120,6 +307,30 @@ command: {}`,
 script:
   path: ../verify.sh`,
 			contains: []string{`script.path "../verify.sh" must be clean and stay under repository root`},
+		},
+		{
+			name: "script with runtime",
+			stepYAML: `kind: script
+runtime: codex
+script:
+  path: scripts/verify.sh`,
+			contains: []string{`kind script must not set runtime`},
+		},
+		{
+			name: "script with model",
+			stepYAML: `kind: script
+model: gpt-5
+script:
+  path: scripts/verify.sh`,
+			contains: []string{`kind script must not set model`},
+		},
+		{
+			name: "script with runtime dirs",
+			stepYAML: `kind: script
+runtime_dirs: ["src"]
+script:
+  path: scripts/verify.sh`,
+			contains: []string{`kind script must not set runtime_dirs`},
 		},
 		{
 			name: "agent with command",

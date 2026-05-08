@@ -60,6 +60,7 @@ func minimalWorkflowSpec() Workflow {
 			Timeout:         Duration{Duration: 30 * time.Minute, Set: true},
 			ReportExitGrace: Duration{Duration: 30 * time.Second, Set: true},
 			Retries:         map[string]int{},
+			Runtime:         "codex",
 		},
 		Steps: map[string]Step{
 			"plan": {
@@ -94,6 +95,13 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 	if config == "" {
 		config = configForAgents(agents)
 	}
+	runtimes := fixture.runtimes
+	if runtimes == nil {
+		runtimes = map[string]string{"codex": validCodexRuntimeDescriptor()}
+		if !strings.Contains(config, "\nruntimes:") {
+			config += "runtimes:\n  codex: runtimes/codex.yaml\n"
+		}
+	}
 	workflow := fixture.workflow
 	if workflow == "" {
 		workflow = workflowYAML(t, nil)
@@ -104,7 +112,7 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 	for id, descriptor := range agents {
 		writeFile(t, filepath.Join(orcDir, "agents", id+".md"), descriptor)
 	}
-	for id, descriptor := range fixture.runtimes {
+	for id, descriptor := range runtimes {
 		writeFile(t, filepath.Join(orcDir, "runtimes", id+".yaml"), descriptor)
 	}
 
@@ -127,6 +135,7 @@ func configForAgents(agents map[string]string) string {
 		b.WriteString(id)
 		b.WriteString(".md\n")
 	}
+	b.WriteString("runtimes:\n  codex: runtimes/codex.yaml\n")
 	return b.String()
 }
 

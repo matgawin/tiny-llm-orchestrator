@@ -25,6 +25,8 @@ agents:
   readability-reviewer: agents/readability-reviewer.md
   redundancy-reviewer: agents/redundancy-reviewer.md
   docs-reviewer: agents/docs-reviewer.md
+runtimes:
+  codex: runtimes/codex.yaml
 
 # Optional sandbox runner for Codex yolo mode.
 # See docs/features/sandbox-run.md for the full policy. Existing configs are

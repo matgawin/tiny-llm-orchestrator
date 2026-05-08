@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
 
@@ -404,7 +405,11 @@ func writeRunStartProject(t *testing.T, workflow string) string {
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
-	writeRunStartFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n")
+	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
+		t.Fatalf("create runtimes dir: %v", err)
+	}
+	writeRunStartFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\nruntimes:\n  codex: runtimes/codex.yaml\n")
+	writeRunStartFile(t, filepath.Join(orcDir, "runtimes", "codex.yaml"), testutil.CodexRuntimeYAML())
 	writeRunStartFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), workflow)
 	writeRunStartFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
 	return root
@@ -437,6 +442,7 @@ task_context:
 %sdefaults:
   timeout: 30m
   report_exit_grace: 30s
+  runtime: codex
   retries: {}
 steps:
   plan:

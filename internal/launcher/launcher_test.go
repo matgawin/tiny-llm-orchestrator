@@ -187,6 +187,7 @@ func writeLoopCapLauncherProject(t *testing.T, root, defaultCaps, workflowCaps s
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
+	writeLauncherRuntime(t, orcDir)
 	var configYAML strings.Builder
 	configYAML.WriteString("version: 1\n")
 	if strings.TrimSpace(defaultCaps) != "" {
@@ -202,7 +203,7 @@ func writeLoopCapLauncherProject(t *testing.T, root, defaultCaps, workflowCaps s
 			configYAML.WriteString("      " + line + "\n")
 		}
 	}
-	configYAML.WriteString("agents:\n  planner: agents/planner.md\n")
+	configYAML.WriteString("agents:\n  planner: agents/planner.md\nruntimes:\n  codex: runtimes/codex.yaml\n")
 	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), configYAML.String())
 	writeLauncherFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
 	writeLauncherFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
@@ -215,6 +216,7 @@ task_context:
 defaults:
   timeout: 200ms
   report_exit_grace: 30ms
+  runtime: codex
   retries: {}
 steps:
   plan:
@@ -333,10 +335,11 @@ func writeCommandLauncherProject(t *testing.T, root string, opts commandWorkflow
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
-	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  coder: agents/coder.md\n")
+	writeLauncherRuntime(t, orcDir)
+	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  coder: agents/coder.md\nruntimes:\n  codex: runtimes/codex.yaml\n")
 	writeLauncherFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
 	var workflowYAML strings.Builder
-	workflowYAML.WriteString("name: implementation\nstart: check\nexecution:\n  mode: sequential\ntask_context:\n  beads: optional\n  markdown_fallback: true\ndefaults:\n  timeout: " + opts.Timeout + "\n  report_exit_grace: 30ms\n  retries: {}\nsteps:\n  check:\n    kind: " + opts.Kind + "\n")
+	workflowYAML.WriteString("name: implementation\nstart: check\nexecution:\n  mode: sequential\ntask_context:\n  beads: optional\n  markdown_fallback: true\ndefaults:\n  timeout: " + opts.Timeout + "\n  report_exit_grace: 30ms\n  runtime: codex\n  retries: {}\nsteps:\n  check:\n    kind: " + opts.Kind + "\n")
 	switch opts.Kind {
 	case config.StepKindScript:
 		workflowYAML.WriteString("    script:\n      path: " + strconv.Quote(opts.ScriptPath) + "\n")
@@ -416,6 +419,14 @@ func appendLauncherSandboxConfig(t *testing.T, root string, requireForWorkers bo
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   require_for_workers: `+require+`
 `)
+}
+
+func writeLauncherRuntime(t *testing.T, orcDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
+		t.Fatalf("create runtimes dir: %v", err)
+	}
+	writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "codex.yaml"), testutil.CodexRuntimeYAML())
 }
 
 func openLauncherStore(t *testing.T, root string) *runstore.Store {

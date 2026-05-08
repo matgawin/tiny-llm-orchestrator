@@ -1,0 +1,19 @@
+id: codex
+command:
+  executable: codex
+  normal_args: [--ask-for-approval, never]
+  sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
+  args: [exec, --skip-git-repo-check]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  allowed: []
+  args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--add-dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false

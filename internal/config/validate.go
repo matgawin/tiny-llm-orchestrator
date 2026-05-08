@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -347,14 +348,14 @@ func validateResolvedUnderRoot(realRoot, realPath string) error {
 	return nil
 }
 
-func validateWorkflow(workflow Workflow, agents map[string]Agent) error {
+func validateWorkflow(workflow Workflow, agents map[string]Agent, runtimes map[string]Runtime) error {
 	if err := validateWorkflowShape(workflow); err != nil {
 		return err
 	}
 
 	declaredPairs := resultPairSet{}
 	for stepName, step := range workflow.Steps {
-		stepPairs, err := validateStep(stepName, step, workflow.Steps, agents)
+		stepPairs, err := validateStep(stepName, step, workflow, workflow.Steps, agents, runtimes)
 		if err != nil {
 			return err
 		}
@@ -394,8 +395,8 @@ func validateWorkflowShape(workflow Workflow) error {
 	return nil
 }
 
-func validateStep(stepName string, step Step, steps map[string]Step, agents map[string]Agent) (resultPairSet, error) {
-	if err := validateStepKind(stepName, step, agents); err != nil {
+func validateStep(stepName string, step Step, workflow Workflow, steps map[string]Step, agents map[string]Agent, runtimes map[string]Runtime) (resultPairSet, error) {
+	if err := validateStepKind(stepName, step, workflow, agents, runtimes); err != nil {
 		return nil, err
 	}
 	if len(step.AllowedResults) == 0 {
@@ -437,7 +438,7 @@ func validateSkipContract(stepName string, step Step, stepPairs resultPairSet) e
 	return nil
 }
 
-func validateStepKind(stepName string, step Step, agents map[string]Agent) error {
+func validateStepKind(stepName string, step Step, workflow Workflow, agents map[string]Agent, runtimes map[string]Runtime) error {
 	kind := step.EffectiveKind()
 	if step.Script.Body != "" {
 		return fmt.Errorf("step %q script.body is not supported in v1", stepName)
@@ -456,9 +457,15 @@ func validateStepKind(stepName string, step Step, agents map[string]Agent) error
 		if _, ok := agents[step.Agent]; !ok {
 			return fmt.Errorf("step %q references missing agent %q", stepName, step.Agent)
 		}
+		if err := validateAgentStepRuntime(stepName, step, workflow, runtimes); err != nil {
+			return err
+		}
 	case StepKindCommand:
 		if step.Agent != "" {
 			return fmt.Errorf("step %q kind command must not set agent", stepName)
+		}
+		if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindCommand); err != nil {
+			return err
 		}
 		if len(step.Command.Argv) == 0 {
 			return fmt.Errorf("step %q command.argv must declare at least one argument", stepName)
@@ -474,6 +481,9 @@ func validateStepKind(stepName string, step Step, agents map[string]Agent) error
 	case StepKindScript:
 		if step.Agent != "" {
 			return fmt.Errorf("step %q kind script must not set agent", stepName)
+		}
+		if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindScript); err != nil {
+			return err
 		}
 		if len(step.Command.Argv) > 0 {
 			return fmt.Errorf("step %q kind script must not set command", stepName)
@@ -498,6 +508,66 @@ func validateStepKind(stepName string, step Step, agents map[string]Agent) error
 		}
 	}
 	return nil
+}
+
+func validateAgentStepRuntime(stepName string, step Step, workflow Workflow, runtimes map[string]Runtime) error {
+	runtimeID := workflow.EffectiveRuntime(step)
+	if runtimeID == "" {
+		return fmt.Errorf("step %q runtime is required for agent steps", stepName)
+	}
+	runtime, ok := runtimes[runtimeID]
+	if !ok {
+		return fmt.Errorf("step %q references missing runtime %q", stepName, runtimeID)
+	}
+	if step.Model != "" && !runtime.Model.Supported {
+		return fmt.Errorf("step %q model requires runtime %q model.supported=true", stepName, runtimeID)
+	}
+	if workflow.Defaults.Model != "" && !runtime.Model.Supported {
+		return fmt.Errorf("step %q defaults.model requires runtime %q model.supported=true", stepName, runtimeID)
+	}
+	if step.Model != "" && !runtimeModelAllows(runtime, step.Model) {
+		return fmt.Errorf("step %q model %q is not allowed by runtime %q model.allowed", stepName, step.Model, runtimeID)
+	}
+	if workflow.Defaults.Model != "" && !runtimeModelAllows(runtime, workflow.Defaults.Model) {
+		return fmt.Errorf("step %q defaults.model %q is not allowed by runtime %q model.allowed", stepName, workflow.Defaults.Model, runtimeID)
+	}
+	model := workflow.EffectiveModel(step, runtime)
+	if model != "" && !runtime.Model.Supported {
+		return fmt.Errorf("step %q resolved model requires runtime %q model.supported=true", stepName, runtimeID)
+	}
+	if model != "" && !runtimeModelAllows(runtime, model) {
+		return fmt.Errorf("step %q resolved model %q is not allowed by runtime %q model.allowed", stepName, model, runtimeID)
+	}
+	if model == "" && runtime.Model.Required {
+		return fmt.Errorf("step %q runtime %q requires a model", stepName, runtimeID)
+	}
+	runtimeDirs := workflow.EffectiveRuntimeDirs(step)
+	for i, dir := range step.RuntimeDirs {
+		if err := validateRuntimeDirPath(fmt.Sprintf("step %q runtime_dirs[%d]", stepName, i), dir); err != nil {
+			return err
+		}
+	}
+	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
+		return fmt.Errorf("step %q runtime_dirs require runtime %q directories.supported=true", stepName, runtimeID)
+	}
+	return nil
+}
+
+func runtimeModelAllows(runtime Runtime, model string) bool {
+	return len(runtime.Model.Allowed) == 0 || slices.Contains(runtime.Model.Allowed, model)
+}
+
+func validateDeterministicStepRuntimeFields(stepName string, step Step, kind string) error {
+	switch {
+	case step.Runtime != "":
+		return fmt.Errorf("step %q kind %s must not set runtime", stepName, kind)
+	case step.Model != "":
+		return fmt.Errorf("step %q kind %s must not set model", stepName, kind)
+	case len(step.RuntimeDirs) > 0:
+		return fmt.Errorf("step %q kind %s must not set runtime_dirs", stepName, kind)
+	default:
+		return nil
+	}
 }
 
 func validateRepoRelativePath(name, value string) error {
@@ -605,6 +675,31 @@ func validateDefaults(defaults Defaults) error {
 	}
 	if defaults.Retries == nil {
 		return errors.New("defaults.retries is required")
+	}
+	for i, dir := range defaults.RuntimeDirs {
+		if err := validateRuntimeDirPath(fmt.Sprintf("defaults.runtime_dirs[%d]", i), dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRuntimeDirPath(name, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is empty", name)
+	}
+	if strings.HasPrefix(value, "~") || strings.ContainsAny(value, "$`") {
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
+	}
+	clean := filepath.Clean(value)
+	if clean != value {
+		return fmt.Errorf("%s %q must be clean", name, value)
+	}
+	if filepath.IsAbs(value) {
+		return nil
+	}
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s %q must be repo-relative or absolute and stay under repository root", name, value)
 	}
 	return nil
 }

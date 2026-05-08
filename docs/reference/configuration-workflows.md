@@ -36,6 +36,9 @@ Workflow files define:
 - `defaults.timeout`
 - `defaults.report_exit_grace`
 - `defaults.retries`
+- `defaults.runtime`, required when agent steps omit `runtime`
+- `defaults.model`, optional
+- `defaults.runtime_dirs`, optional
 - `steps`
 
 Validation rules:
@@ -50,6 +53,12 @@ Validation rules:
 - `defaults.retries` is required.
 - Retry counts must be zero or greater.
 - Retry keys must match `status/result` pairs declared by the workflow's steps.
+- Agent step runtime resolution is `steps.<id>.runtime`, then
+  `defaults.runtime`; missing effective runtime is invalid.
+- Agent step model resolution is `steps.<id>.model`, then `defaults.model`,
+  then the selected runtime descriptor's `model.default`.
+- Runtime directory resolution appends `defaults.runtime_dirs` before
+  `steps.<id>.runtime_dirs` and preserves configured order.
 
 `vcs` is workflow-level policy, separate from task context and step defaults.
 `dirty_start: block` rejects dirty working copies before a run directory is
@@ -73,12 +82,23 @@ Workflow steps may be agent-backed or deterministic process steps. Omitted
 Agent steps declare:
 
 - `agent`: an agent id present in `.orc/config.yaml`
+- `runtime`: optional runtime id present in `.orc/config.yaml`
+- `model`: optional model value passed only when the selected runtime supports models
+- `runtime_dirs`: optional clean repo-relative paths or absolute host paths
 - `skippable`: optional explicit opt-in for system-owned skip routing
 - `allowed_results`: a non-empty map of allowed statuses to non-empty result lists
 - `on`: a deterministic transition map keyed by `status/result`
 
 Agent steps may also set `kind: agent`; they must not set `command` or
 `script`.
+
+Validation uses the selected runtime descriptor. A selected runtime must exist.
+Model values are rejected when `model.supported` is false, required when
+`model.required` is true and no effective model resolves, and checked against
+non-empty `model.allowed` lists. `runtime_dirs` require
+`directories.supported: true`. Runtime directory entries are argv values only:
+Orc rejects empty entries, unclean relative paths, traversal outside the repo,
+and shell, environment, or tilde expansion syntax.
 
 Command steps declare argv-only process execution:
 
@@ -135,7 +155,8 @@ that override inherited environment values.
 Kind-specific validation rejects mixed definitions: agent steps require
 `agent`; command steps require `command.argv` and must not set `agent` or
 `script`; script steps require `script.path` and must not set `agent` or
-`command`; unsupported `kind` values are configuration errors.
+`command`; command and script steps must not set `runtime`, `model`, or
+`runtime_dirs`; unsupported `kind` values are configuration errors.
 
 Allowed result values must be non-empty strings. Every `on` key must be declared in `allowed_results`, and every declared `status/result` pair must have a deterministic transition to another step or a supported terminal state.
 

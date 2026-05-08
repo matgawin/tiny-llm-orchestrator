@@ -8,6 +8,7 @@ task_context:
 defaults:
   timeout: 30m
   report_exit_grace: 30s
+  runtime: codex
   retries: {}
 steps:
   plan:

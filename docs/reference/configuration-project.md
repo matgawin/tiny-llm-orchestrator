@@ -29,9 +29,15 @@ Required fields:
 - `workflows`: map of workflow name to either a legacy `.orc`-relative
   workflow file path scalar or an object with `path` and optional `loop_caps`
 - `agents`: map of agent id to `.orc`-relative descriptor file path
+- `runtimes`: optional map of runtime id to `.orc`-relative runtime descriptor file path
 
 The `workflows` and `agents` maps must each contain at least one entry.
 Referenced paths must be relative to `.orc`; absolute paths, traversal outside `.orc`, and symlink escapes are rejected.
+
+Runtime descriptor ids must match their `runtimes` map keys. Workflow agent
+steps select prompt/persona descriptors through `agent`; runtime descriptors
+describe executable worker commands and capabilities. Any agent step with an
+effective runtime must reference a declared runtime.
 
 Project config also supports workflow loop cap defaults:
 

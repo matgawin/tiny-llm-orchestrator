@@ -58,6 +58,12 @@ The scaffold includes these workflows:
 - `review-docs`: review durable docs, indexes, examples, and links for
   contract accuracy.
 
+The scaffold also includes `.orc/runtimes/codex.yaml` and references it from
+`.orc/config.yaml` as `runtimes.codex`. Scaffolded workflows set
+`defaults.runtime: codex`, so existing agent-only steps have an explicit
+effective runtime while preserving the agent descriptor ids used in persisted
+attempt metadata.
+
 Implementation, bugfix, mechanical-change, and test-only workflows block dirty
 starts by default so unrelated pre-existing changes do not mix with new work.
 Review-only workflows allow dirty starts by default because their normal input

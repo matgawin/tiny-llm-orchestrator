@@ -12,6 +12,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
 func TestSkipPersistsAuditedTransition(t *testing.T) {
@@ -327,7 +328,8 @@ func writeSkipRoutingProject(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("mkdir agents: %v", err)
 	}
-	writeSkipFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n  reviewer: agents/reviewer.md\n  coder: agents/coder.md\n")
+	writeSkipRuntime(t, orcDir)
+	writeSkipFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n  reviewer: agents/reviewer.md\n  coder: agents/coder.md\nruntimes:\n  codex: runtimes/codex.yaml\n")
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Planner.\n---\n\nPlan.\n")
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), "---\nid: reviewer\nrole: reviewer\ndescription: Reviewer.\n---\n\nReview.\n")
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Coder.\n---\n\nCode.\n")
@@ -345,7 +347,8 @@ func writeSkipProject(t *testing.T, skippable bool, skipTarget, retryLine string
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("mkdir agents: %v", err)
 	}
-	writeSkipFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n  reviewer: agents/reviewer.md\n")
+	writeSkipRuntime(t, orcDir)
+	writeSkipFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n  reviewer: agents/reviewer.md\nruntimes:\n  codex: runtimes/codex.yaml\n")
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Planner.\n---\n\nPlan.\n")
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), "---\nid: reviewer\nrole: reviewer\ndescription: Reviewer.\n---\n\nReview.\n")
 	retries := "{}"
@@ -370,6 +373,7 @@ task_context:
 defaults:
   timeout: 30m
   report_exit_grace: 30s
+  runtime: codex
   retries: `+retries+`
 steps:
   plan:
@@ -388,6 +392,14 @@ steps:
       done/approved: ready_for_human
 `)
 	return root
+}
+
+func writeSkipRuntime(t *testing.T, orcDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
+		t.Fatalf("mkdir runtimes: %v", err)
+	}
+	writeSkipFile(t, filepath.Join(orcDir, "runtimes", "codex.yaml"), testutil.CodexRuntimeYAML())
 }
 
 func writeSkipFile(t *testing.T, path, content string) {

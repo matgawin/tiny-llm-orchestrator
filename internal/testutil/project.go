@@ -40,11 +40,16 @@ func WriteProject(t *testing.T, root string, opts ProjectOptions) {
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
+		t.Fatalf("create runtimes dir: %v", err)
+	}
 	configYAML := "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n"
 	if opts.TwoStep {
 		configYAML += "  coder: agents/coder.md\n"
 	}
+	configYAML += "runtimes:\n  codex: runtimes/codex.yaml\n"
 	writeFile(t, filepath.Join(orcDir, "config.yaml"), configYAML)
+	writeFile(t, filepath.Join(orcDir, "runtimes", "codex.yaml"), CodexRuntimeYAML())
 	writeFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
 	if opts.TwoStep {
 		writeFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
@@ -67,6 +72,7 @@ task_context:
 defaults:
   timeout: %s
   report_exit_grace: %s
+  runtime: codex
   retries:
 %s
 steps:
@@ -93,6 +99,7 @@ task_context:
 defaults:
   timeout: %s
   report_exit_grace: %s
+  runtime: codex
   retries:
 %s
 steps:
@@ -101,6 +108,29 @@ steps:
     allowed_results:
 %s    on:
 %s`, opts.Beads, opts.MarkdownFallback, opts.Timeout, opts.ReportExitGrace, retriesYAML(opts.Retries), allowed, outcomeTransitionsYAML(opts, planReadyTarget))
+}
+
+func CodexRuntimeYAML() string {
+	return `id: codex
+command:
+  executable: codex
+  normal_args: [--ask-for-approval, never]
+  sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
+  args: [exec, --skip-git-repo-check, -]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  allowed: []
+  args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--add-dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+`
 }
 
 func allowedResultsYAML(opts ProjectOptions) string {
