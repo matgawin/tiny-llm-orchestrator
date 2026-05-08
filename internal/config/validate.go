@@ -297,7 +297,16 @@ func validateSandboxMountTarget(projectRoot, homeMode, target string) error {
 	if homeMode == SandboxHomeModeSynthetic && strings.HasPrefix(clean, "/home/") && !strings.HasPrefix(clean, sandboxSyntheticHome+string(filepath.Separator)) {
 		return errors.New("must not override critical sandbox path /home")
 	}
-	criticalTargets := []string{
+	if critical, ok := ProtectedSandboxTargetConflict(clean); ok {
+		return fmt.Errorf("must not override critical sandbox path %s", critical)
+	}
+	return nil
+}
+
+// ProtectedSandboxTargetConflict reports whether target intersects a sandbox
+// path owned by Orc's base bubblewrap setup.
+func ProtectedSandboxTargetConflict(target string) (string, bool) {
+	for _, critical := range []string{
 		"/proc",
 		"/dev",
 		"/tmp",
@@ -308,13 +317,12 @@ func validateSandboxMountTarget(projectRoot, homeMode, target string) error {
 		"/lib64",
 		"/etc",
 		"/nix/store",
-	}
-	for _, critical := range criticalTargets {
-		if clean == critical || strings.HasPrefix(clean, critical+string(filepath.Separator)) || isStrictPathAncestor(clean, critical) {
-			return fmt.Errorf("must not override critical sandbox path %s", critical)
+	} {
+		if target == critical || strings.HasPrefix(target, critical+string(filepath.Separator)) || isStrictPathAncestor(target, critical) {
+			return critical, true
 		}
 	}
-	return nil
+	return "", false
 }
 
 func isStrictPathAncestor(parent, child string) bool {

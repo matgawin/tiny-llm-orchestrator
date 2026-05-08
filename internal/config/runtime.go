@@ -183,7 +183,13 @@ func validateRuntimeSandbox(runtime Runtime) error {
 }
 
 func validateRuntimeRequirementHost(name, host string) error {
+	if strings.HasPrefix(host, "~") || strings.ContainsAny(host, "$`") {
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, host)
+	}
 	if filepath.IsAbs(host) {
+		if filepath.Clean(host) != host {
+			return fmt.Errorf("%s %q must be clean", name, host)
+		}
 		return nil
 	}
 	clean := filepath.Clean(host)
@@ -191,6 +197,107 @@ func validateRuntimeRequirementHost(name, host string) error {
 		return fmt.Errorf("%s %q must be clean and stay under repository root", name, host)
 	}
 	return nil
+}
+
+func validateSelectedRuntimeSandboxRequirementConflicts(sandbox *SandboxConfig, workflows map[string]Workflow, runtimes map[string]Runtime) error {
+	if sandbox == nil {
+		return nil
+	}
+	merged := sandboxRequirementSet{
+		envSet: map[string]string{},
+		mounts: map[string]sandboxRequirementMount{},
+	}
+	if err := merged.addEnvSet("sandbox.env.set", sandbox.Env.Set); err != nil {
+		return err
+	}
+	if err := merged.addMounts("sandbox.mounts", sandbox.Mounts); err != nil {
+		return err
+	}
+	for _, runtimeID := range SelectedRuntimeIDs(workflows) {
+		runtime, ok := runtimes[runtimeID]
+		if !ok {
+			continue
+		}
+		prefix := fmt.Sprintf("runtime %q sandbox.requirements", runtimeID)
+		if err := merged.addEnvSet(prefix+".env.set", runtime.Sandbox.Requirements.Env.Set); err != nil {
+			return err
+		}
+		if err := merged.addMounts(prefix+".mounts", runtime.Sandbox.Requirements.Mounts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type sandboxRequirementSet struct {
+	envSet map[string]string
+	mounts map[string]sandboxRequirementMount
+}
+
+type sandboxRequirementMount struct {
+	host     string
+	mode     string
+	optional bool
+	source   string
+}
+
+func (s sandboxRequirementSet) addEnvSet(source string, env map[string]string) error {
+	for name, value := range env {
+		if existing, ok := s.envSet[name]; ok && existing != value {
+			return fmt.Errorf("%s.%s conflicts with another fixed sandbox environment value for %s", source, name, name)
+		}
+		s.envSet[name] = value
+	}
+	return nil
+}
+
+func (s sandboxRequirementSet) addMounts(source string, mounts []SandboxMount) error {
+	for i, mount := range mounts {
+		target := filepath.Clean(mount.Target)
+		next := sandboxRequirementMount{
+			host:     cleanSandboxRequirementHost(mount.Host),
+			mode:     mount.Mode,
+			optional: mount.Optional.Value,
+			source:   fmt.Sprintf("%s[%d]", source, i),
+		}
+		existing, ok := s.mounts[target]
+		if !ok {
+			s.mounts[target] = next
+			continue
+		}
+		if existing.host != next.host || existing.mode != next.mode || existing.optional != next.optional {
+			return fmt.Errorf("%s target %q conflicts with %s target %q", next.source, target, existing.source, target)
+		}
+	}
+	return nil
+}
+
+func cleanSandboxRequirementHost(host string) string {
+	if filepath.IsAbs(host) {
+		return filepath.Clean(host)
+	}
+	return filepath.Clean(host)
+}
+
+// SelectedRuntimeIDs returns the runtime IDs selected by agent steps in loaded workflows.
+func SelectedRuntimeIDs(workflows map[string]Workflow) []string {
+	seen := map[string]bool{}
+	ids := make([]string, 0)
+	for _, workflow := range workflows {
+		for _, step := range workflow.Steps {
+			if step.EffectiveKind() != StepKindAgent {
+				continue
+			}
+			runtimeID := workflow.EffectiveRuntime(step)
+			if runtimeID == "" || seen[runtimeID] {
+				continue
+			}
+			seen[runtimeID] = true
+			ids = append(ids, runtimeID)
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 type placeholderContext int

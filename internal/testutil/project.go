@@ -130,6 +130,11 @@ directories:
 sandbox:
   supported: true
   required: false
+  requirements:
+    env:
+      pass: [CODEX_HOME, OPENAI_API_KEY]
+      set: {}
+    mounts: []
 `
 }
 

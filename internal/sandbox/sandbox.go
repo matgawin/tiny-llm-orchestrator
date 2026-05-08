@@ -110,7 +110,7 @@ func BuildSpec(project *config.Project, opts Options) (BwrapSpec, error) {
 	if evalSymlinks == nil {
 		evalSymlinks = filepath.EvalSymlinks
 	}
-	policy, err := resolvePolicy(project.Root, sandboxConfig, opts, pathExists, stat, evalSymlinks)
+	policy, err := resolvePolicy(project, sandboxConfig, opts, pathExists, stat, evalSymlinks)
 	if err != nil {
 		return BwrapSpec{}, err
 	}
@@ -213,7 +213,8 @@ var minimalExecutableHostPaths = []string{
 	"/nix/store",
 }
 
-func resolvePolicy(root string, sandboxConfig *config.SandboxConfig, opts Options, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (sandboxPolicy, error) {
+func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig, opts Options, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (sandboxPolicy, error) {
+	root := project.Root
 	hostEnv := hostEnvMap(opts)
 	home, err := resolveSandboxHome(sandboxConfig.Home.Mode, hostEnv, opts)
 	if err != nil {
@@ -231,11 +232,12 @@ func resolvePolicy(root string, sandboxConfig *config.SandboxConfig, opts Option
 		return sandboxPolicy{}, err
 	}
 	beadsPath := filepath.Clean(filepath.Join(root, "..", ".beads"))
-	extraMounts, err := resolveExtraMounts(root, home, sandboxConfig.Mounts, pathExists)
+	sandboxEnv, sandboxMounts := mergeRuntimeSandboxRequirements(project, sandboxConfig)
+	extraMounts, err := resolveExtraMounts(root, beadsPath, home, sandboxMounts, pathExists, evalSymlinks)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
-	pathMounts, err := resolvePathMounts(root, beadsPath, home, hostHome, effectiveSandboxPath(hostEnv, sandboxConfig.Env), sandboxConfig.Path.Mode, extraMounts, stat, evalSymlinks)
+	pathMounts, err := resolvePathMounts(root, beadsPath, home, hostHome, effectiveSandboxPath(hostEnv, sandboxEnv), sandboxConfig.Path.Mode, extraMounts, stat, evalSymlinks)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
@@ -245,7 +247,7 @@ func resolvePolicy(root string, sandboxConfig *config.SandboxConfig, opts Option
 		codexTargetPath: codexTarget,
 		pathMounts:      pathMounts,
 		extraMounts:     extraMounts,
-		env:             resolveEnv(hostEnv, sandboxConfig.Env, home, codexTarget, root),
+		env:             resolveEnv(hostEnv, sandboxEnv, home, codexTarget, root),
 	}
 	if pathExists(beadsPath) {
 		policy.beadsPath = beadsPath
@@ -335,19 +337,77 @@ func effectiveSandboxPath(hostEnv map[string]string, sandboxEnv config.SandboxEn
 	return hostEnv["PATH"]
 }
 
-func resolveExtraMounts(root, sandboxHome string, mounts []config.SandboxMount, pathExists func(string) bool) ([]resolvedMount, error) {
+func mergeRuntimeSandboxRequirements(project *config.Project, sandboxConfig *config.SandboxConfig) (config.SandboxEnvConfig, []sourcedSandboxMount) {
+	env := sandboxConfig.Env
+	if env.Set != nil {
+		env.Set = maps.Clone(env.Set)
+	}
+	mounts := make([]sourcedSandboxMount, 0, len(sandboxConfig.Mounts))
+	for i, mount := range sandboxConfig.Mounts {
+		mounts = append(mounts, sourcedSandboxMount{
+			mount:  mount,
+			source: fmt.Sprintf("sandbox.mounts[%d]", i),
+		})
+	}
+	for _, runtimeID := range config.SelectedRuntimeIDs(project.Workflows) {
+		runtimeConfig, ok := project.Runtimes[runtimeID]
+		if !ok {
+			continue
+		}
+		requirements := runtimeConfig.Sandbox.Requirements
+		env.Pass = append(env.Pass, requirements.Env.Pass...)
+		if len(requirements.Env.Set) > 0 {
+			if env.Set == nil {
+				env.Set = map[string]string{}
+			}
+			maps.Copy(env.Set, requirements.Env.Set)
+		}
+		for i, mount := range requirements.Mounts {
+			mounts = append(mounts, sourcedSandboxMount{
+				mount:  mount,
+				source: fmt.Sprintf("runtime %q sandbox.requirements.mounts[%d]", runtimeID, i),
+			})
+		}
+	}
+	return env, mounts
+}
+
+type sourcedSandboxMount struct {
+	mount  config.SandboxMount
+	source string
+}
+
+func resolveExtraMounts(root, beadsPath, sandboxHome string, mounts []sourcedSandboxMount, pathExists func(string) bool, evalSymlinks func(string) (string, error)) ([]resolvedMount, error) {
 	resolved := make([]resolvedMount, 0, len(mounts))
-	for i, mount := range mounts {
+	for _, sourced := range mounts {
+		mount := sourced.mount
 		host := mount.Host
 		if !filepath.IsAbs(host) {
 			host = filepath.Join(root, host)
 		}
 		host = filepath.Clean(host)
-		if mount.Optional.Value && !pathExists(host) {
-			continue
+		if !pathExists(host) {
+			if mount.Optional.Value {
+				continue
+			}
+			return nil, fmt.Errorf("%s.host %q does not exist", sourced.source, mount.Host)
+		}
+		if !filepath.IsAbs(mount.Host) && mount.Mode == "rw" {
+			realRoot, err := evalSymlinks(root)
+			if err != nil {
+				return nil, fmt.Errorf("%s.host %q: resolve repository root: %w", sourced.source, mount.Host, err)
+			}
+			realHost, err := evalSymlinks(host)
+			if err != nil {
+				return nil, fmt.Errorf("%s.host %q: %w", sourced.source, mount.Host, err)
+			}
+			rel, err := filepath.Rel(realRoot, realHost)
+			if err != nil || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("%s.host %q must not escape repository root for writable mounts", sourced.source, mount.Host)
+			}
 		}
 		target := filepath.Clean(mount.Target)
-		if err := validateActiveHomeMountTarget(i, sandboxHome, target); err != nil {
+		if err := validateExtraMountTarget(sourced.source, root, beadsPath, sandboxHome, target); err != nil {
 			return nil, err
 		}
 		resolved = append(resolved, resolvedMount{
@@ -450,15 +510,8 @@ func validatePathMountTarget(root, beadsPath, sandboxHome, hostHome, target stri
 	if beadsPath != "" && pathIntersects(target, filepath.Clean(beadsPath)) {
 		return fmt.Errorf("unsafe PATH entry %q: must not override the Beads mount %s", target, filepath.Clean(beadsPath))
 	}
-	for _, protected := range []string{"/proc", "/dev", "/tmp"} {
-		if target == protected || strings.HasPrefix(target, protected+string(filepath.Separator)) || isStrictPathAncestor(target, protected) {
-			return fmt.Errorf("unsafe PATH entry %q: must not override protected sandbox path %s", target, protected)
-		}
-	}
-	for _, protected := range []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/nix/store"} {
-		if target == protected || isStrictPathAncestor(target, protected) {
-			return fmt.Errorf("unsafe PATH entry %q: must not override protected sandbox path %s", target, protected)
-		}
+	if protected, ok := config.ProtectedSandboxTargetConflict(target); ok {
+		return fmt.Errorf("unsafe PATH entry %q: must not override protected sandbox path %s", target, protected)
 	}
 	return nil
 }
@@ -467,8 +520,8 @@ func pathIntersects(a, b string) bool {
 	return a == b || isStrictPathAncestor(a, b) || isStrictPathAncestor(b, a)
 }
 
-func validateActiveHomeMountTarget(index int, sandboxHome, target string) error {
-	name := fmt.Sprintf("sandbox.mounts[%d].target %q", index, target)
+func validateExtraMountTarget(source, root, beadsPath, sandboxHome, target string) error {
+	name := fmt.Sprintf("%s.target %q", source, target)
 	if target == sandboxHome {
 		return fmt.Errorf("%s: must not override active sandbox HOME %s", name, sandboxHome)
 	}
@@ -480,6 +533,15 @@ func validateActiveHomeMountTarget(index int, sandboxHome, target string) error 
 	}
 	if strings.HasPrefix(target, "/home/") || target == "/home" {
 		return fmt.Errorf("%s: must not override critical sandbox path /home", name)
+	}
+	if filepath.IsAbs(root) && pathIntersects(target, filepath.Clean(root)) {
+		return fmt.Errorf("%s: must not override the repository mount %s", name, filepath.Clean(root))
+	}
+	if filepath.IsAbs(beadsPath) && pathIntersects(target, filepath.Clean(beadsPath)) {
+		return fmt.Errorf("%s: must not override the Beads mount %s", name, filepath.Clean(beadsPath))
+	}
+	if protected, ok := config.ProtectedSandboxTargetConflict(target); ok {
+		return fmt.Errorf("%s: must not override protected sandbox path %s", name, protected)
 	}
 	return nil
 }

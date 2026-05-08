@@ -462,6 +462,38 @@ sandbox:
 	}
 }
 
+func TestLoadRejectsSelectedRuntimeSandboxRequirementStaticConflict(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{
+		config: configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}) + `
+sandbox:
+  command:
+    argv: [sh]
+  cwd: .
+  env:
+    set:
+      ORC_RUNTIME: project
+`,
+		runtimes: map[string]string{"codex": `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+directories:
+  supported: false
+sandbox:
+  supported: true
+  requirements:
+    env:
+      set:
+        ORC_RUNTIME: codex
+`},
+	})
+
+	assertLoadErrorContains(t, root, `runtime "codex" sandbox.requirements.env.set.ORC_RUNTIME conflicts with another fixed sandbox environment value for ORC_RUNTIME`)
+}
+
 func TestLoadRejectsUnsafeRuntimeReferences(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{

@@ -99,6 +99,8 @@ orchestration. By default it includes:
   bound wholesale by default
 - an optional `sandbox.path.mode: host_entries` policy that mounts existing
   absolute PATH directories read-only at their original sandbox paths
+- sandbox requirements declared by runtimes selected by loaded workflows:
+  required environment pass-through, fixed environment values, and extra mounts
 - a private writable `/tmp` tmpfs instead of writable host `/tmp`
 - read-only binds for existing executable/system paths needed to start normal
   configured commands: `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc`, and
@@ -119,6 +121,16 @@ allowlist includes `PATH`, `HOME`, `TERM`, `LANG`, `LC_*`, `SHELL`, `USER`,
 same name. Orc-managed values for `HOME`, `CODEX_HOME`, `ORC_SANDBOX`, and
 `ORC_SANDBOX_ROOT` are set to the resolved sandbox values after host allowlist,
 `sandbox.env.pass`, and `sandbox.env.set` processing.
+
+Runtime descriptor `sandbox.requirements.env` entries merge into the sandbox
+environment policy before bubblewrap starts. Static fixed-value conflicts fail
+when project config is loaded; missing host variables requested through
+pass-through are skipped the same way as `sandbox.env.pass`.
+
+The Codex runtime descriptor declares `CODEX_HOME` and `OPENAI_API_KEY`
+pass-through requirements. The separate Orc-managed Codex home bind remains as
+temporary compatibility behavior so existing sandboxed Codex launches keep the
+same config path semantics while runtime requirements are introduced.
 
 ## PATH Mount Policy
 
@@ -189,6 +201,11 @@ mounts it read-write at the same absolute path inside the sandbox and sets
 Extra `sandbox.mounts` entries support `ro` and `rw` modes. Relative host paths
 resolve from the repository root. Missing mounts are errors unless
 `optional: true` is set, in which case Orc skips the missing mount.
+Runtime descriptor `sandbox.requirements.mounts` entries use the same fields
+and are resolved while building the bubblewrap spec, before the sandbox process
+starts. Static target and duplicate declaration conflicts fail during config
+load; host-dependent missing paths and symlink escape checks fail during
+sandbox launch preparation.
 
 Writable repo-relative host paths must stay inside the repository and must not
 escape through traversal or symlinks. Mount targets must be clean absolute

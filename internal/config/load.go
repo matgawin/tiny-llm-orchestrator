@@ -45,6 +45,9 @@ func Load(projectRoot string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSelectedRuntimeSandboxRequirementConflicts(cfg.Sandbox, workflows, runtimes); err != nil {
+		return nil, err
+	}
 
 	return &Project{
 		Root:       absRoot,

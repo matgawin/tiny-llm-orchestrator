@@ -761,6 +761,183 @@ func TestBuildSpecSkipsMissingOptionalExtraMount(t *testing.T) {
 	}
 }
 
+func TestBuildSpecIncludesSelectedRuntimeSandboxRequirements(t *testing.T) {
+	root := t.TempDir()
+	runtimeCache := filepath.Join(root, ".orc", "cache", "custom")
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+	project.Workflows = map[string]config.Workflow{
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "custom"},
+			Steps: map[string]config.Step{
+				"code": {Agent: "coder"},
+			},
+		},
+	}
+	project.Runtimes = map[string]config.Runtime{
+		"custom": {
+			ID: "custom",
+			Sandbox: config.RuntimeSandbox{
+				Supported: true,
+				Requirements: config.RuntimeSandboxRequirements{
+					Env: config.SandboxEnvConfig{
+						Pass: []string{"CUSTOM_TOKEN"},
+						Set:  map[string]string{"ORC_RUNTIME": "custom"},
+					},
+					Mounts: []config.SandboxMount{
+						{Host: ".orc/cache/custom", Target: "/workspace/.orc/cache/custom", Mode: "rw"},
+					},
+				},
+			},
+		},
+	}
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), runtimeCache),
+		EvalSymlinks: fakeEvalSymlinks(map[string]string{
+			root:         root,
+			runtimeCache: runtimeCache,
+		}, nil),
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_TOKEN=secret"}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	if !containsSequence(spec.Args, "--bind", runtimeCache, "/workspace/.orc/cache/custom") {
+		t.Fatalf("bwrap args = %#v, want runtime-required mount", spec.Args)
+	}
+	assertEnvContains(t, spec.Env, "CUSTOM_TOKEN=secret")
+	assertEnvContains(t, spec.Env, "ORC_RUNTIME=custom")
+}
+
+func TestBuildSpecRejectsMissingRequiredRuntimeSandboxMount(t *testing.T) {
+	root := t.TempDir()
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:    config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:        ".",
+		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+	project.Workflows = map[string]config.Workflow{
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "custom"},
+			Steps: map[string]config.Step{
+				"code": {Agent: "coder"},
+			},
+		},
+	}
+	project.Runtimes = map[string]config.Runtime{
+		"custom": {
+			ID: "custom",
+			Sandbox: config.RuntimeSandbox{
+				Supported: true,
+				Requirements: config.RuntimeSandboxRequirements{
+					Mounts: []config.SandboxMount{
+						{Host: ".orc/cache/missing", Target: "/workspace/.orc/cache/missing", Mode: "ro"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		PathExists:  onlyHostPaths(filepath.Join(root, ".codex")),
+		Environ:     testEnv(root),
+	})
+	if err == nil || !strings.Contains(err.Error(), `runtime "custom" sandbox.requirements.mounts[0].host ".orc/cache/missing" does not exist`) {
+		t.Fatalf("BuildSpec error = %v, want missing runtime mount error", err)
+	}
+}
+
+func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
+	tests := []struct {
+		name   string
+		target func(root string) string
+		want   string
+	}{
+		{
+			name:   "repository target",
+			target: func(root string) string { return root },
+			want:   "must not override the repository mount",
+		},
+		{
+			name:   "repository child target",
+			target: func(root string) string { return filepath.Join(root, ".orc", "cache") },
+			want:   "must not override the repository mount",
+		},
+		{
+			name:   "repository ancestor target",
+			target: filepath.Dir,
+			want:   "must not override the repository mount",
+		},
+		{
+			name:   "beads target",
+			target: func(root string) string { return filepath.Clean(filepath.Join(root, "..", ".beads")) },
+			want:   "must not override the Beads mount",
+		},
+		{
+			name:   "protected tmp target",
+			target: func(string) string { return "/tmp/cache" },
+			want:   "must not override protected sandbox path /tmp",
+		},
+		{
+			name:   "protected system ancestor target",
+			target: func(string) string { return "/nix" },
+			want:   "must not override protected sandbox path /nix/store",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			runtimeCache := filepath.Join(root, ".orc", "cache", "custom")
+			project := sandboxProject(root, config.SandboxConfig{
+				Command:    config.SandboxCommand{Argv: []string{"sh"}},
+				CWD:        ".",
+				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			})
+			project.Workflows = map[string]config.Workflow{
+				"implementation": {
+					Defaults: config.Defaults{Runtime: "custom"},
+					Steps: map[string]config.Step{
+						"code": {Agent: "coder"},
+					},
+				},
+			}
+			project.Runtimes = map[string]config.Runtime{
+				"custom": {
+					ID: "custom",
+					Sandbox: config.RuntimeSandbox{
+						Supported: true,
+						Requirements: config.RuntimeSandboxRequirements{
+							Mounts: []config.SandboxMount{
+								{Host: ".orc/cache/custom", Target: tt.target(root), Mode: "ro"},
+							},
+						},
+					},
+				},
+			}
+
+			_, err := BuildSpec(project, Options{
+				RuntimeGOOS: "linux",
+				LookPath:    foundBwrap,
+				PathExists:  onlyHostPaths(filepath.Join(root, ".codex"), runtimeCache),
+				Environ:     testEnv(root),
+			})
+			if err == nil || !strings.Contains(err.Error(), `runtime "custom" sandbox.requirements.mounts[0].target`) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("BuildSpec error = %v, want runtime protected target error containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildSpecRejectsMissingSandboxConfig(t *testing.T) {
 	_, err := BuildSpec(&config.Project{Root: t.TempDir()}, Options{RuntimeGOOS: "linux", LookPath: foundBwrap})
 	if err == nil || !strings.Contains(err.Error(), "sandbox config is required") {
