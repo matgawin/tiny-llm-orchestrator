@@ -33,6 +33,7 @@ workflows:
   mechanical-change: workflows/mechanical-change.yaml
   test-only: workflows/test-only.yaml
   docs-update: workflows/docs-update.yaml
+  review-fix: workflows/review-fix.yaml
   review-mechanical: workflows/review-mechanical.yaml
   review-readability: workflows/review-readability.yaml
   review-redundancy: workflows/review-redundancy.yaml

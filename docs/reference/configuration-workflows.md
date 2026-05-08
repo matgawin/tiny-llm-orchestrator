@@ -158,10 +158,10 @@ steps:
 commands are not supported in v1; argv entries are passed directly to process
 execution without shell parsing, expansion, or interpolation.
 
-The bundled implementation, bugfix, mechanical-change, and test-only workflows
-run `task check` through GNU `timeout` with a 5-minute wall-clock limit and a
-10-second forced-kill grace. This keeps hung package tests from occupying a run
-until the broader workflow attempt timeout expires.
+The bundled implementation, bugfix, mechanical-change, test-only, and
+review-fix workflows run `task check` through GNU `timeout` with a 5-minute
+wall-clock limit and a 10-second forced-kill grace. This keeps hung package
+tests from occupying a run until the broader workflow attempt timeout expires.
 
 The bundled `docs-update` workflow is intentionally lighter: it edits durable
 docs and routes directly to docs review. It does not run a command verification
