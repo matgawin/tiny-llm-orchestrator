@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	launcherStatusDone  = "done"
+	launcherStatusDone  = workflow.ReportStatusDone
 	launcherResultReady = "ready"
 	launcherCodeStep    = "code"
 )
@@ -318,7 +318,7 @@ func writeLauncherProject(t *testing.T, root, timeout string, opts launcherRunOp
 		MarkdownFallback: true,
 		Timeout:          timeout,
 		ReportExitGrace:  reportExitGrace,
-		FailedResults:    []string{"missing_report", "process_error", "timeout"},
+		FailedResults:    []string{resultMissingReport, resultProcessError, resultTimeout},
 		TwoStep:          opts.TwoStep,
 		Retries:          opts.Retries,
 	})

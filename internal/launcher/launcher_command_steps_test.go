@@ -103,7 +103,7 @@ func TestLaunchNextRoutesFailingCommandStepBackToCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
-	if result.Attempt.Status != "done" || result.Attempt.Result != "failed" {
+	if result.Attempt.Status != workflow.ReportStatusDone || result.Attempt.Result != resultCommandFailed {
 		t.Fatalf("attempt outcome = %s/%s, want done/failed", result.Attempt.Status, result.Attempt.Result)
 	}
 	if result.Attempt.ExitCode == nil || *result.Attempt.ExitCode != 7 || result.Attempt.ExitState != exitStateExited {
@@ -153,7 +153,7 @@ func TestLaunchNextUndeclaredCommandOutcomePersistsOriginalConfigError(t *testin
 		t.Fatalf("LaunchNext error = %v, want undeclared generated outcome", err)
 	}
 	if result.Attempt.State != runstore.AttemptStateReported ||
-		result.Attempt.Status != reportStatusDone ||
+		result.Attempt.Status != workflow.ReportStatusDone ||
 		result.Attempt.Result != resultCommandFailed {
 		t.Fatalf("attempt = %+v, want original reported done/failed", result.Attempt)
 	}
@@ -187,7 +187,7 @@ func TestLaunchNextRecordsSystemReportForCommandSpawnError(t *testing.T) {
 		t.Fatal("Launched = true, want false for spawn error")
 	}
 	if result.Attempt.State != runstore.AttemptStateReported ||
-		result.Attempt.Status != reportStatusFailed ||
+		result.Attempt.Status != workflow.ReportStatusFailed ||
 		result.Attempt.Result != resultProcessError ||
 		result.Attempt.ExitState != exitStateStartFailed {
 		t.Fatalf("attempt = %+v, want reported failed/process_error start_failed", result.Attempt)
@@ -216,7 +216,7 @@ func TestLaunchNextMapsCommandTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
-	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != reportStatusFailed || result.Attempt.Result != resultTimeout {
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != workflow.ReportStatusFailed || result.Attempt.Result != resultTimeout {
 		t.Fatalf("attempt = %+v, want reported failed/timeout", result.Attempt)
 	}
 }

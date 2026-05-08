@@ -32,8 +32,8 @@ func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 		workflow: workflowYAML(t, func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
 			step.Skippable = true
-			step.AllowedResults["done"] = append(step.AllowedResults["done"], "skipped")
-			step.On["done/skipped"] = testTerminalReadyForHuman
+			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
+			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
 			return workflow
 		}),
@@ -47,11 +47,11 @@ func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 	if !step.Skippable {
 		t.Fatal("plan skippable = false, want true")
 	}
-	if !slices.Contains(step.AllowedResults["done"], "skipped") {
-		t.Fatalf("plan allowed done results = %v, want skipped", step.AllowedResults["done"])
+	if !slices.Contains(step.AllowedResults[SystemSkipStatus], SystemSkipResult) {
+		t.Fatalf("plan allowed %s results = %v, want %s", SystemSkipStatus, step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 	}
-	if got := step.On["done/skipped"]; got != testTerminalReadyForHuman {
-		t.Fatalf("plan done/skipped transition = %q, want %s", got, testTerminalReadyForHuman)
+	if got := step.On[SystemSkipPair]; got != testTerminalReadyForHuman {
+		t.Fatalf("plan %s transition = %q, want %s", SystemSkipPair, got, testTerminalReadyForHuman)
 	}
 }
 
@@ -60,27 +60,27 @@ func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 		generatedWorkflowCase(t, "skippable missing allowed result", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
 			step.Skippable = true
-			step.On["done/skipped"] = testTerminalReadyForHuman
+			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
 			return workflow
 		}, `step "plan" is skippable`, `allowed_results.done including skipped`),
 		generatedWorkflowCase(t, "skippable missing transition", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
 			step.Skippable = true
-			step.AllowedResults["done"] = append(step.AllowedResults["done"], "skipped")
+			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 			workflow.Steps["plan"] = step
 			return workflow
 		}, `step "plan" is skippable`, `on transition for done/skipped`),
 		generatedWorkflowCase(t, "non skippable allowed result", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
-			step.AllowedResults["done"] = append(step.AllowedResults["done"], "skipped")
-			step.On["done/skipped"] = testTerminalReadyForHuman
+			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
+			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
 			return workflow
 		}, `step "plan" declares reserved system outcome done/skipped but is not skippable`),
 		generatedWorkflowCase(t, "non skippable transition", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
-			step.On["done/skipped"] = testTerminalReadyForHuman
+			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
 			return workflow
 		}, `step "plan" declares reserved system transition done/skipped but is not skippable`),

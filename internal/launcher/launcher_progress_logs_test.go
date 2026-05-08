@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
@@ -28,8 +29,8 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 		t.Fatal("Launched = false, want true")
 	}
 	if result.Attempt.State != runstore.AttemptStateMissingReport ||
-		result.Attempt.Status != reportStatusFailed ||
-		result.Attempt.Result != "missing_report" {
+		result.Attempt.Status != workflow.ReportStatusFailed ||
+		result.Attempt.Result != resultMissingReport {
 		t.Fatalf("attempt = %+v, want failed/missing_report", result.Attempt)
 	}
 	if result.Attempt.PromptRef == nil || result.Attempt.LogRef == nil {

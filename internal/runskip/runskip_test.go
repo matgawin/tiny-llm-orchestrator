@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
@@ -47,12 +48,12 @@ func TestSkipPersistsAuditedTransition(t *testing.T) {
 		t.Fatalf("skipped steps = %d, want 1", len(result.Status.SkippedSteps))
 	}
 	skipped := result.Status.SkippedSteps[0]
-	if skipped.StepID != "plan" || skipped.Status != "done" || skipped.Result != "skipped" || skipped.Reason != "not worth another review" || skipped.Source != "unit-test" {
+	if skipped.StepID != "plan" || skipped.Status != config.SystemSkipStatus || skipped.Result != config.SystemSkipResult || skipped.Reason != "not worth another review" || skipped.Source != "unit-test" {
 		t.Fatalf("skipped = %+v, want trimmed audited skip", skipped)
 	}
 	entry := result.Status.WorkflowLoop.Entries[len(result.Status.WorkflowLoop.Entries)-1]
-	if entry.State != "review" || entry.PreviousState != "plan" || entry.TriggerStatus != "done" || entry.TriggerResult != "skipped" {
-		t.Fatalf("workflow entry = %+v, want done/skipped transition to review", entry)
+	if entry.State != "review" || entry.PreviousState != "plan" || entry.TriggerStatus != config.SystemSkipStatus || entry.TriggerResult != config.SystemSkipResult {
+		t.Fatalf("workflow entry = %+v, want %s transition to review", entry, config.SystemSkipPair)
 	}
 }
 
@@ -356,8 +357,8 @@ func writeSkipProject(t *testing.T, skippable bool, skipTarget, retryLine string
 	onSkip := ""
 	if skippable {
 		skipFields = "    skippable: true\n"
-		doneResults = "ready, skipped"
-		onSkip = "      done/skipped: " + skipTarget + "\n"
+		doneResults = "ready, " + config.SystemSkipResult
+		onSkip = "      " + config.SystemSkipPair + ": " + skipTarget + "\n"
 	}
 	writeSkipFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
 start: plan

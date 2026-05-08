@@ -17,9 +17,6 @@ import (
 )
 
 const (
-	reportStatusFailed = "failed"
-	reportStatusDone   = "done"
-
 	resultCommandPassed = "passed"
 	resultCommandFailed = "failed"
 	resultMissingReport = runstore.AttemptResultMissingReport

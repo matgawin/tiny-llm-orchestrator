@@ -16,6 +16,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 const (
@@ -171,7 +172,7 @@ func deterministicPromptContent(workflowName string, attempt runstore.Attempt, s
 }
 
 func recordDeterministicProcessError(store *runstore.Store, runID string, attempt runstore.Attempt, step config.Step, command []string, exitState string, logRef runstore.ArtifactRef, at time.Time, causes ...error) (runstore.Attempt, error) {
-	status, result := reportStatusFailed, resultProcessError
+	status, result := workflow.ReportStatusFailed, resultProcessError
 	if err := validateGeneratedOutcome(step, status, result); err != nil {
 		causes = append(causes, err)
 	}
@@ -302,27 +303,27 @@ func waitForDeterministicProcess(ctx context.Context, timeout time.Duration, cmd
 
 func deterministicOutcome(result deterministicWaitResult) (string, string, *int, string) {
 	if result.workflowTimeout {
-		return reportStatusFailed, resultTimeout, nil, exitStateTimeout
+		return workflow.ReportStatusFailed, resultTimeout, nil, exitStateTimeout
 	}
 	if result.ctxErr != nil {
-		return reportStatusFailed, resultProcessError, nil, exitStateCanceled
+		return workflow.ReportStatusFailed, resultProcessError, nil, exitStateCanceled
 	}
 	if result.err == nil {
 		code := 0
-		return reportStatusDone, resultCommandPassed, &code, exitStateExited
+		return workflow.ReportStatusDone, resultCommandPassed, &code, exitStateExited
 	}
 	var exitErr *exec.ExitError
 	if errors.As(result.err, &exitErr) {
 		code := exitErr.ExitCode()
-		return reportStatusDone, resultCommandFailed, &code, exitStateExited
+		return workflow.ReportStatusDone, resultCommandFailed, &code, exitStateExited
 	}
-	return reportStatusFailed, resultProcessError, nil, result.err.Error()
+	return workflow.ReportStatusFailed, resultProcessError, nil, result.err.Error()
 }
 
 func deterministicReportSummary(kind string, command []string, status, result, stdoutTail, stderrTail string) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "%s step finished with %s/%s: %s", kind, status, result, strings.Join(command, " "))
-	if status == reportStatusDone && result == resultCommandPassed {
+	if status == workflow.ReportStatusDone && result == resultCommandPassed {
 		return out.String()
 	}
 	if stdoutTail != "" {

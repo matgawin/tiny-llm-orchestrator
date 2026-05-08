@@ -203,7 +203,7 @@ func TestLaunchNextRecoversUnverifiableActiveAttempt(t *testing.T) {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
 	if !result.Recovered || result.Attempt.State != runstore.AttemptStateProcessError ||
-		result.Attempt.Result != "process_error" || result.Attempt.ExitState != "unknown" {
+		result.Attempt.Result != resultProcessError || result.Attempt.ExitState != exitStateUnknown {
 		t.Fatalf("result = %+v, want recovered process_error unknown", result)
 	}
 	loaded := loadLauncherRun(t, root, runID)

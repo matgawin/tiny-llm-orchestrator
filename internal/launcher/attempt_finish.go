@@ -11,6 +11,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 const launchCleanupTimeout = 2 * time.Second
@@ -26,7 +27,7 @@ func finishProcessErrorAttempt(store *runstore.Store, runID, attemptID, exitStat
 	finished, finishErr := finishAttemptWithCleanupContext(store, runID, runstore.FinishAttemptRequest{
 		AttemptID: attemptID,
 		State:     runstore.AttemptStateProcessError,
-		Status:    reportStatusFailed,
+		Status:    workflow.ReportStatusFailed,
 		Result:    resultProcessError,
 		ExitState: exitState,
 		LogRef:    refPtr(logRef),

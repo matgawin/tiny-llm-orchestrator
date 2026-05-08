@@ -14,6 +14,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 const (
@@ -252,7 +253,7 @@ func (r *workerRunner) finishWaitOutcome(waitResult waitResult) (runstore.Attemp
 	finishReq := runstore.FinishAttemptRequest{
 		AttemptID: r.attempt.AttemptID,
 		State:     state,
-		Status:    reportStatusFailed,
+		Status:    workflow.ReportStatusFailed,
 		Result:    result,
 		ExitCode:  exitCode,
 		ExitState: exitState,
@@ -427,7 +428,7 @@ func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runst
 	recovered, _, err := store.RecoverAttempt(run.ID, runstore.FinishAttemptRequest{
 		AttemptID: active.AttemptID,
 		State:     state,
-		Status:    reportStatusFailed,
+		Status:    workflow.ReportStatusFailed,
 		Result:    result,
 		ExitState: exitState,
 		LogRef:    active.LogRef,

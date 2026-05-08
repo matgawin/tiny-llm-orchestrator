@@ -170,7 +170,7 @@ func TestLaunchNextRecordsProcessErrorForNonzeroExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
-	if result.Attempt.State != runstore.AttemptStateProcessError || result.Attempt.Result != "process_error" {
+	if result.Attempt.State != runstore.AttemptStateProcessError || result.Attempt.Result != resultProcessError {
 		t.Fatalf("attempt = %+v, want process_error", result.Attempt)
 	}
 	if result.Attempt.ExitCode == nil || *result.Attempt.ExitCode != 7 {

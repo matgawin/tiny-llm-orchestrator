@@ -13,6 +13,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
 func TestLaunchNextPreservesExplicitCommandInsideVerifiedSandbox(t *testing.T) {
@@ -86,7 +87,7 @@ func TestLaunchNextRejectsScriptSymlinkEscape(t *testing.T) {
 		t.Fatalf("LaunchNext error = %v, want script escape error", err)
 	}
 	if result.Attempt.State != runstore.AttemptStateReported ||
-		result.Attempt.Status != reportStatusFailed ||
+		result.Attempt.Status != workflow.ReportStatusFailed ||
 		result.Attempt.Result != resultProcessError ||
 		result.Attempt.ExitState != exitStateStartFailed {
 		t.Fatalf("attempt = %+v, want reported failed/process_error start_failed", result.Attempt)

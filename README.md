@@ -2,17 +2,7 @@
 
 ## Purpose
 
-Provide the canonical top-level index for the repository, including the code map, docs map, and the main entrypoints for contributors.
-
-## Audience
-
-Contributors, maintainers, reviewers, operators, and code agents landing in the repository.
-
-## Read This When
-
-- You need the main map of the repository.
-- You want to find the right code area or canonical doc before making a change.
-- You need to know which subsystem owns a behavior.
+Tiny Orc provides a project-local control plane for supervising LLM coding work as durable, inspectable workflow runs. It turns explicit task context into recorded orchestration state, launches role-specific workers only when the workflow selects them, preserves logs and reports for human review, and keeps automation conservative enough that a human or main agent can remain accountable for routing, verification, and final handoff.
 
 ## Related Docs
 
@@ -51,6 +41,7 @@ Primary dependencies:
 - Go `1.26.x`
 - `github.com/goccy/go-yaml` for YAML config parsing
 - Nix development shell with `go-task`, `jujutsu`, `beads`, formatters, and lint tooling
+- (optional) [Beads](https://github.com/gastownhall/beads)
 
 ## Documentation Index
 
