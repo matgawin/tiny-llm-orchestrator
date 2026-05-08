@@ -80,7 +80,7 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"`orc report --json-file <path>`",
 		"Do not combine `--json-file` with report field flags.",
 	})
-	for _, reserved := range []string{"failed/error", "failed/invalid_report", "failed/missing_report", "failed/timeout", "failed/process_error"} {
+	for _, reserved := range []string{"done/skipped", "failed/error", "failed/invalid_report", "failed/missing_report", "failed/timeout", "failed/process_error"} {
 		if strings.Contains(prompt, "`"+reserved+"`") {
 			t.Fatalf("prompt includes system-owned report outcome %s:\n%s", reserved, prompt)
 		}
@@ -537,12 +537,14 @@ defaults:
 steps:
   plan:
     agent: planner
+    skippable: true
     allowed_results:
-      done: [ready]
+      done: [ready, skipped]
       blocked: [blocked]
       failed: [error, invalid_report, missing_report, timeout, process_error]
     on:
       done/ready: test
+      done/skipped: test
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/invalid_report: blocked_for_human

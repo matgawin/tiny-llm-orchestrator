@@ -3,6 +3,9 @@ package report
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +14,60 @@ import (
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
-const reportIgnoredEvent = "report.ignored"
+const (
+	reportIgnoredEvent = "report.ignored"
+	reportStatusFailed = "failed"
+)
+
+func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
+	root := t.TempDir()
+	writeSkippableReportProject(t, root)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	run, err := store.Create(runstore.CreateRunRequest{
+		RunID:    "skip-report-run",
+		Workflow: "implementation",
+		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	startActiveAttempt(t, store, run.ID, "attempt-001")
+
+	result, err := Submit(context.Background(), Options{
+		Root: root,
+		Report: runstore.Report{
+			RunID:     run.ID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
+			Status:    "done",
+			Result:    "skipped",
+			Summary:   "Skipping this step.",
+		},
+		Time: time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("Submit returned nil error, want reserved skip outcome rejection")
+	}
+	if !strings.Contains(err.Error(), "workers cannot report reserved system outcome done/skipped") {
+		t.Fatalf("error = %v, want reserved skip outcome rejection", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateInvalidReport || result.Attempt.Status != reportStatusFailed || result.Attempt.Result != runstore.AttemptResultInvalidReport {
+		t.Fatalf("attempt = %+v, want failed/invalid_report", result.Attempt)
+	}
+
+	loaded, loadErr := store.Load(run.ID)
+	if loadErr != nil {
+		t.Fatalf("Load returned error: %v", loadErr)
+	}
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != reportStatusFailed || attempt.Result != runstore.AttemptResultInvalidReport {
+		t.Fatalf("persisted attempt = %+v, want failed/invalid_report", attempt)
+	}
+}
 
 func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 	store, err := runstore.Open(t.TempDir())
@@ -121,6 +177,38 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 	}
 	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
 		t.Fatalf("last event type = %q, want report.ignored", got)
+	}
+}
+
+func writeSkippableReportProject(t *testing.T, root string) {
+	t.Helper()
+	testutil.WriteProject(t, root, testutil.ProjectOptions{
+		Beads:            "optional",
+		MarkdownFallback: true,
+	})
+	workflow := `name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries: {}
+steps:
+  plan:
+    agent: planner
+    skippable: true
+    allowed_results:
+      done: [ready, skipped]
+    on:
+      done/ready: ready_for_human
+      done/skipped: ready_for_human
+`
+	if err := os.WriteFile(filepath.Join(root, ".orc", "workflows", "implementation.yaml"), []byte(workflow), 0o600); err != nil {
+		t.Fatalf("write skippable workflow: %v", err)
 	}
 }
 

@@ -26,6 +26,10 @@ const (
 	VCSDirtyStartAllow = "allow"
 	VCSNoVCSAllow      = "allow"
 	VCSNoVCSBlock      = "block"
+
+	SystemSkipStatus = "done"
+	SystemSkipResult = "skipped"
+	SystemSkipPair   = SystemSkipStatus + "/" + SystemSkipResult
 )
 
 var (
@@ -331,6 +335,7 @@ type Step struct {
 	Script         ScriptStep          `yaml:"script"`
 	CWD            string              `yaml:"cwd"`
 	Env            map[string]string   `yaml:"env"`
+	Skippable      bool                `yaml:"skippable"`
 	AllowedResults map[string][]string `yaml:"allowed_results"`
 	On             map[string]string   `yaml:"on"`
 }

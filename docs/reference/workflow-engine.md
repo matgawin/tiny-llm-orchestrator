@@ -63,8 +63,17 @@ only when declared by the workflow step.
 `allowed_results` is broader than worker-authored report input. `orc report`
 rejects reserved synthesized/system-owned outcomes such as `failed/timeout`,
 `failed/missing_report`, `failed/invalid_report`, `failed/process_error`, and
-`failed/error`; those outcomes enter the workflow engine only from the launcher,
-report validation, or other store-owned system paths.
+`failed/error`; it also rejects the system-owned skip outcome `done/skipped`.
+Those outcomes enter the workflow engine only from the launcher, report
+validation, skip service, or other trusted system paths.
+
+Workflow-declared skip routing uses the normal outcome model. A step is
+skippable only when config declares `skippable: true`,
+`allowed_results.done: [..., skipped]`, and an explicit `on.done/skipped`
+transition. Once a trusted system path supplies `done/skipped`, the workflow
+engine evaluates that pair exactly like any other declared outcome pair. Skipped
+review is not implicitly approved; it follows the configured `done/skipped`
+transition, which may or may not target the same state as approval.
 
 ## Decisions
 

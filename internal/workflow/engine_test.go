@@ -116,6 +116,39 @@ func TestEvaluateImplementationWorkflowRoutesTerminalOutcomes(t *testing.T) {
 	assertTerminalDecision(t, decision, RunStatusReadyForHuman)
 }
 
+func TestEvaluateRoutesTrustedSkippedOutcome(t *testing.T) {
+	workflow := config.Workflow{
+		Name:  "skip-routing",
+		Start: "review",
+		Steps: map[string]config.Step{
+			"review": {
+				Agent:     "reviewer",
+				Skippable: true,
+				AllowedResults: map[string][]string{
+					ReportStatusDone: {"approved", "skipped"},
+				},
+				On: map[string]string{
+					"done/approved": "ready_for_human",
+					"done/skipped":  "code",
+				},
+			},
+			"code": {
+				Agent: "coder",
+				AllowedResults: map[string][]string{
+					ReportStatusDone: {"ready"},
+				},
+				On: map[string]string{
+					"done/ready": "ready_for_human",
+				},
+			},
+		},
+	}
+	outcome := Outcome{Step: "review", Status: ReportStatusDone, Result: "skipped"}
+
+	decision := evaluateRunningOutcome(t, workflow, outcome, RetryLineage{})
+	assertSelectedStep(t, decision, "code")
+}
+
 func TestEvaluateImplementationWorkflowBlocksForHumanOnAnyStep(t *testing.T) {
 	workflow := implementationWorkflow(t)
 	for _, step := range []string{stepPlan, "code", "test", "review", "redundancy-review", "code_fixer", "test-redundancy", "readability-review", "code_cleaner", "test-readability"} {

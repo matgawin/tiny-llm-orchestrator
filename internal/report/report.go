@@ -445,6 +445,9 @@ func validatePayloadWorkflow(workflowConfig config.Workflow, report runstore.Rep
 // WorkerReportableOutcome reports whether a status/result pair may be authored
 // by a worker through orc report.
 func WorkerReportableOutcome(status, result string) bool {
+	if status == config.SystemSkipStatus && result == config.SystemSkipResult {
+		return false
+	}
 	if status != "failed" {
 		return true
 	}

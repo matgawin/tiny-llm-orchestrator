@@ -14,6 +14,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
+const testTerminalReadyForHuman = "ready_for_human"
+
 func TestLoadValidImplementationWorkflow(t *testing.T) {
 	project, err := Load(validScaffoldPath())
 	if err != nil {
@@ -159,6 +161,73 @@ steps:
 	}
 	if len(project.Workflows["implementation"].ReferencedAgents) != 0 {
 		t.Fatalf("referenced agents = %+v, want none for deterministic-only workflow", project.Workflows["implementation"].ReferencedAgents)
+	}
+}
+
+func TestLoadAcceptsSkippableStepContract(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{
+		workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+			step := workflow.Steps["plan"]
+			step.Skippable = true
+			step.AllowedResults["done"] = append(step.AllowedResults["done"], "skipped")
+			step.On["done/skipped"] = testTerminalReadyForHuman
+			workflow.Steps["plan"] = step
+			return workflow
+		}),
+	})
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	step := project.Workflows["implementation"].Steps["plan"]
+	if !step.Skippable {
+		t.Fatal("plan skippable = false, want true")
+	}
+	if !slices.Contains(step.AllowedResults["done"], "skipped") {
+		t.Fatalf("plan allowed done results = %v, want skipped", step.AllowedResults["done"])
+	}
+	if got := step.On["done/skipped"]; got != testTerminalReadyForHuman {
+		t.Fatalf("plan done/skipped transition = %q, want %s", got, testTerminalReadyForHuman)
+	}
+}
+
+func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
+	tests := []invalidWorkflowCase{
+		generatedWorkflowCase(t, "skippable missing allowed result", func(workflow Workflow) Workflow {
+			step := workflow.Steps["plan"]
+			step.Skippable = true
+			step.On["done/skipped"] = testTerminalReadyForHuman
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" is skippable`, `allowed_results.done including skipped`),
+		generatedWorkflowCase(t, "skippable missing transition", func(workflow Workflow) Workflow {
+			step := workflow.Steps["plan"]
+			step.Skippable = true
+			step.AllowedResults["done"] = append(step.AllowedResults["done"], "skipped")
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" is skippable`, `on transition for done/skipped`),
+		generatedWorkflowCase(t, "non skippable allowed result", func(workflow Workflow) Workflow {
+			step := workflow.Steps["plan"]
+			step.AllowedResults["done"] = append(step.AllowedResults["done"], "skipped")
+			step.On["done/skipped"] = testTerminalReadyForHuman
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" declares reserved system outcome done/skipped but is not skippable`),
+		generatedWorkflowCase(t, "non skippable transition", func(workflow Workflow) Workflow {
+			step := workflow.Steps["plan"]
+			step.On["done/skipped"] = testTerminalReadyForHuman
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" declares reserved system transition done/skipped but is not skippable`),
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{workflow: tt.workflow})
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
 	}
 }
 

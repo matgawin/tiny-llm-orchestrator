@@ -98,9 +98,9 @@ orc report --run <run-id> --step <step-id> --agent <agent-id> --attempt <attempt
 
 `<status>` and `<result>` must be one of the selected step's worker-reportable
 `status/result` pairs from workflow config. Reserved system-owned outcomes such
-as `failed/invalid_report`, `failed/missing_report`, `failed/timeout`,
-`failed/process_error`, and `failed/error` are not shown in the prompt because
-workers cannot submit them through `orc report`.
+as `done/skipped`, `failed/invalid_report`, `failed/missing_report`,
+`failed/timeout`, `failed/process_error`, and `failed/error` are not shown in
+the prompt because workers cannot submit them through `orc report`.
 
 Rendered prompts also list optional structured report fields: repeatable
 `--changed-path`, `--command`, `--test`, `--risk`, and `--follow-up` flags,

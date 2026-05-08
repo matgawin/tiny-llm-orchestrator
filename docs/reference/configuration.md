@@ -303,6 +303,7 @@ Workflow steps may be agent-backed or deterministic process steps. Omitted
 Agent steps declare:
 
 - `agent`: an agent id present in `.orc/config.yaml`
+- `skippable`: optional explicit opt-in for system-owned skip routing
 - `allowed_results`: a non-empty map of allowed statuses to non-empty result lists
 - `on`: a deterministic transition map keyed by `status/result`
 
@@ -368,8 +369,31 @@ Kind-specific validation rejects mixed definitions: agent steps require
 
 Allowed result values must be non-empty strings. Every `on` key must be declared in `allowed_results`, and every declared `status/result` pair must have a deterministic transition to another step or a supported terminal state.
 
+`skippable: true` is the per-step workflow contract for the system-owned skip
+outcome `done/skipped`. Omitted or false means the step is not skippable. A
+skippable step must declare both `allowed_results.done` containing `skipped`
+and an explicit `on.done/skipped` transition:
+
+```yaml
+steps:
+  review:
+    agent: reviewer
+    skippable: true
+    allowed_results:
+      done: [approved, changes_requested, skipped]
+    on:
+      done/approved: ready_for_human
+      done/changes_requested: code
+      done/skipped: ready_for_human
+```
+
+Configuration validation rejects `skippable: true` unless both declarations are
+present. It also rejects `done/skipped` in either `allowed_results` or `on` for
+non-skippable steps. This keeps skip routing discoverable in workflow config
+and prevents workers from accidentally authoring the reserved skip outcome.
+
 Worker-authored reports may use workflow-declared outcome pairs except reserved
-system-owned failure results. `orc report` rejects `failed/error`,
+system-owned results. `orc report` rejects `done/skipped`, `failed/error`,
 `failed/invalid_report`, `failed/missing_report`, `failed/timeout`, and
 `failed/process_error`; those are written only by report validation, run-store,
 or launcher paths. Command and script steps do not call `orc report`; Orc writes

@@ -388,11 +388,35 @@ func validateStep(stepName string, step Step, steps map[string]Step, agents map[
 	if err != nil {
 		return nil, err
 	}
+	if err := validateSkipContract(stepName, step, stepPairs); err != nil {
+		return nil, err
+	}
 	if err := validateTransitions(stepName, step.On, stepPairs, steps); err != nil {
 		return nil, err
 	}
 
 	return stepPairs, nil
+}
+
+func validateSkipContract(stepName string, step Step, stepPairs resultPairSet) error {
+	_, declaresAllowedSkip := stepPairs[SystemSkipPair]
+	_, declaresTransitionSkip := step.On[SystemSkipPair]
+	if step.Skippable {
+		if !declaresAllowedSkip {
+			return fmt.Errorf("step %q is skippable but must declare allowed_results.%s including %s", stepName, SystemSkipStatus, SystemSkipResult)
+		}
+		if !declaresTransitionSkip {
+			return fmt.Errorf("step %q is skippable but must declare an explicit on transition for %s", stepName, SystemSkipPair)
+		}
+		return nil
+	}
+	if declaresAllowedSkip {
+		return fmt.Errorf("step %q declares reserved system outcome %s but is not skippable", stepName, SystemSkipPair)
+	}
+	if declaresTransitionSkip {
+		return fmt.Errorf("step %q declares reserved system transition %s but is not skippable", stepName, SystemSkipPair)
+	}
+	return nil
 }
 
 func validateStepKind(stepName string, step Step, agents map[string]Agent) error {
