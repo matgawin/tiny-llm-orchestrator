@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -255,82 +256,7 @@ agents:
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "coder.md"), cliAgentDescriptor("coder", "Implements code changes."))
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "tester.md"), cliAgentDescriptor("tester", "Runs verification."))
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), cliAgentDescriptor("reviewer", "Reviews completed work."))
-	writeCLIFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
-start: plan
-execution:
-  mode: sequential
-task_context:
-  beads: optional
-  markdown_fallback: true
-defaults:
-  timeout: 30m
-  report_exit_grace: 30s
-  retries:
-    failed/missing_report: 1
-    failed/timeout: 0
-    failed/invalid_report: 0
-    failed/process_error: 1
-    failed/error: 0
-steps:
-  plan:
-    agent: planner
-    allowed_results:
-      done: [ready]
-      blocked: [blocked]
-      failed: [error, timeout, missing_report, invalid_report, process_error]
-    on:
-      done/ready: code
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
-      failed/timeout: blocked_for_human
-      failed/missing_report: blocked_for_human
-      failed/invalid_report: blocked_for_human
-      failed/process_error: blocked_for_human
-  code:
-    agent: coder
-    allowed_results:
-      done: [ready]
-      blocked: [blocked]
-      failed: [error, timeout, missing_report, invalid_report, process_error]
-    on:
-      done/ready: test
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
-      failed/timeout: blocked_for_human
-      failed/missing_report: blocked_for_human
-      failed/invalid_report: blocked_for_human
-      failed/process_error: blocked_for_human
-  test:
-    agent: tester
-    allowed_results:
-      done: [passed, failed]
-      blocked: [blocked]
-      failed: [error, timeout, missing_report, invalid_report, process_error]
-    on:
-      done/passed: review
-      done/failed: code
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
-      failed/timeout: blocked_for_human
-      failed/missing_report: blocked_for_human
-      failed/invalid_report: blocked_for_human
-      failed/process_error: blocked_for_human
-  review:
-    agent: reviewer
-    allowed_results:
-      done: [approved, changes_requested]
-      blocked: [blocked]
-      failed: [error, timeout, missing_report, invalid_report, process_error]
-    on:
-      done/approved: ready_for_human
-      done/changes_requested: code
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
-      failed/timeout: blocked_for_human
-      failed/missing_report: blocked_for_human
-      failed/invalid_report: blocked_for_human
-      failed/process_error: blocked_for_human
-`)
+	writeCLIFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), string(readCLITestdata(t, "implementation_workflow.yaml")))
 }
 
 func writeCLISkipStepProject(t *testing.T, root string, reviewSkippable bool) {
@@ -978,6 +904,15 @@ func readCLIFile(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return content
+}
+
+func readCLITestdata(t *testing.T, name string) []byte {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve CLI testdata path")
+	}
+	return readCLIFile(t, filepath.Join(filepath.Dir(file), "testdata", name))
 }
 
 func latestCLIArtifactRef(t *testing.T, run *runstore.Run, kind runstore.ArtifactKind) runstore.ArtifactRef {

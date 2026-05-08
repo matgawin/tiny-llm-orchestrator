@@ -1,0 +1,40 @@
+name: implementation
+start: check
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries: {}
+steps:
+  check:
+    kind: command
+    command:
+      argv: ["task", "check"]
+    cwd: tools
+    env:
+      ORC_MODE: deterministic
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: verify
+      done/failed: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
+  verify:
+    kind: script
+    script:
+      path: scripts/verify.sh
+      args: ["--strict"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: ready_for_human
+      done/failed: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -26,6 +27,19 @@ func workflowYAML(t *testing.T, mutate func(Workflow) Workflow) string {
 	content, err := yaml.Marshal(workflow)
 	if err != nil {
 		t.Fatalf("marshal workflow: %v", err)
+	}
+	return string(content)
+}
+
+func readConfigTestdata(t *testing.T, name string) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve config testdata path")
+	}
+	content, err := os.ReadFile(filepath.Join(filepath.Dir(file), "testdata", name))
+	if err != nil {
+		t.Fatalf("read testdata %s: %v", name, err)
 	}
 	return string(content)
 }

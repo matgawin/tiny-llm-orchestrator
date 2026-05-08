@@ -47,41 +47,7 @@ sandbox:
 }
 
 func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
-	root := writeMinimalProject(t, projectFixture{config: `version: 1
-workflows:
-  implementation: workflows/implementation.yaml
-agents:
-  planner: agents/planner.md
-sandbox:
-  command:
-    argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
-  cwd: tools
-  require_for_workers: true
-  home:
-    mode: host_path
-  path:
-    mode: host_entries
-  bubblewrap:
-    enabled: true
-    network: false
-    mounts:
-      repo: rw
-      beads: auto
-      codex_home: rw
-      tmp: rw
-  env:
-    pass: ["TERM"]
-    set:
-      ORC_SANDBOX: "1"
-  mounts:
-    - host: data
-      target: /workspace/data
-      mode: ro
-    - host: missing-cache
-      target: /workspace/cache
-      mode: rw
-      optional: true
-`})
+	root := writeMinimalProject(t, projectFixture{config: readConfigTestdata(t, "full_sandbox_config.yaml")})
 	if err := os.Mkdir(filepath.Join(root, "tools"), 0o755); err != nil {
 		t.Fatalf("create tools dir: %v", err)
 	}

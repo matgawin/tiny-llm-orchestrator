@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -564,58 +565,7 @@ description: Reviews completed work.
 
 Review the change and report approval or requested changes.
 `)
-	writePromptFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
-start: plan
-execution:
-  mode: sequential
-task_context:
-  beads: optional
-  markdown_fallback: true
-defaults:
-  timeout: 30m
-  report_exit_grace: 30s
-  retries:
-    failed/error: 0
-steps:
-  plan:
-    agent: planner
-    skippable: true
-    allowed_results:
-      done: [ready, skipped]
-      blocked: [blocked]
-      failed: [error, invalid_report, missing_report, timeout, process_error]
-    on:
-      done/ready: test
-      done/skipped: test
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
-      failed/invalid_report: blocked_for_human
-      failed/missing_report: blocked_for_human
-      failed/timeout: blocked_for_human
-      failed/process_error: blocked_for_human
-  test:
-    agent: tester
-    allowed_results:
-      done: [passed, failed]
-      blocked: [blocked]
-      failed: [error]
-    on:
-      done/passed: review
-      done/failed: plan
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
-  review:
-    agent: reviewer
-    allowed_results:
-      done: [approved, changes_requested]
-      blocked: [blocked]
-      failed: [error]
-    on:
-      done/approved: ready_for_human
-      done/changes_requested: plan
-      blocked/blocked: blocked_for_human
-      failed/error: blocked_for_human
-`)
+	writePromptFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), string(readPromptTestdata(t, "implementation_workflow.yaml")))
 }
 
 func createPromptRun(t *testing.T, root, state string) string {
@@ -856,6 +806,15 @@ func readPromptFile(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return content
+}
+
+func readPromptTestdata(t *testing.T, name string) []byte {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve prompt testdata path")
+	}
+	return readPromptFile(t, filepath.Join(filepath.Dir(file), "testdata", name))
 }
 
 func writePromptFile(t *testing.T, path, content string) {

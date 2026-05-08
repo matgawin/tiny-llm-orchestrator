@@ -1,0 +1,32 @@
+name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries: {}
+steps:
+  plan:
+    agent: planner
+    allowed_results:
+      done: [ready]
+    on:
+      done/ready: review
+  review:
+    agent: reviewer
+    skippable: true
+    allowed_results:
+      done: [approved, skipped]
+    on:
+      done/approved: ready_for_human
+      done/skipped: code
+  code:
+    agent: coder
+    allowed_results:
+      done: [ready]
+    on:
+      done/ready: ready_for_human

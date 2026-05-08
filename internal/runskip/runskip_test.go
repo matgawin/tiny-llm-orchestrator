@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -329,39 +330,7 @@ func writeSkipRoutingProject(t *testing.T) string {
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Planner.\n---\n\nPlan.\n")
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), "---\nid: reviewer\nrole: reviewer\ndescription: Reviewer.\n---\n\nReview.\n")
 	writeSkipFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Coder.\n---\n\nCode.\n")
-	writeSkipFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
-start: plan
-execution:
-  mode: sequential
-task_context:
-  beads: optional
-  markdown_fallback: true
-defaults:
-  timeout: 30m
-  report_exit_grace: 30s
-  retries: {}
-steps:
-  plan:
-    agent: planner
-    allowed_results:
-      done: [ready]
-    on:
-      done/ready: review
-  review:
-    agent: reviewer
-    skippable: true
-    allowed_results:
-      done: [approved, skipped]
-    on:
-      done/approved: ready_for_human
-      done/skipped: code
-  code:
-    agent: coder
-    allowed_results:
-      done: [ready]
-    on:
-      done/ready: ready_for_human
-`)
+	writeSkipFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), string(readSkipTestdata(t, "routing_workflow.yaml")))
 	return root
 }
 
@@ -425,4 +394,17 @@ func writeSkipFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func readSkipTestdata(t *testing.T, name string) []byte {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve skip testdata path")
+	}
+	content, err := os.ReadFile(filepath.Join(filepath.Dir(file), "testdata", name))
+	if err != nil {
+		t.Fatalf("read testdata %s: %v", name, err)
+	}
+	return content
 }

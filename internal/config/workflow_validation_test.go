@@ -7,47 +7,7 @@ import (
 )
 
 func TestLoadAcceptsCommandAndScriptSteps(t *testing.T) {
-	workflow := `name: implementation
-start: check
-execution:
-  mode: sequential
-task_context:
-  beads: optional
-  markdown_fallback: true
-defaults:
-  timeout: 30m
-  report_exit_grace: 30s
-  retries: {}
-steps:
-  check:
-    kind: command
-    command:
-      argv: ["task", "check"]
-    cwd: tools
-    env:
-      ORC_MODE: deterministic
-    allowed_results:
-      done: [passed, failed]
-      failed: [timeout, process_error]
-    on:
-      done/passed: verify
-      done/failed: blocked_for_human
-      failed/timeout: blocked_for_human
-      failed/process_error: blocked_for_human
-  verify:
-    kind: script
-    script:
-      path: scripts/verify.sh
-      args: ["--strict"]
-    allowed_results:
-      done: [passed, failed]
-      failed: [timeout, process_error]
-    on:
-      done/passed: ready_for_human
-      done/failed: blocked_for_human
-      failed/timeout: blocked_for_human
-      failed/process_error: blocked_for_human
-`
+	workflow := readConfigTestdata(t, "command_script_workflow.yaml")
 	root := writeMinimalProject(t, projectFixture{workflow: workflow})
 
 	project, err := Load(root)
@@ -285,7 +245,7 @@ func TestLoadRejectsRawWorkflowConfig(t *testing.T) {
 		},
 		{
 			name:     "duplicate step name",
-			workflow: duplicateStepWorkflow,
+			workflow: duplicateStepWorkflow(t),
 			agents: map[string]string{
 				"planner": validAgentDescriptor("planner"),
 				"coder":   validAgentDescriptor("coder"),
@@ -353,28 +313,7 @@ steps:
 	return b.String()
 }
 
-const duplicateStepWorkflow = `name: implementation
-start: plan
-execution:
-  mode: sequential
-task_context:
-  beads: optional
-  markdown_fallback: true
-defaults:
-  timeout: 30m
-  report_exit_grace: 30s
-  retries: {}
-steps:
-  plan:
-    agent: planner
-    allowed_results:
-      done: [ready]
-    on:
-      done/ready: code
-  plan:
-    agent: coder
-    allowed_results:
-      done: [ready]
-    on:
-      done/ready: ready_for_human
-`
+func duplicateStepWorkflow(t *testing.T) string {
+	t.Helper()
+	return readConfigTestdata(t, "duplicate_step_workflow.yaml")
+}
