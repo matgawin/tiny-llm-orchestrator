@@ -21,7 +21,7 @@ artifacts, or terminal ready-for-review behavior.
 - [summary-context.md](summary-context.md)
 - [run-inspection.md](run-inspection.md)
 - [follow-up-recording.md](follow-up-recording.md)
-- [../reference/run-store.md](../reference/run-store.md)
+- [../reference/run-store-status-artifacts.md](../reference/run-store-status-artifacts.md)
 
 ## Command Shape
 

@@ -133,4 +133,6 @@ prompts/<six-digit-sequence>-<step-id>.md
 ```
 
 The Run Store records prompt artifacts with the existing `artifact.written`
-event and materializes the artifact reference into `status.json`.
+event and materializes the artifact reference into `status.json`. See
+[run-store-status-artifacts.md](../reference/run-store-status-artifacts.md#artifacts)
+for the artifact path contract.

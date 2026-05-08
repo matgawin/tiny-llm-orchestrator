@@ -283,7 +283,8 @@ policy remains for the outcome pair, the next `launch-next` invocation records
 retry routing metadata and starts the replacement attempt. If retries are
 exhausted, that `launch-next` invocation applies the configured `on:`
 transition, commonly `blocked_for_human`. The `attempt.started` routing fields
-are specified in [run-store.md](../reference/run-store.md).
+are specified in
+[run-store-events.md](../reference/run-store-events.md#v1-event-types).
 
 ## Post-Report Process Cleanup
 

@@ -21,7 +21,7 @@ follow-up handling, or VCS summary rendering.
 - [final-summary-recording.md](final-summary-recording.md)
 - [follow-up-recording.md](follow-up-recording.md)
 - [run-start.md](run-start.md)
-- [../reference/run-store.md](../reference/run-store.md)
+- [../reference/run-store-status-artifacts.md](../reference/run-store-status-artifacts.md)
 - [../architecture/service-boundaries.md](../architecture/service-boundaries.md)
 
 ## Command Shape
