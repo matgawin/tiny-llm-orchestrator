@@ -60,6 +60,38 @@ Validation rules:
 - Runtime directory resolution appends `defaults.runtime_dirs` before
   `steps.<id>.runtime_dirs` and preserves configured order.
 
+Runtime defaults are workflow-level defaults for agent steps:
+
+```yaml
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  runtime: codex
+  model: gpt-5.3-codex
+  runtime_dirs:
+    - shared-worktree
+  retries:
+    failed/missing_report: 1
+```
+
+Agent steps may override the effective runtime, model, and directory args:
+
+```yaml
+steps:
+  code:
+    agent: coder
+    runtime: custom-runtime
+    model: custom-model
+    runtime_dirs:
+      - /home/matt/Documents/other-repo
+```
+
+The effective runtime is `steps.<id>.runtime`, then `defaults.runtime`; there
+is no runtime descriptor default. The effective model is `steps.<id>.model`,
+then `defaults.model`, then the selected runtime descriptor's `model.default`.
+The effective runtime directories are all `defaults.runtime_dirs` followed by
+all `steps.<id>.runtime_dirs`, preserving order and exact duplicates.
+
 `vcs` is workflow-level policy, separate from task context and step defaults.
 `dirty_start: block` rejects dirty working copies before a run directory is
 created. `dirty_start: allow` records the dirty pre-run snapshot and lets the
@@ -99,6 +131,10 @@ non-empty `model.allowed` lists. `runtime_dirs` require
 `directories.supported: true`. Runtime directory entries are argv values only:
 Orc rejects empty entries, unclean relative paths, traversal outside the repo,
 and shell, environment, or tilde expansion syntax.
+
+Command and script steps are deterministic local process steps. They do not use
+agent descriptors or runtime descriptors, and validation rejects `runtime`,
+`model`, and `runtime_dirs` on those step kinds.
 
 Command steps declare argv-only process execution:
 

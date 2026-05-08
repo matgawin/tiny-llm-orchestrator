@@ -49,36 +49,44 @@ Orc sets these marker variables in the sandboxed environment:
 - `ORC_SANDBOX_ROOT=<repo>`
 
 Worker launches inherit sandboxing through normal process inheritance. Start the
-top-level Codex/orchestrator session with `orc sandbox run`; any child
-worker processes launched through `orc run advance <run-id>` or `orc worker
-launch-next <run-id>` from that session run in the same bubblewrap environment
-and see the marker variables above.
+top-level orchestrator session with `orc sandbox run`; any child worker
+processes launched through `orc run advance <run-id>` or
+`orc worker launch-next <run-id>` from that session run in the same bubblewrap
+environment and see the marker variables above.
 
-Agent worker launches use the normal Codex default outside a verified Orc
-sandbox:
+Agent worker commands are built from the selected runtime descriptor. Outside
+a verified Orc sandbox, the launcher uses the runtime's `command.normal_args`;
+inside a verified Orc sandbox, it uses `command.sandbox_args`. The scaffolded
+Codex runtime descriptor therefore produces this normal argv:
 
 ```bash
 codex --ask-for-approval never exec --skip-git-repo-check -
 ```
 
 When the repository has sandbox config and Orc verifies both `ORC_SANDBOX=1`
-and a canonical `ORC_SANDBOX_ROOT` matching the current repository root, agent
-worker launches use Codex yolo mode:
+and a canonical `ORC_SANDBOX_ROOT` matching the current repository root, the
+same Codex runtime descriptor produces this sandbox argv:
 
 ```bash
 codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
 ```
 
 The outer bubblewrap process is the isolation boundary in this mode. Manually
-exported marker variables do not change worker defaults in repositories without
-sandbox config, and invalid or mismatched markers do not enable yolo mode.
+exported marker variables do not switch runtime mode in repositories without
+sandbox config, and invalid or mismatched markers do not select sandbox args.
+There is no built-in Codex fallback after the runtime migration; projects that
+want Codex workers must declare and select `.orc/runtimes/codex.yaml`.
 Explicit worker command overrides are used unchanged.
 
 Set `sandbox.require_for_workers: true` when a repository should refuse worker
 launches unless those markers prove the launcher is already inside the
-repository's sandbox. The guard is opt-in so existing non-sandbox workflows keep
-working. Guard failures tell the operator to restart the orchestrator with
-`orc sandbox run`.
+repository's sandbox. Runtime descriptors may also declare
+`sandbox.required: true`, which refuses launches for that selected runtime
+outside a verified Orc sandbox, or `sandbox.supported: false`, which refuses
+launches inside one. These worker-mode conflicts are checked immediately before
+process start. The project-wide guard is opt-in so existing non-sandbox
+workflows keep working. Guard failures tell the operator to restart the
+orchestrator with `orc sandbox run`.
 
 ## Bubblewrap Defaults
 
@@ -206,6 +214,16 @@ and are resolved while building the bubblewrap spec, before the sandbox process
 starts. Static target and duplicate declaration conflicts fail during config
 load; host-dependent missing paths and symlink escape checks fail during
 sandbox launch preparation.
+
+Runtime sandbox requirements are selected from loaded workflows before
+bubblewrap starts. Static conflicts that do not require host inspection fail
+during project config load. Host-dependent failures, including missing required
+host paths, symlink resolution failures, protected target conflicts that depend
+on resolved paths, and unavailable sandbox coverage for selected
+`runtime_dirs`, fail during sandbox launch preparation. Worker launch does not
+add mounts to an already-running sandbox; it only verifies that the selected
+runtime is compatible with the active sandbox markers and that required runtime
+directories are visible through existing sandbox coverage.
 
 Writable repo-relative host paths must stay inside the repository and must not
 escape through traversal or symlinks. Mount targets must be clean absolute

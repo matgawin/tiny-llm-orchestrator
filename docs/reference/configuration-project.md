@@ -29,15 +29,75 @@ Required fields:
 - `workflows`: map of workflow name to either a legacy `.orc`-relative
   workflow file path scalar or an object with `path` and optional `loop_caps`
 - `agents`: map of agent id to `.orc`-relative descriptor file path
-- `runtimes`: optional map of runtime id to `.orc`-relative runtime descriptor file path
 
 The `workflows` and `agents` maps must each contain at least one entry.
 Referenced paths must be relative to `.orc`; absolute paths, traversal outside `.orc`, and symlink escapes are rejected.
 
-Runtime descriptor ids must match their `runtimes` map keys. Workflow agent
-steps select prompt/persona descriptors through `agent`; runtime descriptors
-describe executable worker commands and capabilities. Any agent step with an
-effective runtime must reference a declared runtime.
+Runtime descriptors are executable descriptors. Agent descriptors remain
+prompt/persona descriptors. Workflow agent steps select prompt/persona
+descriptors through `agent` and select executable descriptors through their
+effective runtime.
+
+Agent workflows must have an effective declared runtime for every agent step.
+The scaffolded project config provides this through a `runtimes` map:
+
+```yaml
+agents:
+  coder: agents/coder.md
+runtimes:
+  codex: runtimes/codex.yaml
+```
+
+Runtime descriptor paths are relative to `.orc`; by convention they live under
+`.orc/runtimes/*.yaml`. The loader rejects absolute paths, traversal outside
+`.orc`, and symlink escapes. Runtime ids must be non-empty and descriptor
+`id` values must match their `runtimes` map keys. Any agent step with an
+effective runtime must reference a declared runtime. There is no built-in Codex
+fallback after the runtime migration; projects that want Codex workers must
+declare a Codex runtime descriptor and select it through workflow defaults or
+step overrides.
+
+A scaffolded Codex runtime descriptor is:
+
+```yaml
+id: codex
+command:
+  executable: codex
+  normal_args: [--ask-for-approval, never]
+  sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
+  args: [exec, --skip-git-repo-check, "-"]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  allowed: []
+  args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--add-dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+  requirements:
+    env:
+      pass: [CODEX_HOME, OPENAI_API_KEY]
+      set: {}
+    mounts: []
+```
+
+Runtime descriptor validation rejects empty command executables, empty argv
+entries, unsupported prompt delivery values, unsupported or misplaced
+placeholders, inconsistent model or directory capability declarations, and
+static sandbox requirement conflicts. The only runtime argv placeholders are
+`{model}`, `{prompt_file}`, `{agent_id}`, `{step_id}`, `{attempt_id}`,
+`{run_id}`, and the directory-only `{dir}` placeholder.
+`{prompt_file}` is valid only with `prompt.delivery: file`; `stdin` delivery
+writes the rendered worker prompt to process stdin. Missing or empty
+`model.allowed` means model values are passed through; a non-empty list is an
+allowlist for runtime defaults and workflow-selected models. Directory args are
+emitted by repeating `directories.args` once per effective `runtime_dirs`
+entry; paths are explicit argv values and are not shell-expanded.
 
 Project config also supports workflow loop cap defaults:
 

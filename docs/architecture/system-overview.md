@@ -6,7 +6,8 @@ Describe the repository's current runtime shape, main package responsibilities, 
 
 ## Audience
 
-Contributors changing CLI behavior, project config validation, workflow semantics, or future runtime orchestration packages.
+Contributors changing CLI behavior, project config validation, workflow
+semantics, launcher behavior, sandbox behavior, or runtime descriptor support.
 
 ## Read This When
 
@@ -26,7 +27,8 @@ The only runnable service today is the `orc` CLI:
 
 - `cmd/orc` starts the process.
 - `internal/cli` handles command dispatch and user-facing output.
-- `internal/config` loads and validates `.orc` project configuration.
+- `internal/config` loads and validates `.orc` project configuration,
+  workflow files, agent descriptors, and runtime descriptors.
 
 The CLI currently exposes help, version, init, `run start`,
 `run add-followup`, read-only `run status` / `run next` behavior,
@@ -46,9 +48,12 @@ Config loading follows this shape:
 
 1. Resolve the project root and `.orc` directory.
 2. Read `.orc/config.yaml`.
-3. Resolve referenced workflow and agent descriptor paths relative to `.orc`.
+3. Resolve referenced workflow, agent descriptor, and runtime descriptor paths
+   relative to `.orc`.
 4. Reject absolute paths, path traversal, and symlink escapes outside `.orc`.
-5. Parse and validate workflows, deterministic transitions, retries, task-context policy, and agent descriptors.
+5. Parse and validate workflows, deterministic transitions, retries,
+   task-context policy, agent descriptors, runtime descriptors, and
+   workflow-selected runtime/model/runtime directory fields.
 
 Run start loads validated project config, enforces task-context and VCS policy,
 rejects dirty or no-VCS starts when the workflow requires that, and persists
@@ -70,6 +75,11 @@ These packages define or reserve ownership for orchestration behavior outside th
 - `internal/report`: report validation and persistence for active worker
   attempts, including report-sourced follow-up recording.
 - `internal/workflow`: deterministic workflow graph transitions.
-- `internal/launcher`: worker process start and supervision.
+- `internal/launcher`: worker process start and supervision from the
+  workflow-selected runtime descriptor.
 
-Do not push launcher or run-store concerns into `internal/config`; config validation should remain a contract-loading boundary.
+Do not push launcher or run-store concerns into `internal/config`; config
+validation should remain a contract-loading boundary. `internal/config` owns
+runtime descriptor schema and static validation, while `internal/launcher`
+owns building the selected worker argv and checking active sandbox-mode
+compatibility before process start.

@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Define the accepted v1 design for configurable agent runtimes before the
-implementation replaces hardcoded Codex worker launch behavior.
+Define the v1 contract for configurable agent runtimes and descriptor-built
+worker launch behavior.
 
 ## Audience
 
@@ -15,7 +15,7 @@ migration, and end-to-end runtime tests.
 
 - You are implementing `.orc/runtimes/*.yaml` loading or validation.
 - You are adding `runtime`, `model`, or `runtime_dirs` workflow fields.
-- You are replacing hardcoded Codex launch defaults with descriptor-built argv.
+- You are maintaining descriptor-built worker argv.
 - You are updating sandbox requirements or runtime-related docs and tests.
 
 ## Related Docs
@@ -29,11 +29,9 @@ migration, and end-to-end runtime tests.
 
 ## Status
 
-This page is the accepted implementation contract for the configurable runtime
-feature. Until the implementation lands, existing docs may still describe the
-current hardcoded Codex launcher behavior. Downstream runtime tasks must update
-those current-behavior docs and tests to match this contract as they replace
-the old behavior.
+This page is the durable implementation contract for configurable runtime
+descriptors, workflow runtime selection, descriptor-built worker argv, and
+runtime sandbox requirements.
 
 ## Public Schema
 
@@ -102,7 +100,7 @@ The minimum descriptor shape is:
 id: codex
 command:
   executable: codex
-  args: [exec, --skip-git-repo-check, -]
+  args: [exec, --skip-git-repo-check, "-"]
   normal_args: [--ask-for-approval, never]
   sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
 prompt:
@@ -111,10 +109,10 @@ model:
   supported: true
   required: false
   allowed: []
-  args: [--model, {model}]
+  args: [--model, "{model}"]
 directories:
   supported: true
-  args: [--add-dir, {dir}]
+  args: [--add-dir, "{dir}"]
 sandbox:
   supported: true
   required: false
@@ -312,11 +310,10 @@ If a launcher override is present, the override command receives the rendered
 prompt on stdin under the existing override contract. Runtime validation still
 loads project config, but the selected worker command is the override command.
 
-## Codex Migration
+## Codex Runtime
 
-After migration, there is no hidden hardcoded Codex launcher fallback. Codex is
-represented by `.orc/runtimes/codex.yaml` and referenced from
-`.orc/config.yaml`:
+There is no hidden Codex launcher fallback. Codex is represented by
+`.orc/runtimes/codex.yaml` and referenced from `.orc/config.yaml`:
 
 ```yaml
 runtimes:
@@ -342,17 +339,17 @@ command:
   executable: codex
   normal_args: [--ask-for-approval, never]
   sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
-  args: [exec, --skip-git-repo-check, -]
+  args: [exec, --skip-git-repo-check, "-"]
 prompt:
   delivery: stdin
 model:
   supported: true
   required: false
   allowed: []
-  args: [--model, {model}]
+  args: [--model, "{model}"]
 directories:
   supported: true
-  args: [--add-dir, {dir}]
+  args: [--add-dir, "{dir}"]
 sandbox:
   supported: true
   required: false
@@ -451,7 +448,7 @@ Implementation tasks must update or add tests for:
 - end-to-end non-Codex runtime execution using real executable fixtures for
   stdin and file prompt delivery
 
-Downstream docs that must change with implementation:
+Related docs that must stay consistent with this contract:
 
 - [configuration-project.md](configuration-project.md) for `runtimes` and
   descriptor validation
@@ -460,8 +457,8 @@ Downstream docs that must change with implementation:
   overrides
 - [configuration-init.md](configuration-init.md) for scaffolded
   `.orc/runtimes/codex.yaml`
-- [../features/worker-launching.md](../features/worker-launching.md) to remove
-  hardcoded Codex default command language
+- [../features/worker-launching.md](../features/worker-launching.md) for
+  descriptor-built worker commands
 - [../features/sandbox-run.md](../features/sandbox-run.md) for runtime sandbox
   requirements and remaining compatibility behavior
 - [../architecture/service-boundaries.md](../architecture/service-boundaries.md)

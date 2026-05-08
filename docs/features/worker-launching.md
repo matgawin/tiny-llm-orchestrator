@@ -89,21 +89,20 @@ prints live progress to stderr and keeps stdout for the final JSON object only.
 
 ## Sandbox Inheritance
 
-Workers are sandboxed by process inheritance when the top-level
-Codex/orchestrator session was started with `orc sandbox run`. In that flow,
-`orc sandbox run` starts the configured command inside bubblewrap, and worker
-processes launched by `orc run advance <run-id>` or `orc worker launch-next
-<run-id>` remain inside the same sandbox.
+Workers are sandboxed by process inheritance when the top-level orchestrator
+session was started with `orc sandbox run`. In that flow, `orc sandbox run`
+starts the configured command inside bubblewrap, and worker processes launched
+by `orc run advance <run-id>` or `orc worker launch-next <run-id>` remain
+inside the same sandbox.
 
 Repositories may opt in to an enforcement guard with
 `sandbox.require_for_workers: true`. When enabled, both `orc run advance` and
 `orc worker launch-next` refuse to launch unless `ORC_SANDBOX=1` is present and
 `ORC_SANDBOX_ROOT` matches the current repository root. This guard is useful
-for repositories that expect Codex yolo mode to be used only inside the Orc
+for repositories whose selected runtimes should run only inside the Orc
 bubblewrap wrapper. It is disabled by default so existing non-sandbox worker
 workflows remain usable. Failure messages tell the operator to restart the
-orchestrator with
-`orc sandbox run`.
+orchestrator with `orc sandbox run`.
 
 ## Launch Contract
 
@@ -188,8 +187,24 @@ attempt records:
 - log artifact reference when the durable log destination is created
 
 The launcher renders the prompt through `internal/promptrender` using the same
-attempt metadata that was persisted. Outside a verified Orc sandbox, the
-default agent worker command is:
+attempt metadata that was persisted. Agent steps then select an executable
+runtime descriptor through the workflow's effective `runtime` value. The
+launcher builds argv from the selected descriptor:
+
+1. `command.executable`
+2. `command.normal_args` outside a verified Orc sandbox, or
+   `command.sandbox_args` inside one
+3. `command.args`
+4. `model.args`, only when an effective model resolves
+5. `directories.args`, repeated once per effective `runtime_dirs` entry
+
+Only descriptor placeholders are substituted: `{model}`, `{prompt_file}`,
+`{agent_id}`, `{step_id}`, `{attempt_id}`, `{run_id}`, and directory-only
+`{dir}`. Prompt delivery follows the runtime descriptor. `prompt.delivery:
+stdin` writes the rendered prompt to process stdin; `prompt.delivery: file`
+passes the persisted prompt artifact path through `{prompt_file}`.
+
+The scaffolded Codex runtime descriptor preserves the previous normal argv:
 
 ```bash
 codex --ask-for-approval never exec --skip-git-repo-check -
@@ -197,22 +212,27 @@ codex --ask-for-approval never exec --skip-git-repo-check -
 
 When the repository has sandbox config and the launcher verifies
 `ORC_SANDBOX=1` plus a canonical `ORC_SANDBOX_ROOT` matching the current
-repository root, the default agent worker command is:
+repository root, the same descriptor selects `command.sandbox_args`, preserving
+the previous sandbox argv:
 
 ```bash
 codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
 ```
 
-This sandbox-only yolo default relies on the inherited outer bubblewrap sandbox
-as the isolation boundary. Explicit launcher command overrides are preserved
-unchanged. Missing, invalid, or mismatched sandbox markers keep the normal
-default unless `sandbox.require_for_workers: true` is enabled, in which case
-the launch is refused before command selection.
+This sandbox-mode Codex argv relies on the inherited outer bubblewrap sandbox
+as the isolation boundary. It is not a built-in launcher fallback; after the
+runtime migration, deleting or failing to select `.orc/runtimes/codex.yaml`
+causes validation or launch selection to fail instead of silently inventing a
+Codex command. Explicit launcher command overrides are preserved unchanged and
+bypass runtime argv construction. Missing, invalid, or mismatched sandbox
+markers select normal runtime args unless `sandbox.require_for_workers: true`
+or the selected runtime's `sandbox.required: true` requires a verified sandbox,
+in which case launch is refused before process start.
 
-The command runs from the project root, resolves `codex` from the effective
-worker environment, and receives the rendered prompt on stdin. In the Nix
-development shell, `codex` is the repo wrapper that adds the Beads directory
-before invoking the underlying Codex binary.
+The command runs from the project root and resolves `command.executable` from
+the effective worker environment. In the Nix development shell, `codex` is the
+repo wrapper that adds the Beads directory before invoking the underlying Codex
+binary.
 
 Command and script steps use the same selected-step, active-attempt, retry,
 timeout, and persisted status lifecycle, but they execute a deterministic local

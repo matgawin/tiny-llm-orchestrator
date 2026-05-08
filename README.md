@@ -67,7 +67,7 @@ Entrypoints:
 - worker prompt rendering: `internal/promptrender` and [docs/features/worker-prompt-rendering.md](docs/features/worker-prompt-rendering.md)
 - worker launching and process supervision: `internal/launcher` and [docs/features/worker-launching.md](docs/features/worker-launching.md)
 - live worker progress contract: [docs/features/live-worker-progress.md](docs/features/live-worker-progress.md)
-- project configuration, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md), [docs/reference/configuration-init.md](docs/reference/configuration-init.md), [docs/reference/configuration-project.md](docs/reference/configuration-project.md), and [docs/reference/configuration-workflows.md](docs/reference/configuration-workflows.md)
+- project configuration, runtime descriptors, init scaffolding, and workflow graph schema: [docs/reference/configuration.md](docs/reference/configuration.md), [docs/reference/configuration-runtimes.md](docs/reference/configuration-runtimes.md), [docs/reference/configuration-init.md](docs/reference/configuration-init.md), [docs/reference/configuration-project.md](docs/reference/configuration-project.md), and [docs/reference/configuration-workflows.md](docs/reference/configuration-workflows.md)
 - deterministic workflow transition logic: `internal/workflow` and [docs/reference/workflow-engine.md](docs/reference/workflow-engine.md)
 - run persistence: `internal/runstore` and [docs/reference/run-store.md](docs/reference/run-store.md)
 - local setup and troubleshooting: [docs/getting-started/README.md](docs/getting-started/README.md)
@@ -81,7 +81,7 @@ Entrypoints:
 - `cmd/orc/main.go`: process entrypoint.
 - `internal/cli`: CLI command parsing and output.
 - `internal/initconfig`: project-local `orc init` scaffold planning and writes.
-- `internal/config`: `.orc` config, workflow, and agent descriptor loading/validation.
+- `internal/config`: `.orc` config, workflow, agent descriptor, and runtime descriptor loading/validation.
 
 ### Runtime Packages
 

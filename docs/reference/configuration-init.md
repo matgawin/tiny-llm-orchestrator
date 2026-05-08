@@ -64,6 +64,39 @@ The scaffold also includes `.orc/runtimes/codex.yaml` and references it from
 effective runtime while preserving the agent descriptor ids used in persisted
 attempt metadata.
 
+The scaffolded Codex runtime descriptor is:
+
+```yaml
+id: codex
+command:
+  executable: codex
+  normal_args: [--ask-for-approval, never]
+  sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
+  args: [exec, --skip-git-repo-check, "-"]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  allowed: []
+  args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--add-dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+  requirements:
+    env:
+      pass: [CODEX_HOME, OPENAI_API_KEY]
+      set: {}
+    mounts: []
+```
+
+This descriptor, not a launcher special case, preserves Codex argv behavior for
+new projects. Existing user-owned `.orc` directories are not automatically
+migrated when scaffold output changes.
+
 Implementation, bugfix, mechanical-change, and test-only workflows block dirty
 starts by default so unrelated pre-existing changes do not mix with new work.
 Review-only workflows allow dirty starts by default because their normal input

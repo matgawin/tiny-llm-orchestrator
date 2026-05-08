@@ -24,7 +24,10 @@ Contributors changing package structure, config validation, CLI behavior, or fut
 - `cmd/orc` owns process startup only.
 - `internal/cli` owns the command boundary.
 - `internal/initconfig` owns the project-local `orc init` scaffold.
-- `internal/config` owns `.orc` config loading, path safety, YAML parsing, workflow validation, and agent descriptor validation.
+- `internal/config` owns `.orc` config loading, path safety, YAML parsing,
+  workflow validation, agent descriptor validation, runtime descriptor loading
+  and static validation, and validation of workflow runtime/model/runtime
+  directory selection against loaded runtime descriptors.
 - `internal/runstart` owns explicit task-context resolution for `orc run start`.
   Feature semantics live in [../features/run-start.md](../features/run-start.md).
 - `internal/vcs` owns read-only jj/git/no-VCS inspection and VCS summary
@@ -43,13 +46,19 @@ Contributors changing package structure, config validation, CLI behavior, or fut
   consistent. It also owns the typed `followups.md` entry formatter so report
   and CLI callers cannot drift.
 - `internal/workflow` owns deterministic workflow transitions for validated workflow definitions and in-memory run state.
-- `internal/launcher` owns worker process launch and supervision.
+- `internal/launcher` owns worker process launch and supervision, including
+  descriptor-built worker argv, prompt delivery mode, runtime placeholder
+  substitution, and active sandbox-mode compatibility checks for the selected
+  runtime.
 - `internal/sandbox` owns `orc sandbox run` bubblewrap argv construction and
-  sandboxed process supervision.
+  sandboxed process supervision, including host-dependent runtime sandbox
+  requirement checks and mounts before the sandboxed process starts.
 
 ## Boundary Rules
 
 - Keep config schema validation independent from process-launch behavior.
+- Keep runtime descriptors as executable contracts, separate from agent
+  prompt/persona descriptors.
 - Keep command routing, help output, and command-level error wrapping in
   `internal/cli`; command packages such as `internal/initconfig` own
   domain-specific prompts and status output.
