@@ -28,6 +28,7 @@ Contributors changing worker process launch, active-attempt state, no-report out
 
 ```bash
 orc run advance <run-id> [--max-steps N] [--once] [--json]
+orc run skip-step <run-id> --step <step-id> --reason <text>
 orc worker launch-next <run-id>
 ```
 
@@ -46,6 +47,31 @@ integer, and the guard stops before launching another worker with stop reason
 `max_steps_reached`. `--once` may be combined with `--max-steps`, but it still
 limits the command to one launched worker attempt. No dry-run mode exists for
 `advance` in v1; use `orc run next <run-id>` for inspection.
+
+`orc run skip-step <run-id> --step <step-id> --reason <text>` is the explicit
+human/operator bypass for a currently selected skippable workflow step. It
+requires `--step`; Orc does not infer the step to skip. It also requires a
+non-empty reason after trimming. The command has no `--yes` confirmation flag
+and no `--json` output mode in v1.
+
+Use skip-step when a human has reviewed the situation and decided a selected
+skippable step should not run. For example, an operator can skip a selected
+review that is not worth running:
+
+```bash
+orc run skip-step 20260508T011210Z-implementation-main-tuz-1b5dd0 --step review --reason "human reviewed the diff; another review pass is not useful"
+```
+
+After reviewer-requested remediation routes back to a skippable code step, an
+operator can bypass that remediation only with an audited reason:
+
+```bash
+orc run skip-step 20260508T011210Z-implementation-main-tuz-1b5dd0 --step code --reason "human reviewed requested changes and decided not to implement them"
+```
+
+The persisted outcome is the system-owned `done/skipped` transition declared
+by workflow config. It does not pretend approval occurred unless the workflow
+routes `done/skipped` the same way as approval.
 
 By default, `advance` prints concise human-readable progress and a final
 summary. With `--json`, stdout contains one final JSON object with `run_id`,
@@ -139,6 +165,12 @@ workflow routes back to code and no cap, block, failure, or guard stops the run,
 `advance` continues through the routed code/test/review cycle. `advance` does
 not call `orc run continue --allow-loop-cap`, resolve human blocks, skip steps,
 write Beads comments, or close Beads issues.
+
+`orc run skip-step` rejects runs with active worker attempts, retry decisions,
+wait decisions, terminal decisions, terminal run states, non-skippable selected
+steps, and a caller-supplied step id that does not match the current
+`select_step` decision. On success it prints the run id, skipped step, trimmed
+reason, and either the next selected step or resulting terminal run status.
 
 Agent launches create a `starting` attempt before rendering the worker prompt.
 The attempt becomes `active` only after process metadata is recorded. The

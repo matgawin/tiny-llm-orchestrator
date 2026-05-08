@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	reportIgnoredEvent = "report.ignored"
-	cliStateRunning    = "running"
+	reportIgnoredEvent    = "report.ignored"
+	cliStateRunning       = "running"
+	cliStateReadyForHuman = "ready_for_human"
 )
 
 func TestMain(m *testing.M) {
@@ -730,6 +731,185 @@ func TestExecuteRunContinueHelpDocumentsContinuationModes(t *testing.T) {
 	})
 }
 
+func TestExecuteRunSkipStepSkipsSelectedReviewStep(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLISkipStepProject(t, root, true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+
+	output := executeCLICommand(t, []string{"run", "skip-step", result.runID, "--step", "review", "--reason", " not worth another review "})
+	assertCLIOutputContainsAll(t, output, []string{
+		"skipped step review for run " + result.runID,
+		"reason: not worth another review",
+		"next selected step: code",
+	})
+	loaded := loadCLIRun(t, root, result.runID)
+	if got := len(loaded.Status.Attempts); got != 0 {
+		t.Fatalf("attempts = %d, want unchanged empty attempts", got)
+	}
+	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != "review" || loaded.Status.SkippedSteps[0].Reason != "not worth another review" {
+		t.Fatalf("skipped steps = %+v, want review skip with trimmed reason", loaded.Status.SkippedSteps)
+	}
+}
+
+func TestExecuteRunSkipStepSkipsSelectedRemediationStep(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLISkipStepProject(t, root, true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	recordCLIReportedAttempt(t, root, result.runID, "review-attempt", "review", "reviewer", "done", "changes_requested")
+
+	output := executeCLICommand(t, []string{"run", "skip-step", result.runID, "--step=code", "--reason=human reviewed requested changes"})
+	assertCLIOutputContainsAll(t, output, []string{
+		"skipped step code for run " + result.runID,
+		"reason: human reviewed requested changes",
+		"run status: " + cliStateReadyForHuman,
+	})
+	loaded := loadCLIRun(t, root, result.runID)
+	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != "code" {
+		t.Fatalf("skipped steps = %+v, want code remediation skip", loaded.Status.SkippedSteps)
+	}
+	if loaded.Status.State != cliStateReadyForHuman {
+		t.Fatalf("state = %q, want %s", loaded.Status.State, cliStateReadyForHuman)
+	}
+}
+
+func TestExecuteRunSkipStepFlagValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "missing step", args: []string{"run", "skip-step", "run-1", "--reason", "skip"}, want: []string{"--step is required"}},
+		{name: "missing reason", args: []string{"run", "skip-step", "run-1", "--step", "review"}, want: []string{"--reason is required"}},
+		{name: "whitespace reason", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", " \t "}, want: []string{"non-empty after trimming"}},
+		{name: "duplicate step", args: []string{"run", "skip-step", "run-1", "--step", "review", "--step=code", "--reason", "skip"}, want: []string{"repeated --step"}},
+		{name: "duplicate reason", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "one", "--reason=two"}, want: []string{"repeated --reason"}},
+		{name: "unknown json", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--json"}, want: []string{`unknown flag "--json"`}},
+		{name: "unknown flag", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--force"}, want: []string{`unknown flag "--force"`}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := Execute(tc.args, &stdout, &stderr); err == nil {
+				t.Fatal("Execute returned nil error, want validation failure")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			assertCLIOutputContainsAll(t, stderr.String(), tc.want)
+		})
+	}
+}
+
+func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
+	tests := []struct {
+		name      string
+		skippable bool
+		setup     func(t *testing.T, root, runID string)
+		step      string
+		want      []string
+	}{
+		{
+			name:      "wrong step",
+			skippable: true,
+			step:      "code",
+			want:      []string{`step "code" is not selected`, `selected step is "review"`},
+		},
+		{
+			name:      "active attempt",
+			skippable: true,
+			setup: func(t *testing.T, root, runID string) {
+				t.Helper()
+				startCLIActiveAttemptForStep(t, root, runID, "review-active", "review", "reviewer")
+			},
+			step: "review",
+			want: []string{"active attempt"},
+		},
+		{
+			name:      "retry decision",
+			skippable: true,
+			setup: func(t *testing.T, root, runID string) {
+				t.Helper()
+				recordCLIReportedAttempt(t, root, runID, "review-retry", "review", "reviewer", "failed", "error")
+			},
+			step: "review",
+			want: []string{"decision is retry_step", "only a selected step can be skipped"},
+		},
+		{
+			name:      "terminal run",
+			skippable: true,
+			setup: func(t *testing.T, root, runID string) {
+				t.Helper()
+				if _, _, err := openCLIStore(t, root).UpdateStatus(runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
+					t.Fatalf("UpdateStatus returned error: %v", err)
+				}
+			},
+			step: "review",
+			want: []string{"terminal"},
+		},
+		{
+			name:      "non skippable step",
+			skippable: false,
+			step:      "review",
+			want:      []string{`step "review" is not skippable`},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLISkipStepProject(t, root, tc.skippable)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			if tc.setup != nil {
+				tc.setup(t, root, result.runID)
+			}
+			before := loadCLIRun(t, root, result.runID)
+
+			var stdout, stderr bytes.Buffer
+			err := Execute([]string{"run", "skip-step", result.runID, "--step", tc.step, "--reason", "skip it"}, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("Execute returned nil error, want skip rejection")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			assertCLIOutputContainsAll(t, stderr.String(), tc.want)
+			after := loadCLIRun(t, root, result.runID)
+			if after.Status.LastSequence != before.Status.LastSequence || len(after.Status.SkippedSteps) != len(before.Status.SkippedSteps) || after.Status.State != before.Status.State {
+				t.Fatalf("after status = %+v, want no mutation from %+v", after.Status, before.Status)
+			}
+		})
+	}
+}
+
+func TestExecuteRunHelpListsSkipStep(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"run", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	assertCLIOutputContainsAll(t, stdout.String(), []string{"skip-step", "Skip the currently selected skippable workflow step"})
+}
+
+func TestExecuteRunSkipStepHelpDocumentsContract(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"run", "skip-step", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	assertCLIOutputContainsAll(t, stdout.String(), []string{
+		"orc run skip-step <run-id> --step <step-id> --reason <text>",
+		"--step <step-id>",
+		"--reason <text>",
+		"active worker attempts",
+		"retry, wait, terminal decisions",
+		"done/skipped",
+		"JSON output",
+	})
+}
+
 func TestExecuteRunAddFollowupAppendsFollowup(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
@@ -798,7 +978,7 @@ func TestRunRecordSummaryOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
 	result := startCLIBeadBackedRunThenBlockBD(t, root)
-	if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: "ready_for_human"}); err != nil {
+	if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 	summaryPath := filepath.Join(root, "final-summary.md")
@@ -1031,7 +1211,7 @@ func TestWorkerLaunchNextRoutesValidReportWithoutPendingOutcome(t *testing.T) {
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
-	if loaded.Status.State != "ready_for_human" {
+	if loaded.Status.State != cliStateReadyForHuman {
 		t.Fatalf("run state = %q, want ready_for_human", loaded.Status.State)
 	}
 }
@@ -1112,7 +1292,7 @@ func TestWorkerLaunchNextRoutesImplementationWorkflowReportsEndToEnd(t *testing.
 	launchCLIWorkerReport(t, run.runID, passed("Tests passed after review fixes."))
 	attemptsBeforeApprovalTerminal := len(loadCLIRun(t, run.root, run.runID).Status.Attempts)
 	launchCLIWorkerReport(t, run.runID, approved("Review approved."))
-	terminalizeCLIWorkflow(t, run.root, run.runID, "ready_for_human", attemptsBeforeApprovalTerminal+1, "Review approved.")
+	terminalizeCLIWorkflow(t, run.root, run.runID, cliStateReadyForHuman, attemptsBeforeApprovalTerminal+1, "Review approved.")
 }
 
 func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) {
@@ -1122,7 +1302,7 @@ func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) 
 	launchCLIWorkerReport(t, run.runID, passed("Tests passed."))
 	attemptsBeforeApprovalTerminal := len(loadCLIRun(t, run.root, run.runID).Status.Attempts)
 	launchCLIWorkerReport(t, run.runID, approved("Review approved."))
-	terminalizeCLIWorkflow(t, run.root, run.runID, "ready_for_human", attemptsBeforeApprovalTerminal+1, "Review approved.")
+	terminalizeCLIWorkflow(t, run.root, run.runID, cliStateReadyForHuman, attemptsBeforeApprovalTerminal+1, "Review approved.")
 
 	summaryPath := filepath.Join(run.root, "final-summary.md")
 	writeCLIFile(t, summaryPath, "# Final Summary\n\nChanges, tests, risks, follow-ups, VCS summary, and review checklist.\n")
@@ -1229,7 +1409,7 @@ func TestRunAdvanceCommandWorkflowReachesReadyForHuman(t *testing.T) {
 		"exit code: 0",
 	})
 	loaded := loadCLIRun(t, root, result.runID)
-	if loaded.Status.State != "ready_for_human" {
+	if loaded.Status.State != cliStateReadyForHuman {
 		t.Fatalf("run state = %q, want ready_for_human", loaded.Status.State)
 	}
 	if got := len(loaded.Status.Attempts); got != 4 {
@@ -2597,6 +2777,67 @@ steps:
 `)
 }
 
+func writeCLISkipStepProject(t *testing.T, root string, reviewSkippable bool) {
+	t.Helper()
+	orcDir := filepath.Join(root, ".orc")
+	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
+		t.Fatalf("mkdir workflows: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  reviewer: agents/reviewer.md
+  coder: agents/coder.md
+`)
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), cliAgentDescriptor("reviewer", "Reviews completed work."))
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "coder.md"), cliAgentDescriptor("coder", "Implements code changes."))
+	reviewSkipFields := ""
+	reviewDoneResults := "approved, changes_requested"
+	reviewSkipTransition := ""
+	if reviewSkippable {
+		reviewSkipFields = "    skippable: true\n"
+		reviewDoneResults = "approved, changes_requested, skipped"
+		reviewSkipTransition = "      done/skipped: code\n"
+	}
+	writeCLIFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), `name: implementation
+start: review
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  retries:
+    failed/error: 1
+steps:
+  review:
+    agent: reviewer
+`+reviewSkipFields+`    allowed_results:
+      done: [`+reviewDoneResults+`]
+      failed: [error]
+    on:
+      done/approved: ready_for_human
+      done/changes_requested: code
+`+reviewSkipTransition+`      failed/error: blocked_for_human
+  code:
+    agent: coder
+    skippable: true
+    allowed_results:
+      done: [ready, skipped]
+      failed: [error]
+    on:
+      done/ready: ready_for_human
+      done/skipped: ready_for_human
+      failed/error: blocked_for_human
+`)
+}
+
 func writeCLIAdvanceCommandProject(t *testing.T, root, reviewStep, loopCaps string) {
 	t.Helper()
 	orcDir := filepath.Join(root, ".orc")
@@ -2875,10 +3116,15 @@ func assertCLILatestAttemptState(t *testing.T, root, runID, state string) runsto
 
 func startCLIActiveAttempt(t *testing.T, root, runID, attemptID string) {
 	t.Helper()
+	startCLIActiveAttemptForStep(t, root, runID, attemptID, "plan", "planner")
+}
+
+func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, agentID string) {
+	t.Helper()
 	store := openCLIStore(t, root)
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
-		StepID:          "plan",
-		AgentID:         "planner",
+		StepID:          stepID,
+		AgentID:         agentID,
 		AttemptID:       attemptID,
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
@@ -2925,6 +3171,26 @@ func startCLIActiveAttempt(t *testing.T, root, runID, attemptID string) {
 		Time:             time.Date(2026, 5, 4, 12, 0, 5, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
+	}
+}
+
+func recordCLIReportedAttempt(t *testing.T, root, runID, attemptID, stepID, agentID, status, result string) {
+	t.Helper()
+	startCLIActiveAttemptForStep(t, root, runID, attemptID, stepID, agentID)
+	if _, _, err := openCLIStore(t, root).RecordAttemptReport(runID, runstore.RecordReportRequest{
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    stepID,
+			AgentID:   agentID,
+			AttemptID: attemptID,
+			Status:    status,
+			Result:    result,
+			Summary:   "reported " + status + "/" + result,
+		},
+		State: runstore.AttemptStateReported,
+		Time:  time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 }
 

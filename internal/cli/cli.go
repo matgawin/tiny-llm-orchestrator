@@ -18,6 +18,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/progress"
 	"tiny-llm-orchestrator/orc/internal/report"
 	"tiny-llm-orchestrator/orc/internal/runinspect"
+	"tiny-llm-orchestrator/orc/internal/runskip"
 	"tiny-llm-orchestrator/orc/internal/runstart"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/runsummary"
@@ -416,6 +417,8 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return executeRunStart(args[1:], stdin, stdout, stderr)
 	case "show":
 		return executeRunInspect("show", args[1:], stdout, stderr, runinspect.Status)
+	case "skip-step":
+		return executeRunSkipStep(args[1:], stdout, stderr)
 	case "status":
 		return executeRunInspect("status", args[1:], stdout, stderr, runinspect.Status)
 	case "next":
@@ -433,6 +436,88 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		}
 		return fmt.Errorf("unknown run command: %s", args[0])
 	}
+}
+
+func executeRunSkipStep(args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return runSkipStepFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	if args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand {
+		return printRunSkipStepHelp(stdout)
+	}
+	runID := args[0]
+	if runID == "" {
+		return runSkipStepFlagError(stderr, fmt.Errorf("requires <run-id>"))
+	}
+	var stepID, reason string
+	stepSet := false
+	reasonSet := false
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--step":
+			if stepSet {
+				return runSkipStepFlagError(stderr, fmt.Errorf("repeated --step flags are ambiguous"))
+			}
+			if !assignFlagValue(args, &i, &stepID) {
+				return runSkipStepFlagError(stderr, fmt.Errorf("--step requires a value"))
+			}
+			stepSet = true
+		case "--reason":
+			if reasonSet {
+				return runSkipStepFlagError(stderr, fmt.Errorf("repeated --reason flags are ambiguous"))
+			}
+			if !assignFlagValue(args, &i, &reason) {
+				return runSkipStepFlagError(stderr, fmt.Errorf("--reason requires a value"))
+			}
+			reasonSet = true
+		case "-h", helpFlag, helpCommand:
+			return printRunSkipStepHelp(stdout)
+		default:
+			if value, ok := strings.CutPrefix(arg, "--step="); ok {
+				if stepSet {
+					return runSkipStepFlagError(stderr, fmt.Errorf("repeated --step flags are ambiguous"))
+				}
+				stepID = value
+				stepSet = true
+				continue
+			}
+			if value, ok := strings.CutPrefix(arg, "--reason="); ok {
+				if reasonSet {
+					return runSkipStepFlagError(stderr, fmt.Errorf("repeated --reason flags are ambiguous"))
+				}
+				reason = value
+				reasonSet = true
+				continue
+			}
+			return runSkipStepFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
+		}
+	}
+	if !stepSet || strings.TrimSpace(stepID) == "" {
+		return runSkipStepFlagError(stderr, fmt.Errorf("--step is required"))
+	}
+	reason = strings.TrimSpace(reason)
+	if !reasonSet || reason == "" {
+		return runSkipStepFlagError(stderr, fmt.Errorf("--reason is required and must be non-empty after trimming"))
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	result, err := runskip.Skip(context.Background(), runskip.Options{
+		Root:   root,
+		RunID:  runID,
+		StepID: stepID,
+		Reason: reason,
+		Source: "cli",
+	})
+	if err != nil {
+		if _, writeErr := fmt.Fprintf(stderr, "%s run skip-step: %v\n", appName, err); writeErr != nil {
+			return writeErr
+		}
+		return err
+	}
+	return printRunSkipStepResult(stdout, result, reason)
 }
 
 func executeRunAdvance(args []string, stdout, stderr io.Writer) error {
@@ -872,6 +957,16 @@ func runContinueFlagError(stderr io.Writer, err error) error {
 	return err
 }
 
+func runSkipStepFlagError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s run skip-step: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	if helpErr := printRunSkipStepHelp(stderr); helpErr != nil {
+		return helpErr
+	}
+	return err
+}
+
 func runRecordSummaryFlagError(stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s run record-summary: %v\n\n", appName, err); writeErr != nil {
 		return writeErr
@@ -928,6 +1023,22 @@ func printAdvanceResult(w io.Writer, result launcher.AdvanceResult) error {
 		return err
 	}
 	return nil
+}
+
+func printRunSkipStepResult(w io.Writer, result runskip.Result, reason string) error {
+	if _, err := fmt.Fprintf(w, "skipped step %s for run %s\n", result.StepID, result.RunID); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "reason: %s\n", reason); err != nil {
+		return err
+	}
+	if result.Status.State == "running" && len(result.Status.WorkflowLoop.Entries) > 0 {
+		entry := result.Status.WorkflowLoop.Entries[len(result.Status.WorkflowLoop.Entries)-1]
+		_, err := fmt.Fprintf(w, "next selected step: %s\n", entry.State)
+		return err
+	}
+	_, err := fmt.Fprintf(w, "run status: %s\n", result.Status.State)
+	return err
 }
 
 func printHelp(w io.Writer) error {
@@ -1046,12 +1157,32 @@ Available Commands:
   next             Inspect the next workflow action without launching it
   record-summary   Record a final ready-for-review summary
   show             Show persisted run state
+  skip-step        Skip the currently selected skippable workflow step
   start            Start a run from explicit task context
   status           Show persisted run state
   summary-context  Render persisted review context
 
 Flags:
   -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printRunSkipStepHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run skip-step records an explicit human decision to bypass the currently selected skippable workflow step.
+
+Usage:
+  %s run skip-step <run-id> --step <step-id> --reason <text>
+
+Flags:
+      --step <step-id>  Required workflow step id; must match the current select_step decision
+      --reason <text>   Required human reason; whitespace-only reasons are rejected
+  -h, --help            Show command help
+
+The command only skips the current runnable select_step decision. It rejects active worker attempts, retry, wait, terminal decisions, terminal runs, non-skippable steps, and step ids other than the selected step.
+The persisted outcome is the system-owned done/skipped transition declared by workflow config. Workers cannot report done/skipped, and this command does not imply review approval unless the workflow's done/skipped route says so.
+JSON output and additional confirmation flags are not supported in v1.
 `, appName, appName)
 
 	return err

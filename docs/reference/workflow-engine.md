@@ -82,6 +82,17 @@ reasons. The service persists the accepted transition as an already-applied
 run-store mutation; future workflow evaluation does not consume the skip as a
 pending worker outcome.
 
+The operator-facing entry point for that service is:
+
+```bash
+orc run skip-step <run-id> --step <step-id> --reason <text>
+```
+
+The CLI requires an explicit `--step` matching the current `select_step`
+decision and a non-empty trimmed `--reason`. It does not support `--json` or an
+extra confirmation flag in v1. Successful skips are audited as `done/skipped`
+and follow only the workflow's configured `on.done/skipped` transition.
+
 The default repo-local and scaffolded workflows use skip routing only for
 explicit human-judgment bypasses: skipped reviews advance to the next configured
 review or human handoff, and skipped remediation after reviewer changes advances
