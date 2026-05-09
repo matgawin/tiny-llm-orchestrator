@@ -42,10 +42,11 @@ It reads:
 
 Agents are prompt/persona descriptors. Runtimes are executable descriptors.
 `internal/config` validates both inventories, keeps them separate, and validates
-workflow agent-step runtime, model, and runtime directory selection against the
-loaded runtime descriptors. See [configuration-runtimes.md](configuration-runtimes.md)
-for the runtime contract and [configuration-workflows.md](configuration-workflows.md)
-for workflow precedence rules.
+workflow agent-step runtime, model, reasoning, and runtime directory selection
+against the loaded runtime descriptors. See
+[configuration-runtimes.md](configuration-runtimes.md) for the runtime contract
+and [configuration-workflows.md](configuration-workflows.md) for workflow
+precedence rules.
 
 The canonical scaffold source for the current v1 shape is
 `internal/initconfig/scaffold/.orc`.

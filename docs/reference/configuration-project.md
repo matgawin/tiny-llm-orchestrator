@@ -73,6 +73,12 @@ model:
   required: false
   allowed: []
   args: [--model, "{model}"]
+reasoning:
+  supported: true
+  required: false
+  default: medium
+  allowed: [low, medium, high, xhigh]
+  args: [--config, 'model_reasoning_effort="{reasoning}"']
 directories:
   supported: true
   args: [--add-dir, "{dir}"]
@@ -103,16 +109,20 @@ sandbox:
 
 Runtime descriptor validation rejects empty command executables, empty argv
 entries, unsupported prompt delivery values, unsupported or misplaced
-placeholders, inconsistent model or directory capability declarations, and
-static sandbox requirement conflicts. The only runtime argv placeholders are
-`{model}`, `{prompt_file}`, `{agent_id}`, `{step_id}`, `{attempt_id}`,
-`{run_id}`, and the directory-only `{dir}` placeholder.
+placeholders, inconsistent model, reasoning, or directory capability
+declarations, and static sandbox requirement conflicts. The only runtime argv
+placeholders are
+`{model}`, `{reasoning}`, `{prompt_file}`, `{agent_id}`, `{step_id}`,
+`{attempt_id}`, `{run_id}`, and the directory-only `{dir}` placeholder.
 `{prompt_file}` is valid only with `prompt.delivery: file`; `stdin` delivery
 writes the rendered worker prompt to process stdin. Missing or empty
 `model.allowed` means model values are passed through; a non-empty list is an
-allowlist for runtime defaults and workflow-selected models. Directory args are
-emitted by repeating `directories.args` once per effective `runtime_dirs`
-entry; paths are explicit argv values and are not shell-expanded.
+allowlist for runtime defaults and workflow-selected models. `{reasoning}` is
+valid only in `reasoning.args`. Missing or empty `reasoning.allowed` means
+reasoning values are passed through; a non-empty list is an allowlist for
+runtime defaults and workflow-selected reasoning values. Directory args are
+emitted by repeating `directories.args` once per effective `runtime_dirs` entry;
+paths are explicit argv values and are not shell-expanded.
 
 Project config also supports workflow loop cap defaults:
 

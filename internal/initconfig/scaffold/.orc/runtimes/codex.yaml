@@ -11,6 +11,12 @@ model:
   required: false
   allowed: []
   args: [--model, "{model}"]
+reasoning:
+  supported: true
+  required: false
+  default: medium
+  allowed: [low, medium, high, xhigh]
+  args: [--config, 'model_reasoning_effort="{reasoning}"']
 directories:
   supported: true
   args: [--add-dir, "{dir}"]

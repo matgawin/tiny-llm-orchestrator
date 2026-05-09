@@ -196,27 +196,32 @@ launcher builds argv from the selected descriptor:
    `command.sandbox_args` inside one
 3. `command.args`
 4. `model.args`, only when an effective model resolves
-5. `directories.args`, repeated once per effective `runtime_dirs` entry
+5. `reasoning.args`, only when an effective reasoning value resolves
+6. `directories.args`, repeated once per effective `runtime_dirs` entry
 
-Only descriptor placeholders are substituted: `{model}`, `{prompt_file}`,
-`{agent_id}`, `{step_id}`, `{attempt_id}`, `{run_id}`, and directory-only
-`{dir}`. Prompt delivery follows the runtime descriptor. `prompt.delivery:
-stdin` writes the rendered prompt to process stdin; `prompt.delivery: file`
-passes the persisted prompt artifact path through `{prompt_file}`.
+Only descriptor placeholders are substituted: `{model}`, `{reasoning}`,
+`{prompt_file}`, `{agent_id}`, `{step_id}`, `{attempt_id}`, `{run_id}`, and
+directory-only `{dir}`. `{reasoning}` is valid only in `reasoning.args`, which
+keeps reasoning separate from command, model, directory, and sandbox behavior.
+Prompt delivery follows the runtime descriptor. `prompt.delivery: stdin` writes
+the rendered prompt to process stdin; `prompt.delivery: file` passes the
+persisted prompt artifact path through `{prompt_file}`.
 
-The scaffolded Codex runtime descriptor preserves the previous normal argv:
+The scaffolded Codex runtime descriptor declares `reasoning.default: medium`,
+so its normal argv includes an explicit reasoning effort unless a workflow
+default or step override selects another value:
 
 ```bash
-codex --ask-for-approval never exec --skip-git-repo-check -
+codex --ask-for-approval never exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
 ```
 
 When the repository has sandbox config and the launcher verifies
 `ORC_SANDBOX=1` plus a canonical `ORC_SANDBOX_ROOT` matching the current
 repository root, the same descriptor selects `command.sandbox_args`, preserving
-the previous sandbox argv:
+the sandbox-mode argv shape with the same reasoning default:
 
 ```bash
-codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
+codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
 ```
 
 This sandbox-mode Codex argv relies on the inherited outer bubblewrap sandbox

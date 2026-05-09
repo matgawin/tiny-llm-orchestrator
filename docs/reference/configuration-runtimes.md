@@ -14,7 +14,8 @@ migration, and end-to-end runtime tests.
 ## Read This When
 
 - You are implementing `.orc/runtimes/*.yaml` loading or validation.
-- You are adding `runtime`, `model`, or `runtime_dirs` workflow fields.
+- You are adding `runtime`, `model`, `reasoning`, or `runtime_dirs`
+  workflow fields.
 - You are maintaining descriptor-built worker argv.
 - You are updating sandbox requirements or runtime-related docs and tests.
 
@@ -68,6 +69,7 @@ Workflow defaults and agent steps add these fields:
 defaults:
   runtime: codex
   model: gpt-5.3-codex
+  reasoning: medium
   runtime_dirs:
     - shared-worktree
 
@@ -76,6 +78,7 @@ steps:
     agent: coder
     runtime: codex
     model: gpt-5.3-codex
+    reasoning: high
     runtime_dirs:
       - /home/matt/Documents/other-repo
 ```
@@ -84,13 +87,15 @@ The public YAML fields are exactly:
 
 - `defaults.runtime`
 - `defaults.model`
+- `defaults.reasoning`
 - `defaults.runtime_dirs`
 - `steps.<id>.runtime`
 - `steps.<id>.model`
+- `steps.<id>.reasoning`
 - `steps.<id>.runtime_dirs`
 
 These fields are agent-step only. Command and script steps must reject
-`runtime`, `model`, and `runtime_dirs`.
+`runtime`, `model`, `reasoning`, and `runtime_dirs`.
 
 ## Runtime Descriptor Shape
 
@@ -110,6 +115,12 @@ model:
   required: false
   allowed: []
   args: [--model, "{model}"]
+reasoning:
+  supported: true
+  required: false
+  default: medium
+  allowed: [low, medium, high, xhigh]
+  args: [--config, 'model_reasoning_effort="{reasoning}"']
 directories:
   supported: true
   args: [--add-dir, "{dir}"]
@@ -133,6 +144,12 @@ descriptor so that Codex keeps its current no-model argv by default. Runtimes
 that need a default model may declare one under `model.default`; it participates
 in the model resolution order below.
 
+`reasoning.default` is optional, but the scaffolded Codex descriptor declares
+`default: medium` so Codex workers receive an explicit reasoning effort unless a
+workflow default or step override selects another value. Reasoning is a
+runtime-owned capability parallel to model selection; it is not part of sandbox
+configuration.
+
 The deterministic argv order is:
 
 1. `command.executable`
@@ -140,7 +157,8 @@ The deterministic argv order is:
    worker mode
 3. `command.args`
 4. `model.args`, appended only when an effective model resolves
-5. `directories.args`, repeated once per effective runtime directory
+5. `reasoning.args`, appended only when an effective reasoning value resolves
+6. `directories.args`, repeated once per effective runtime directory
 
 This order is intentionally different from shell-style command assembly. Each
 YAML list item is one argv entry.
@@ -156,6 +174,7 @@ later design explicitly changes this contract.
 Runtime descriptors may use only these placeholders in argv fragments:
 
 - `{model}`
+- `{reasoning}`
 - `{prompt_file}`
 - `{agent_id}`
 - `{step_id}`
@@ -163,10 +182,11 @@ Runtime descriptors may use only these placeholders in argv fragments:
 - `{run_id}`
 - `{dir}`
 
-`{dir}` is valid only in `directories.args`. The public command/model
-placeholder list is exactly `{model}`, `{prompt_file}`, `{agent_id}`,
-`{step_id}`, `{attempt_id}`, and `{run_id}`; `{dir}` is reserved for the
-directory capability fragment because it is repeated per directory.
+`{dir}` is valid only in `directories.args`. `{reasoning}` is valid only in
+`reasoning.args`. The command/model placeholder list is exactly
+`{model}`, `{prompt_file}`, `{agent_id}`, `{step_id}`, `{attempt_id}`, and
+`{run_id}`; `{dir}` is reserved for the directory capability fragment because
+it is repeated per directory.
 
 Unknown placeholders are configuration errors. Orc does not perform shell
 expansion, environment expansion, tilde expansion, command substitution, or
@@ -176,6 +196,7 @@ violate field validation.
 
 `{prompt_file}` is valid only when `prompt.delivery: file`. `{model}` is valid
 only in `model.args` or command argv for runtimes with `model.supported: true`.
+`{reasoning}` is never valid in command, model, or directory argv fragments.
 `directories.args` must include `{dir}` when `directories.supported: true`.
 
 ## Resolution Rules
@@ -202,6 +223,21 @@ is missing or empty, model values are pass-through. When it is non-empty,
 workflow defaults, step overrides, and runtime defaults must all be members of
 the allowlist.
 
+Reasoning resolution for an agent step is:
+
+1. `steps.<id>.reasoning`
+2. `defaults.reasoning`
+3. `runtime.reasoning.default`
+
+If `runtime.reasoning.required: true` and no effective reasoning value
+resolves, validation fails. If any workflow reasoning value resolves or is
+declared while `runtime.reasoning.supported: false`, validation fails. When
+`runtime.reasoning.allowed` is missing or empty, reasoning values are
+pass-through. When it is non-empty, workflow defaults, step overrides, and
+runtime defaults must all be members of the allowlist. Reasoning values are
+non-empty strings and are passed as explicit argv values only; Orc performs no
+shell, environment, tilde, command, or provider-specific expansion.
+
 Runtime directory resolution is:
 
 1. all `defaults.runtime_dirs` entries in declared order
@@ -225,6 +261,13 @@ Runtime capabilities are explicit descriptor metadata.
 `model.supported: false` means the runtime cannot receive model selection from
 workflow config. It rejects `model.required`, `model.default`, `model.allowed`,
 `model.args`, and any effective workflow model.
+
+`reasoning.supported: false` means the runtime cannot receive reasoning
+selection from workflow config. It rejects `reasoning.required`,
+`reasoning.default`, `reasoning.allowed`, `reasoning.args`, and any effective
+workflow reasoning. Reasoning support is independent from sandbox support; a
+runtime can support or require sandboxing without supporting reasoning, and can
+support reasoning without requiring sandboxing.
 
 `directories.supported: false` means the runtime cannot receive
 `runtime_dirs`. It rejects `directories.args` and any effective
@@ -417,8 +460,8 @@ existing validation and argv behavior and do not gain existence checks.
 
 Explicit launcher command overrides bypass runtime resolution entirely and keep
 their current behavior. They do not merge with runtime descriptor argv,
-workflow model selection, prompt delivery settings, directory args, or sandbox
-mode args.
+workflow model selection, workflow reasoning selection, prompt delivery
+settings, directory args, or sandbox mode args.
 
 If a launcher override is present, the override command receives the rendered
 prompt on stdin under the existing override contract. Runtime validation still
@@ -445,7 +488,8 @@ defaults:
     failed/missing_report: 1
 ```
 
-The Codex runtime descriptor must preserve current argv behavior:
+The Codex runtime descriptor intentionally declares model, reasoning,
+directory, prompt, and sandbox behavior as data:
 
 ```yaml
 id: codex
@@ -461,6 +505,12 @@ model:
   required: false
   allowed: []
   args: [--model, "{model}"]
+reasoning:
+  supported: true
+  required: false
+  default: medium
+  allowed: [low, medium, high, xhigh]
+  args: [--config, 'model_reasoning_effort="{reasoning}"']
 directories:
   supported: true
   args: [--add-dir, "{dir}"]
@@ -489,23 +539,27 @@ sandbox:
         mode: rw
 ```
 
-With no effective model, Codex argv remains:
+With no effective workflow model and no workflow reasoning override, the
+scaffolded Codex descriptor still omits model args but emits its default
+reasoning effort:
 
 ```bash
-codex --ask-for-approval never exec --skip-git-repo-check -
+codex --ask-for-approval never exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
 ```
 
 Inside a verified Orc sandbox, Codex argv remains:
 
 ```bash
-codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
+codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
 ```
 
-Codex model values are pass-through because `allowed` is empty. Codex config
-home behavior is descriptor data: the `config_home` mount reads an absolute
-host `CODEX_HOME` when present, otherwise falls back to host HOME plus
-`.codex`, creates the source directory when missing, mounts it read-write, and
-sets sandbox `CODEX_HOME` from the resolved target path.
+Codex model values are pass-through because `model.allowed` is empty. Codex
+reasoning values are restricted to `low`, `medium`, `high`, and `xhigh`, with
+`medium` as the runtime default. Codex config home behavior is descriptor data:
+the `config_home` mount reads an absolute host `CODEX_HOME` when present,
+otherwise falls back to host HOME plus `.codex`, creates the source directory
+when missing, mounts it read-write, and sets sandbox `CODEX_HOME` from the
+resolved target path.
 
 ## Validation Timing
 
@@ -516,7 +570,7 @@ Project config load validates:
 - required descriptor fields and supported enum values
 - argv fragments, empty entries, and unknown placeholders
 - prompt delivery mode and `{prompt_file}` legality
-- model and directory capability self-consistency
+- model, reasoning, and directory capability self-consistency
 - static sandbox requirement conflicts
 
 Project config load also validates extended runtime sandbox requirement shape:
@@ -531,9 +585,12 @@ Workflow validation validates:
 - agent steps have an effective declared runtime
 - model precedence and model allowlist membership
 - required model presence
-- unsupported workflow `model` and `runtime_dirs` requests
+- reasoning precedence and reasoning allowlist membership
+- required reasoning presence
+- unsupported workflow `model`, `reasoning`, and `runtime_dirs` requests
 - `runtime_dirs` path shape
-- command/script rejection of `runtime`, `model`, and `runtime_dirs`
+- command/script rejection of `runtime`, `model`, `reasoning`, and
+  `runtime_dirs`
 
 Sandbox launch validates host-dependent sandbox requirement behavior before
 starting bubblewrap. That launch-time validation covers env-sourced mount source
@@ -558,6 +615,7 @@ The first implementation does not include:
 - environment, tilde, command, or arbitrary placeholder expansion
 - user-defined placeholder names
 - runtime fields on command or script steps
+- project-level reasoning defaults outside workflow defaults
 - automatic migration of user-owned existing projects outside scaffold output
 - dynamic mounting of runtime directories during worker launch
 - runtime-specific prompt rendering templates
@@ -566,6 +624,7 @@ The first implementation does not include:
 - runtime discovery from `PATH`, package managers, editor settings, or Codex
   custom agent directories
 - model allowlist fetching from external providers
+- reasoning allowlist fetching from external providers
 
 ## Downstream Implementation Checklist
 
@@ -577,12 +636,15 @@ Implementation tasks must update or add tests for:
   unknown placeholders
 - prompt delivery validation, including `{prompt_file}` only with file delivery
 - model pass-through and allowlist rejection
-- unsupported model and directory capability failures
-- explicit step runtime/model override and workflow default fallback
-- missing effective runtime and missing required model failures
+- reasoning default, pass-through, allowlist rejection, and placeholder
+  validation
+- unsupported model, reasoning, and directory capability failures
+- explicit step runtime/model/reasoning override and workflow default fallback
+- missing effective runtime and missing required model/reasoning failures
 - `runtime_dirs` validation, preserved ordering, duplicate retention, and
   repeated directory argv emission
-- command/script rejection of `runtime`, `model`, and `runtime_dirs`
+- command/script rejection of `runtime`, `model`, `reasoning`, and
+  `runtime_dirs`
 - descriptor-built Codex normal and sandbox argv compatibility
 - launcher override bypass behavior
 - runtime sandbox requirements, simple mount compatibility, extended
@@ -596,8 +658,8 @@ Related docs that must stay consistent with this contract:
 - [configuration-project.md](configuration-project.md) for `runtimes` and
   descriptor validation
 - [configuration-workflows.md](configuration-workflows.md) for
-  `defaults.runtime`, `defaults.model`, `defaults.runtime_dirs`, and step
-  overrides
+  `defaults.runtime`, `defaults.model`, `defaults.reasoning`,
+  `defaults.runtime_dirs`, and step overrides
 - [configuration-init.md](configuration-init.md) for scaffolded
   `.orc/runtimes/codex.yaml`
 - [../features/worker-launching.md](../features/worker-launching.md) for

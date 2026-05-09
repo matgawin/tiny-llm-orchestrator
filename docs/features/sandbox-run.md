@@ -57,10 +57,11 @@ environment and see the marker variables above.
 Agent worker commands are built from the selected runtime descriptor. Outside
 a verified Orc sandbox, the launcher uses the runtime's `command.normal_args`;
 inside a verified Orc sandbox, it uses `command.sandbox_args`. The scaffolded
-Codex runtime descriptor therefore produces this normal argv:
+Codex runtime descriptor declares `reasoning.default: medium`, so it produces
+this normal argv unless workflow config selects another reasoning value:
 
 ```bash
-codex --ask-for-approval never exec --skip-git-repo-check -
+codex --ask-for-approval never exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
 ```
 
 When the repository has sandbox config and Orc verifies both `ORC_SANDBOX=1`
@@ -68,7 +69,7 @@ and a canonical `ORC_SANDBOX_ROOT` matching the current repository root, the
 same Codex runtime descriptor produces this sandbox argv:
 
 ```bash
-codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check -
+codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
 ```
 
 The outer bubblewrap process is the isolation boundary in this mode. Manually
