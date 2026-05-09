@@ -92,6 +92,7 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 		},
 		Prompt:      config.RuntimePrompt{Delivery: runtimePromptDeliveryFile},
 		Model:       config.RuntimeModel{Supported: true, Args: []string{"--model", "{model}"}},
+		Reasoning:   config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", "{reasoning}"}},
 		Directories: config.RuntimeDirectories{Supported: true, Args: []string{"--add-dir", "{dir}"}},
 		Sandbox:     config.RuntimeSandbox{Supported: true},
 	}
@@ -99,12 +100,14 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 		Defaults: config.Defaults{
 			Runtime:     "fileai",
 			Model:       "workflow-model",
+			Reasoning:   "medium",
 			RuntimeDirs: []string{"shared"},
 		},
 		Steps: map[string]config.Step{
 			"code": {
 				Agent:       "coder",
 				Model:       "step-model",
+				Reasoning:   "high",
 				RuntimeDirs: []string{"/tmp/external"},
 			},
 		},
@@ -122,6 +125,7 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 		"--run-step", "run-1:code",
 		"--agent", "coder",
 		"--model", "step-model",
+		"--reasoning", "high",
 		"--add-dir", filepath.Join(root, "shared"),
 		"--add-dir", "/tmp/external",
 	}
@@ -130,6 +134,102 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 	}
 	if promptMode != runtimePromptDeliveryFile {
 		t.Fatalf("promptMode = %q, want file", promptMode)
+	}
+}
+
+func TestRuntimeCommandAppendsModelReasoningAndDirsInOrder(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ORC_SANDBOX", "0")
+	t.Setenv("ORC_SANDBOX_ROOT", root)
+
+	for _, tt := range []struct {
+		name     string
+		runtime  config.Runtime
+		defaults config.Defaults
+		step     config.Step
+		want     []string
+		notWant  []string
+	}{
+		{
+			name: "model only",
+			runtime: config.Runtime{
+				ID:      "recorder",
+				Command: config.RuntimeCommand{Executable: "recorder"},
+				Prompt:  config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
+				Model:   config.RuntimeModel{Supported: true, Args: []string{"--model", "{model}"}},
+				Sandbox: config.RuntimeSandbox{Supported: true},
+			},
+			defaults: config.Defaults{Runtime: "recorder", Model: "model-a"},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder", "--model", "model-a"},
+			notWant:  []string{"--reasoning", "--dir"},
+		},
+		{
+			name: "reasoning only",
+			runtime: config.Runtime{
+				ID:        "recorder",
+				Command:   config.RuntimeCommand{Executable: "recorder"},
+				Prompt:    config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
+				Reasoning: config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", "{reasoning}"}},
+				Sandbox:   config.RuntimeSandbox{Supported: true},
+			},
+			defaults: config.Defaults{Runtime: "recorder", Reasoning: "medium"},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder", "--reasoning", "medium"},
+			notWant:  []string{"--model", "--dir"},
+		},
+		{
+			name: "model reasoning and dirs",
+			runtime: config.Runtime{
+				ID:          "recorder",
+				Command:     config.RuntimeCommand{Executable: "recorder"},
+				Prompt:      config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
+				Model:       config.RuntimeModel{Supported: true, Args: []string{"--model", "{model}"}},
+				Reasoning:   config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", "{reasoning}"}},
+				Directories: config.RuntimeDirectories{Supported: true, Args: []string{"--dir", "{dir}"}},
+				Sandbox:     config.RuntimeSandbox{Supported: true},
+			},
+			defaults: config.Defaults{Runtime: "recorder", Model: "model-a", Reasoning: "medium", RuntimeDirs: []string{"shared"}},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder", "--model", "model-a", "--reasoning", "medium", "--dir", filepath.Join(root, "shared")},
+		},
+		{
+			name: "neither",
+			runtime: config.Runtime{
+				ID:        "recorder",
+				Command:   config.RuntimeCommand{Executable: "recorder"},
+				Prompt:    config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
+				Model:     config.RuntimeModel{Supported: true, Args: []string{"--model", "{model}"}},
+				Reasoning: config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", "{reasoning}"}},
+				Sandbox:   config.RuntimeSandbox{Supported: true},
+			},
+			defaults: config.Defaults{Runtime: "recorder"},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder"},
+			notWant:  []string{"--model", "--reasoning", "--dir"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			workflow := config.Workflow{
+				Defaults: tt.defaults,
+				Steps: map[string]config.Step{
+					launcherPlanStep: tt.step,
+				},
+			}
+
+			command, _, err := runtimeCommandForTest(root, workflow, tt.runtime)
+			if err != nil {
+				t.Fatalf("runtimeCommand returned error: %v", err)
+			}
+			if !slices.Equal(command, tt.want) {
+				t.Fatalf("command = %#v, want %#v", command, tt.want)
+			}
+			for _, notWant := range tt.notWant {
+				if slices.Contains(command, notWant) {
+					t.Fatalf("command = %#v, did not want %q", command, notWant)
+				}
+			}
+		})
 	}
 }
 

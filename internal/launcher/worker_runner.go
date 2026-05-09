@@ -140,6 +140,7 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 
 	values := runtimePlaceholderValues{
 		model:      r.loaded.Workflow.EffectiveModel(step, runtime),
+		reasoning:  r.loaded.Workflow.EffectiveReasoning(step, runtime),
 		promptFile: r.prompt.Path,
 		agentID:    r.attempt.AgentID,
 		stepID:     r.attempt.StepID,
@@ -151,6 +152,12 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 	}
 	if values.model != "" && !runtime.Model.Supported {
 		return nil, "", fmt.Errorf("runtime %q does not support model arguments", runtimeID)
+	}
+	if runtime.Reasoning.Required && values.reasoning == "" {
+		return nil, "", fmt.Errorf("runtime %q requires reasoning but no effective reasoning resolved", runtimeID)
+	}
+	if values.reasoning != "" && !runtime.Reasoning.Supported {
+		return nil, "", fmt.Errorf("runtime %q does not support reasoning arguments", runtimeID)
 	}
 	runtimeDirs := r.loaded.Workflow.EffectiveRuntimeDirs(step)
 	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
@@ -177,6 +184,9 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 	command = append(command, runtime.Command.Args...)
 	if values.model != "" {
 		command = append(command, runtime.Model.Args...)
+	}
+	if values.reasoning != "" {
+		command = append(command, runtime.Reasoning.Args...)
 	}
 	var err error
 	command, err = substituteRuntimePlaceholders(command, values)
@@ -265,6 +275,7 @@ func runtimeDirSandboxCoverageError(stepID, runtimeID, original, resolved, reaso
 
 type runtimePlaceholderValues struct {
 	model      string
+	reasoning  string
 	promptFile string
 	agentID    string
 	stepID     string
@@ -314,6 +325,8 @@ func runtimePlaceholderValue(placeholder string, values runtimePlaceholderValues
 	switch placeholder {
 	case "{model}":
 		return values.model, true
+	case "{reasoning}":
+		return values.reasoning, true
 	case "{prompt_file}":
 		return values.promptFile, true
 	case "{agent_id}":

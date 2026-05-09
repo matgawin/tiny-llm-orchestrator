@@ -15,6 +15,11 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
+const (
+	defaultCodexNormalArgsWithReasoning  = "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n--config\nmodel_reasoning_effort=\"medium\"\n"
+	defaultCodexSandboxArgsWithReasoning = "--dangerously-bypass-approvals-and-sandbox\nexec\n--skip-git-repo-check\n-\n--config\nmodel_reasoning_effort=\"medium\"\n"
+)
+
 func TestExecuteWorkerHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -210,7 +215,7 @@ func TestExecuteWorkerLaunchNextUsesDefaultCodexCommand(t *testing.T) {
 		t.Fatalf("output missing successful shim missing_report result:\n%s\nlogs:\n%s", output, readCLILaunchLogs(t, root, result.runID))
 	}
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt"})
-	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
+	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 	assertCLIOutputContainsAll(t, string(readCLIFile(t, shim.stdinPath)), []string{
 		"# Tiny Orc Worker Prompt\n",
 		"- run_id: `" + result.runID + "`\n",
@@ -231,7 +236,7 @@ func TestExecuteWorkerLaunchNextUsesNormalDefaultWithSandboxConfigOutsideSandbox
 
 	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
-	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
+	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 }
 
 func TestExecuteWorkerLaunchNextUsesSandboxCodexCommandInsideVerifiedSandbox(t *testing.T) {
@@ -248,7 +253,7 @@ func TestExecuteWorkerLaunchNextUsesSandboxCodexCommandInsideVerifiedSandbox(t *
 
 	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
-	assertCLICodexArgs(t, shim, "--dangerously-bypass-approvals-and-sandbox\nexec\n--skip-git-repo-check\n-\n")
+	assertCLICodexArgs(t, shim, defaultCodexSandboxArgsWithReasoning)
 }
 
 func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxMarkerDisabled(t *testing.T) {
@@ -265,7 +270,7 @@ func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxMarkerDisabled(t *te
 
 	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
-	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
+	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 }
 
 func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxRootInvalid(t *testing.T) {
@@ -282,7 +287,7 @@ func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxRootInvalid(t *testi
 
 	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
-	assertCLICodexArgs(t, shim, "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n")
+	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 }
 
 func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardMissingMarker(t *testing.T) {
@@ -361,7 +366,7 @@ func TestExecuteWorkerLaunchNextAllowsMatchingSandboxGuard(t *testing.T) {
 
 	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
-	assertCLICodexArgs(t, shim, "--dangerously-bypass-approvals-and-sandbox\nexec\n--skip-git-repo-check\n-\n")
+	assertCLICodexArgs(t, shim, defaultCodexSandboxArgsWithReasoning)
 }
 
 func TestConcurrentWorkerLaunchNextOnlyStartsOneWorker(t *testing.T) {

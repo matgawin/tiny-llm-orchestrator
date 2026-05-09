@@ -22,6 +22,8 @@ defaults:
 steps:
   plan:
     agent: planner
+    model: gpt-5.5
+    reasoning: xhigh
     allowed_results:
       done: [ready]
       blocked: [blocked]

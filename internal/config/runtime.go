@@ -26,6 +26,7 @@ type runtimeDescriptorYAML struct {
 	Command     RuntimeCommand     `yaml:"command"`
 	Prompt      RuntimePrompt      `yaml:"prompt"`
 	Model       RuntimeModel       `yaml:"model"`
+	Reasoning   RuntimeReasoning   `yaml:"reasoning"`
 	Directories RuntimeDirectories `yaml:"directories"`
 	Sandbox     RuntimeSandbox     `yaml:"sandbox"`
 }
@@ -44,6 +45,7 @@ func loadRuntime(realOrcDir, path string) (Runtime, error) {
 		Command:     raw.Command,
 		Prompt:      raw.Prompt,
 		Model:       raw.Model,
+		Reasoning:   raw.Reasoning,
 		Directories: raw.Directories,
 		Sandbox:     raw.Sandbox,
 		SourcePath:  path,
@@ -81,6 +83,9 @@ func validateRuntime(runtime Runtime) error {
 		return fmt.Errorf("prompt.delivery %q is invalid; allowed: stdin, file", runtime.Prompt.Delivery)
 	}
 	if err := validateRuntimeModel(runtime); err != nil {
+		return err
+	}
+	if err := validateRuntimeReasoning(runtime); err != nil {
 		return err
 	}
 	if err := validateRuntimeDirectories(runtime); err != nil {
@@ -133,6 +138,29 @@ func validateRuntimeModel(runtime Runtime) error {
 		return fmt.Errorf("model.default %q is not allowed by model.allowed", runtime.Model.Default)
 	}
 	return validateRuntimeArgv("model.args", runtime.Model.Args, runtime, placeholderContextModel)
+}
+
+func validateRuntimeReasoning(runtime Runtime) error {
+	if !runtime.Reasoning.Supported {
+		switch {
+		case runtime.Reasoning.Required:
+			return errors.New("reasoning.required requires reasoning.supported=true")
+		case runtime.Reasoning.Default != "":
+			return errors.New("reasoning.default requires reasoning.supported=true")
+		case len(runtime.Reasoning.Allowed) > 0:
+			return errors.New("reasoning.allowed requires reasoning.supported=true")
+		case len(runtime.Reasoning.Args) > 0:
+			return errors.New("reasoning.args requires reasoning.supported=true")
+		}
+		return nil
+	}
+	if err := validateStringListNoEmpty("reasoning.allowed", runtime.Reasoning.Allowed); err != nil {
+		return err
+	}
+	if len(runtime.Reasoning.Allowed) > 0 && runtime.Reasoning.Default != "" && !slices.Contains(runtime.Reasoning.Allowed, runtime.Reasoning.Default) {
+		return fmt.Errorf("reasoning.default %q is not allowed by reasoning.allowed", runtime.Reasoning.Default)
+	}
+	return validateRuntimeArgv("reasoning.args", runtime.Reasoning.Args, runtime, placeholderContextReasoning)
 }
 
 func validateRuntimeDirectories(runtime Runtime) error {
@@ -437,6 +465,7 @@ type placeholderContext int
 const (
 	placeholderContextCommand placeholderContext = iota
 	placeholderContextModel
+	placeholderContextReasoning
 	placeholderContextDirectories
 )
 
@@ -464,8 +493,15 @@ func validateRuntimePlaceholders(name string, index int, arg string, runtime Run
 			if !runtime.Model.Supported {
 				return fmt.Errorf("%s[%d] placeholder %s requires model.supported=true", name, index, placeholder)
 			}
-			if ctx == placeholderContextDirectories {
-				return fmt.Errorf("%s[%d] placeholder %s is not valid in directories.args", name, index, placeholder)
+			if ctx == placeholderContextDirectories || ctx == placeholderContextReasoning {
+				return fmt.Errorf("%s[%d] placeholder %s is not valid in %s", name, index, placeholder, placeholderContextName(ctx))
+			}
+		case "{reasoning}":
+			if !runtime.Reasoning.Supported {
+				return fmt.Errorf("%s[%d] placeholder %s requires reasoning.supported=true", name, index, placeholder)
+			}
+			if ctx != placeholderContextReasoning {
+				return fmt.Errorf("%s[%d] placeholder %s is valid only in reasoning.args", name, index, placeholder)
 			}
 		case "{dir}":
 			if ctx != placeholderContextDirectories {
@@ -480,6 +516,17 @@ func validateRuntimePlaceholders(name string, index int, arg string, runtime Run
 		return fmt.Errorf("%s[%d] contains malformed placeholder syntax", name, index)
 	}
 	return nil
+}
+
+func placeholderContextName(ctx placeholderContext) string {
+	switch ctx {
+	case placeholderContextReasoning:
+		return "reasoning.args"
+	case placeholderContextDirectories:
+		return "directories.args"
+	default:
+		return "command or model args"
+	}
 }
 
 func validateStringListNoEmpty(name string, values []string) error {

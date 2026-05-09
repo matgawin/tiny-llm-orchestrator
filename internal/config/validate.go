@@ -546,6 +546,28 @@ func validateAgentStepRuntime(stepName string, step Step, workflow Workflow, run
 	if model == "" && runtime.Model.Required {
 		return fmt.Errorf("step %q runtime %q requires a model", stepName, runtimeID)
 	}
+	if step.Reasoning != "" && !runtime.Reasoning.Supported {
+		return fmt.Errorf("step %q reasoning requires runtime %q reasoning.supported=true", stepName, runtimeID)
+	}
+	if workflow.Defaults.Reasoning != "" && !runtime.Reasoning.Supported {
+		return fmt.Errorf("step %q defaults.reasoning requires runtime %q reasoning.supported=true", stepName, runtimeID)
+	}
+	if step.Reasoning != "" && !runtimeReasoningAllows(runtime, step.Reasoning) {
+		return fmt.Errorf("step %q reasoning %q is not allowed by runtime %q reasoning.allowed", stepName, step.Reasoning, runtimeID)
+	}
+	if workflow.Defaults.Reasoning != "" && !runtimeReasoningAllows(runtime, workflow.Defaults.Reasoning) {
+		return fmt.Errorf("step %q defaults.reasoning %q is not allowed by runtime %q reasoning.allowed", stepName, workflow.Defaults.Reasoning, runtimeID)
+	}
+	reasoning := workflow.EffectiveReasoning(step, runtime)
+	if reasoning != "" && !runtime.Reasoning.Supported {
+		return fmt.Errorf("step %q resolved reasoning requires runtime %q reasoning.supported=true", stepName, runtimeID)
+	}
+	if reasoning != "" && !runtimeReasoningAllows(runtime, reasoning) {
+		return fmt.Errorf("step %q resolved reasoning %q is not allowed by runtime %q reasoning.allowed", stepName, reasoning, runtimeID)
+	}
+	if reasoning == "" && runtime.Reasoning.Required {
+		return fmt.Errorf("step %q runtime %q requires reasoning", stepName, runtimeID)
+	}
 	runtimeDirs := workflow.EffectiveRuntimeDirs(step)
 	for i, dir := range step.RuntimeDirs {
 		if err := validateRuntimeDirPath(fmt.Sprintf("step %q runtime_dirs[%d]", stepName, i), dir); err != nil {
@@ -562,12 +584,18 @@ func runtimeModelAllows(runtime Runtime, model string) bool {
 	return len(runtime.Model.Allowed) == 0 || slices.Contains(runtime.Model.Allowed, model)
 }
 
+func runtimeReasoningAllows(runtime Runtime, reasoning string) bool {
+	return len(runtime.Reasoning.Allowed) == 0 || slices.Contains(runtime.Reasoning.Allowed, reasoning)
+}
+
 func validateDeterministicStepRuntimeFields(stepName string, step Step, kind string) error {
 	switch {
 	case step.Runtime != "":
 		return fmt.Errorf("step %q kind %s must not set runtime", stepName, kind)
 	case step.Model != "":
 		return fmt.Errorf("step %q kind %s must not set model", stepName, kind)
+	case step.Reasoning != "":
+		return fmt.Errorf("step %q kind %s must not set reasoning", stepName, kind)
 	case len(step.RuntimeDirs) > 0:
 		return fmt.Errorf("step %q kind %s must not set runtime_dirs", stepName, kind)
 	default:

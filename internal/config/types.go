@@ -196,6 +196,7 @@ type Runtime struct {
 	Command     RuntimeCommand
 	Prompt      RuntimePrompt
 	Model       RuntimeModel
+	Reasoning   RuntimeReasoning
 	Directories RuntimeDirectories
 	Sandbox     RuntimeSandbox
 	SourcePath  string
@@ -216,6 +217,15 @@ type RuntimePrompt struct {
 
 // RuntimeModel declares model-selection capability and argv behavior.
 type RuntimeModel struct {
+	Supported bool     `yaml:"supported"`
+	Required  bool     `yaml:"required"`
+	Default   string   `yaml:"default"`
+	Allowed   []string `yaml:"allowed"`
+	Args      []string `yaml:"args"`
+}
+
+// RuntimeReasoning declares reasoning-selection capability and argv behavior.
+type RuntimeReasoning struct {
 	Supported bool     `yaml:"supported"`
 	Required  bool     `yaml:"required"`
 	Default   string   `yaml:"default"`
@@ -372,6 +382,7 @@ type Defaults struct {
 	Retries         map[string]int `yaml:"retries"`
 	Runtime         string         `yaml:"runtime"`
 	Model           string         `yaml:"model"`
+	Reasoning       string         `yaml:"reasoning"`
 	RuntimeDirs     []string       `yaml:"runtime_dirs"`
 }
 
@@ -392,6 +403,17 @@ func (w Workflow) EffectiveModel(step Step, runtime Runtime) string {
 		return w.Defaults.Model
 	}
 	return runtime.Model.Default
+}
+
+// EffectiveReasoning returns the reasoning value selected for an agent step and runtime.
+func (w Workflow) EffectiveReasoning(step Step, runtime Runtime) string {
+	if step.Reasoning != "" {
+		return step.Reasoning
+	}
+	if w.Defaults.Reasoning != "" {
+		return w.Defaults.Reasoning
+	}
+	return runtime.Reasoning.Default
 }
 
 // EffectiveRuntimeDirs returns workflow default runtime directories followed
@@ -485,6 +507,7 @@ type Step struct {
 	Agent          string              `yaml:"agent"`
 	Runtime        string              `yaml:"runtime"`
 	Model          string              `yaml:"model"`
+	Reasoning      string              `yaml:"reasoning"`
 	RuntimeDirs    []string            `yaml:"runtime_dirs"`
 	Command        CommandStep         `yaml:"command"`
 	Script         ScriptStep          `yaml:"script"`

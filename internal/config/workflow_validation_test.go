@@ -10,6 +10,8 @@ const (
 	testRuntimeCodex  = "codex"
 	testRuntimeFileAI = "fileai"
 	testModelGPT5     = "gpt-5"
+	testReasoningHigh = "high"
+	testReasoningMed  = "medium"
 )
 
 func TestLoadAcceptsCommandAndScriptSteps(t *testing.T) {
@@ -74,10 +76,12 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 			},
 			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
 				workflow.Defaults.Runtime = testRuntimeCodex
+				workflow.Defaults.Reasoning = testReasoningMed
 				workflow.Defaults.RuntimeDirs = []string{"shared"}
 				step := workflow.Steps["plan"]
 				step.Runtime = testRuntimeFileAI
 				step.Model = "model-b"
+				step.Reasoning = testReasoningHigh
 				step.RuntimeDirs = []string{"/tmp/external-worktree"}
 				workflow.Steps["plan"] = step
 				return workflow
@@ -96,6 +100,9 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeFileAI]); got != "model-b" {
 			t.Fatalf("effective model = %q, want model-b", got)
 		}
+		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeFileAI]); got != testReasoningHigh {
+			t.Fatalf("effective reasoning = %q, want high", got)
+		}
 		if got, want := workflow.EffectiveRuntimeDirs(step), []string{"shared", "/tmp/external-worktree"}; !slices.Equal(got, want) {
 			t.Fatalf("effective runtime dirs = %v, want %v", got, want)
 		}
@@ -109,6 +116,7 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
 				workflow.Defaults.Runtime = testRuntimeCodex
 				workflow.Defaults.Model = testModelGPT5
+				workflow.Defaults.Reasoning = testReasoningHigh
 				workflow.Defaults.RuntimeDirs = []string{"src"}
 				return workflow
 			}),
@@ -125,6 +133,28 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 		}
 		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeCodex]); got != testModelGPT5 {
 			t.Fatalf("effective model = %q, want gpt-5", got)
+		}
+		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeCodex]); got != testReasoningHigh {
+			t.Fatalf("effective reasoning = %q, want high", got)
+		}
+	})
+
+	t.Run("runtime default supplies reasoning when workflow omits it", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{
+			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+				workflow.Defaults.Runtime = testRuntimeCodex
+				return workflow
+			}),
+		})
+
+		project, err := Load(root)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+		workflow := project.Workflows["implementation"]
+		step := workflow.Steps["plan"]
+		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeCodex]); got != testReasoningMed {
+			t.Fatalf("effective reasoning = %q, want medium", got)
 		}
 	})
 }
@@ -213,6 +243,34 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			workflow.Steps["plan"] = step
 			return workflow
 		}, `step "plan" runtime_dirs require runtime "nodirs" directories.supported=true`),
+		generatedWorkflowCase(t, "missing required reasoning", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "requiredreasoning"
+			return workflow
+		}, `step "plan" runtime "requiredreasoning" requires reasoning`),
+		generatedWorkflowCase(t, "step reasoning unsupported", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "noreasoning"
+			step := workflow.Steps["plan"]
+			step.Reasoning = testReasoningMed
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" reasoning requires runtime "noreasoning" reasoning.supported=true`),
+		generatedWorkflowCase(t, "default reasoning unsupported", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = "noreasoning"
+			workflow.Defaults.Reasoning = testReasoningMed
+			return workflow
+		}, `step "plan" defaults.reasoning requires runtime "noreasoning" reasoning.supported=true`),
+		generatedWorkflowCase(t, "allowlist rejects step reasoning", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = testRuntimeFileAI
+			step := workflow.Steps["plan"]
+			step.Reasoning = "extreme"
+			workflow.Steps["plan"] = step
+			return workflow
+		}, `step "plan" reasoning "extreme" is not allowed by runtime "fileai" reasoning.allowed`),
+		generatedWorkflowCase(t, "allowlist rejects default reasoning", func(workflow Workflow) Workflow {
+			workflow.Defaults.Runtime = testRuntimeFileAI
+			workflow.Defaults.Reasoning = "extreme"
+			return workflow
+		}, `step "plan" defaults.reasoning "extreme" is not allowed by runtime "fileai" reasoning.allowed`),
 		generatedWorkflowCase(t, "empty default runtime dir", func(workflow Workflow) Workflow {
 			workflow.Defaults.RuntimeDirs = []string{""}
 			return workflow
@@ -237,19 +295,23 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeMinimalProject(t, projectFixture{
 				config: configWithRuntimes(map[string]string{
-					testRuntimeCodex:  "runtimes/codex.yaml",
-					testRuntimeFileAI: "runtimes/fileai.yaml",
-					"nomodel":         "runtimes/nomodel.yaml",
-					"nodirs":          "runtimes/nodirs.yaml",
-					"requiredmodel":   "runtimes/requiredmodel.yaml",
+					testRuntimeCodex:    "runtimes/codex.yaml",
+					testRuntimeFileAI:   "runtimes/fileai.yaml",
+					"nomodel":           "runtimes/nomodel.yaml",
+					"noreasoning":       "runtimes/noreasoning.yaml",
+					"nodirs":            "runtimes/nodirs.yaml",
+					"requiredmodel":     "runtimes/requiredmodel.yaml",
+					"requiredreasoning": "runtimes/requiredreasoning.yaml",
 				}),
 				workflow: tt.workflow,
 				runtimes: map[string]string{
-					testRuntimeCodex:  validCodexRuntimeDescriptor(),
-					testRuntimeFileAI: validFilePromptRuntimeDescriptor(),
-					"nomodel":         validNoModelRuntimeDescriptor("nomodel"),
-					"nodirs":          validNoDirsRuntimeDescriptor("nodirs"),
-					"requiredmodel":   validRequiredModelRuntimeDescriptor("requiredmodel"),
+					testRuntimeCodex:    validCodexRuntimeDescriptor(),
+					testRuntimeFileAI:   validFilePromptRuntimeDescriptor(),
+					"nomodel":           validNoModelRuntimeDescriptor("nomodel"),
+					"noreasoning":       validNoReasoningRuntimeDescriptor("noreasoning"),
+					"nodirs":            validNoDirsRuntimeDescriptor("nodirs"),
+					"requiredmodel":     validRequiredModelRuntimeDescriptor("requiredmodel"),
+					"requiredreasoning": validRequiredReasoningRuntimeDescriptor("requiredreasoning"),
 				},
 			})
 			assertLoadErrorContains(t, root, tt.contains...)
@@ -288,6 +350,14 @@ command:
 			contains: []string{`kind command must not set model`},
 		},
 		{
+			name: "command with reasoning",
+			stepYAML: `kind: command
+reasoning: medium
+command:
+  argv: ["task", "check"]`,
+			contains: []string{`kind command must not set reasoning`},
+		},
+		{
 			name: "command with runtime dirs",
 			stepYAML: `kind: command
 runtime_dirs: ["src"]
@@ -323,6 +393,14 @@ model: gpt-5
 script:
   path: scripts/verify.sh`,
 			contains: []string{`kind script must not set model`},
+		},
+		{
+			name: "script with reasoning",
+			stepYAML: `kind: script
+reasoning: medium
+script:
+  path: scripts/verify.sh`,
+			contains: []string{`kind script must not set reasoning`},
 		},
 		{
 			name: "script with runtime dirs",

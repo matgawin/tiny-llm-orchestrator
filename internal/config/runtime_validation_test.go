@@ -38,6 +38,12 @@ func TestLoadValidRuntimeDescriptors(t *testing.T) {
 	if len(codex.Model.Allowed) != 0 {
 		t.Fatalf("codex model.allowed = %v, want empty pass-through list", codex.Model.Allowed)
 	}
+	if !codex.Reasoning.Supported {
+		t.Fatal("codex reasoning.supported = false, want true")
+	}
+	if got, want := codex.Reasoning.Default, "medium"; got != want {
+		t.Fatalf("codex reasoning.default = %q, want %q", got, want)
+	}
 	if got, want := project.Runtimes["fileai"].Prompt.Delivery, "file"; got != want {
 		t.Fatalf("fileai prompt.delivery = %q, want %q", got, want)
 	}
@@ -119,6 +125,111 @@ sandbox:
   supported: true
 `,
 			contains: []string{`model.allowed[0] is empty`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{
+				config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
+				runtimes: map[string]string{"codex": tt.descriptor},
+			})
+			if len(tt.contains) == 0 {
+				if _, err := Load(root); err != nil {
+					t.Fatalf("Load returned error: %v", err)
+				}
+				return
+			}
+			assertLoadErrorContains(t, root, tt.contains...)
+		})
+	}
+}
+
+func TestLoadRuntimeReasoningAllowlistValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		descriptor string
+		contains   []string
+	}{
+		{
+			name: "missing allowed means pass through",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+reasoning:
+  supported: true
+  default: effort-9
+  args: [--reasoning, "{reasoning}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+		},
+		{
+			name: "empty allowed means pass through",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+reasoning:
+  supported: true
+  default: effort-9
+  allowed: []
+  args: [--reasoning, "{reasoning}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+		},
+		{
+			name: "default constrained by allowlist",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+reasoning:
+  supported: true
+  default: effort-9
+  allowed: [medium]
+  args: [--reasoning, "{reasoning}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `reasoning.default "effort-9" is not allowed by reasoning.allowed`},
+		},
+		{
+			name: "empty allowlist entry",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+reasoning:
+  supported: true
+  allowed: [""]
+  args: [--reasoning, "{reasoning}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`reasoning.allowed[0] is empty`},
 		},
 	}
 
@@ -434,6 +545,25 @@ sandbox:
 			contains: []string{`model.args[1] contains unknown placeholder {provider_model}`},
 		},
 		{
+			name: "unknown reasoning arg placeholder",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+reasoning:
+  supported: true
+  args: ["--reasoning", "{provider_reasoning}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`reasoning.args[1] contains unknown placeholder {provider_reasoning}`},
+		},
+		{
 			name: "malformed placeholder",
 			descriptor: `id: codex
 command:
@@ -520,6 +650,44 @@ sandbox:
 			contains: []string{`command.args[1] placeholder {dir} is valid only in directories.args`},
 		},
 		{
+			name: "reasoning placeholder only in reasoning args",
+			descriptor: `id: codex
+command:
+  executable: codex
+  args: ["--reasoning", "{reasoning}"]
+prompt:
+  delivery: stdin
+model:
+  supported: false
+reasoning:
+  supported: true
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`command.args[1] placeholder {reasoning} is valid only in reasoning.args`},
+		},
+		{
+			name: "model placeholder invalid in reasoning args",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: true
+reasoning:
+  supported: true
+  args: ["--reasoning", "{model}"]
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`reasoning.args[1] placeholder {model} is not valid in reasoning.args`},
+		},
+		{
 			name: "unsupported model rejects model fields",
 			descriptor: `id: codex
 command:
@@ -535,6 +703,25 @@ sandbox:
   supported: true
 `,
 			contains: []string{`model.default requires model.supported=true`},
+		},
+		{
+			name: "unsupported reasoning rejects reasoning fields",
+			descriptor: `id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+  supported: false
+reasoning:
+  supported: false
+  default: medium
+directories:
+  supported: false
+sandbox:
+  supported: true
+`,
+			contains: []string{`reasoning.default requires reasoning.supported=true`},
 		},
 		{
 			name: "unsupported directories rejects args",
@@ -746,6 +933,12 @@ model:
   default: model-a
   allowed: [model-a, model-b]
   args: [--model, "{model}"]
+reasoning:
+  supported: true
+  required: false
+  default: medium
+  allowed: [low, medium, high]
+  args: [--reasoning, "{reasoning}"]
 directories:
   supported: true
   args: [--dir, "{dir}"]
@@ -802,6 +995,28 @@ sandbox:
 `
 }
 
+func validNoReasoningRuntimeDescriptor(id string) string {
+	return `id: ` + id + `
+command:
+  executable: ` + id + `
+  args: [run]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  args: [--model, "{model}"]
+reasoning:
+  supported: false
+directories:
+  supported: true
+  args: [--dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+`
+}
+
 func validRequiredModelRuntimeDescriptor(id string) string {
 	return `id: ` + id + `
 command:
@@ -813,6 +1028,30 @@ model:
   supported: true
   required: true
   args: [--model, "{model}"]
+directories:
+  supported: true
+  args: [--dir, "{dir}"]
+sandbox:
+  supported: true
+  required: false
+`
+}
+
+func validRequiredReasoningRuntimeDescriptor(id string) string {
+	return `id: ` + id + `
+command:
+  executable: ` + id + `
+  args: [run]
+prompt:
+  delivery: stdin
+model:
+  supported: true
+  required: false
+  args: [--model, "{model}"]
+reasoning:
+  supported: true
+  required: true
+  args: [--reasoning, "{reasoning}"]
 directories:
   supported: true
   args: [--dir, "{dir}"]
