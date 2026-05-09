@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -120,14 +122,15 @@ type LoopCapsConfig struct {
 // Process execution and bubblewrap argv construction are owned by
 // internal/sandbox.
 type SandboxConfig struct {
-	Command           SandboxCommand    `yaml:"command"`
-	CWD               string            `yaml:"cwd"`
-	RequireForWorkers bool              `yaml:"require_for_workers"`
-	Home              SandboxHomeConfig `yaml:"home"`
-	Path              SandboxPathConfig `yaml:"path"`
-	Bubblewrap        BubblewrapConfig  `yaml:"bubblewrap"`
-	Env               SandboxEnvConfig  `yaml:"env"`
-	Mounts            []SandboxMount    `yaml:"mounts"`
+	Command           SandboxCommand         `yaml:"command"`
+	CWD               string                 `yaml:"cwd"`
+	RequireForWorkers bool                   `yaml:"require_for_workers"`
+	Home              SandboxHomeConfig      `yaml:"home"`
+	Path              SandboxPathConfig      `yaml:"path"`
+	ProtectedPaths    []SandboxProtectedPath `yaml:"protected_paths"`
+	Bubblewrap        BubblewrapConfig       `yaml:"bubblewrap"`
+	Env               SandboxEnvConfig       `yaml:"env"`
+	Mounts            []SandboxMount         `yaml:"mounts"`
 }
 
 // SandboxHomeConfig stores the sandbox HOME path policy.
@@ -138,6 +141,87 @@ type SandboxHomeConfig struct {
 // SandboxPathConfig stores the sandbox PATH mount policy.
 type SandboxPathConfig struct {
 	Mode string `yaml:"mode"`
+}
+
+// SandboxProtectedPath stores one static protected host-path declaration. The
+// host_home and absolute values are syntactic config only; host-dependent
+// resolution belongs to internal/sandbox.
+type SandboxProtectedPath struct {
+	HostHome    string `yaml:"host_home"`
+	Absolute    string `yaml:"absolute"`
+	HostHomeSet bool   `yaml:"-"`
+	AbsoluteSet bool   `yaml:"-"`
+
+	decodeError string
+	unknownKeys []string
+}
+
+// UnmarshalYAML records key presence so validation can reject empty values and
+// entries that set neither or both supported forms.
+func (p *SandboxProtectedPath) UnmarshalYAML(data []byte) error {
+	*p = SandboxProtectedPath{}
+	var scalar string
+	if err := yaml.Unmarshal(data, &scalar); err == nil {
+		p.decodeError = "must be an object with exactly one of host_home or absolute"
+		return nil
+	}
+
+	var raw yaml.MapSlice
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for _, item := range raw {
+		key, ok := item.Key.(string)
+		if !ok {
+			p.decodeError = "must use string keys"
+			continue
+		}
+		switch key {
+		case "host_home":
+			p.HostHomeSet = true
+			value, ok := item.Value.(string)
+			if !ok {
+				p.decodeError = "host_home must be a string"
+				continue
+			}
+			p.HostHome = value
+		case "absolute":
+			p.AbsoluteSet = true
+			value, ok := item.Value.(string)
+			if !ok {
+				p.decodeError = "absolute must be a string"
+				continue
+			}
+			p.Absolute = value
+		default:
+			p.unknownKeys = append(p.unknownKeys, key)
+		}
+	}
+	slices.Sort(p.unknownKeys)
+	return nil
+}
+
+// MarshalYAML emits only the public schema fields.
+func (p SandboxProtectedPath) MarshalYAML() (any, error) {
+	out := map[string]string{}
+	if p.HostHomeSet {
+		out["host_home"] = p.HostHome
+	}
+	if p.AbsoluteSet {
+		out["absolute"] = p.Absolute
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+func (p SandboxProtectedPath) hasUnknownKeys() bool {
+	return len(p.unknownKeys) > 0
+}
+
+func (p SandboxProtectedPath) unknownKeyList() string {
+	return strings.Join(p.unknownKeys, ", ")
 }
 
 // SandboxCommand declares the argv-only command launched by orc sandbox run.

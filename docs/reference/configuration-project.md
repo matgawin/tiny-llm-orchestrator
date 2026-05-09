@@ -170,6 +170,9 @@ sandbox:
     mode: synthetic
   path:
     mode: none
+  protected_paths:
+    - host_home: .ssh
+    - absolute: /var/lib/orc/secrets
   bubblewrap:
     enabled: true
     network: true
@@ -228,6 +231,14 @@ while building the sandbox spec, not during static config load. See
 [../features/sandbox-run.md](../features/sandbox-run.md) for symlink
 resolution, dangerous-entry errors, dedupe, and explicit mount conflict
 behavior.
+
+`sandbox.protected_paths` is an optional list of static protected host-path
+declarations. Each entry must set exactly one of `host_home` or `absolute`.
+`host_home` values are clean relative descendant paths under the host HOME,
+such as `.ssh` or `.config/tool/secrets`; absolute values must be clean
+absolute paths and cannot be `/`. These declarations are parsed and validated
+with project config so later sandbox path handling can rely on explicit,
+non-shell-expanded paths.
 
 `sandbox.bubblewrap.enabled` is reserved for bubblewrap policy selection; v1
 `orc sandbox run` always shells out to `bwrap` and never treats this field as

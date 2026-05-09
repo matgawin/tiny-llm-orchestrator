@@ -44,6 +44,66 @@ sandbox:
 	if got := project.Config.Sandbox.Path.Mode; got != SandboxPathModeNone {
 		t.Fatalf("sandbox path mode = %q, want %q", got, SandboxPathModeNone)
 	}
+	if got := project.Config.Sandbox.ProtectedPaths; len(got) != 0 {
+		t.Fatalf("sandbox protected paths = %v, want empty default", got)
+	}
+}
+
+func TestLoadAcceptsSandboxProtectedPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want []SandboxProtectedPath
+	}{
+		{
+			name: "empty list",
+			yaml: "[]",
+			want: []SandboxProtectedPath{},
+		},
+		{
+			name: "host home and absolute",
+			yaml: `[
+    {host_home: .ssh},
+    {host_home: .config/tool/secrets},
+    {absolute: /var/lib/orc/secrets}
+  ]`,
+			want: []SandboxProtectedPath{
+				{HostHome: ".ssh", HostHomeSet: true},
+				{HostHome: ".config/tool/secrets", HostHomeSet: true},
+				{Absolute: "/var/lib/orc/secrets", AbsoluteSet: true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{config: `version: 1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths: ` + tt.yaml + `
+`})
+
+			project, err := Load(root)
+			if err != nil {
+				t.Fatalf("Load returned error: %v", err)
+			}
+			got := project.Config.Sandbox.ProtectedPaths
+			if len(got) != len(tt.want) {
+				t.Fatalf("protected paths length = %d, want %d: %#v", len(got), len(tt.want), got)
+			}
+			for i := range tt.want {
+				if got[i].HostHome != tt.want[i].HostHome || got[i].HostHomeSet != tt.want[i].HostHomeSet ||
+					got[i].Absolute != tt.want[i].Absolute || got[i].AbsoluteSet != tt.want[i].AbsoluteSet {
+					t.Fatalf("protected paths[%d] = %#v, want %#v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
 }
 
 func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
@@ -138,6 +198,174 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
   path:
     mode: all_host`,
 			contains: []string{`sandbox.path.mode "all_host" is invalid; allowed: none, host_entries`},
+		},
+		{
+			name: "bare string protected path",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - .ssh`,
+			contains: []string{`sandbox.protected_paths[0] must be an object with exactly one of host_home or absolute`},
+		},
+		{
+			name: "protected path with both forms",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: .ssh
+      absolute: /home/user/.ssh`,
+			contains: []string{`sandbox.protected_paths[0] must set exactly one of host_home or absolute`},
+		},
+		{
+			name: "protected path with neither form",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - {}`,
+			contains: []string{`sandbox.protected_paths[0] must set exactly one of host_home or absolute`},
+		},
+		{
+			name: "empty protected host home",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: ""`,
+			contains: []string{`sandbox.protected_paths[0].host_home is empty`},
+		},
+		{
+			name: "dot protected host home",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: .`,
+			contains: []string{`sandbox.protected_paths[0].host_home "." must be a clean relative descendant path`},
+		},
+		{
+			name: "absolute protected host home",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: /home/user/.ssh`,
+			contains: []string{`sandbox.protected_paths[0].host_home "/home/user/.ssh" must be relative`},
+		},
+		{
+			name: "traversing protected host home",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: ../.ssh`,
+			contains: []string{`sandbox.protected_paths[0].host_home "../.ssh" must be a clean relative descendant path`},
+		},
+		{
+			name: "unclean protected host home separator",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: .config//tool`,
+			contains: []string{`sandbox.protected_paths[0].host_home ".config//tool" must be a clean relative descendant path`},
+		},
+		{
+			name: "unclean protected host home traversal",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: .config/../.ssh`,
+			contains: []string{`sandbox.protected_paths[0].host_home ".config/../.ssh" must be a clean relative descendant path`},
+		},
+		{
+			name: "protected host home environment expansion",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: $CUSTOM_HOME/.ssh`,
+			contains: []string{`sandbox.protected_paths[0].host_home "$CUSTOM_HOME/.ssh" must not use shell, environment, or tilde expansion`},
+		},
+		{
+			name: "protected host home tilde expansion",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - host_home: ~/.ssh`,
+			contains: []string{`sandbox.protected_paths[0].host_home "~/.ssh" must not use shell, environment, or tilde expansion`},
+		},
+		{
+			name: "empty protected absolute",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - absolute: ""`,
+			contains: []string{`sandbox.protected_paths[0].absolute is empty`},
+		},
+		{
+			name: "root protected absolute",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - absolute: /`,
+			contains: []string{`sandbox.protected_paths[0].absolute "/" must not be root`},
+		},
+		{
+			name: "relative protected absolute",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - absolute: .ssh`,
+			contains: []string{`sandbox.protected_paths[0].absolute ".ssh" must be absolute`},
+		},
+		{
+			name: "unclean protected absolute",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - absolute: /var//secrets`,
+			contains: []string{`sandbox.protected_paths[0].absolute "/var//secrets" must be clean`},
+		},
+		{
+			name: "protected absolute tilde expansion",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - absolute: ~/.ssh`,
+			contains: []string{`sandbox.protected_paths[0].absolute "~/.ssh" must not use shell, environment, or tilde expansion`},
+		},
+		{
+			name: "protected absolute environment expansion",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - absolute: $CUSTOM_HOME/.ssh`,
+			contains: []string{`sandbox.protected_paths[0].absolute "$CUSTOM_HOME/.ssh" must not use shell, environment, or tilde expansion`},
+		},
+		{
+			name: "protected absolute command substitution",
+			config: `sandbox:
+  command:
+    argv: ["codex"]
+  protected_paths:
+    - absolute: $(pwd)/secrets`,
+			contains: []string{`sandbox.protected_paths[0].absolute "$(pwd)/secrets" must not use shell, environment, or tilde expansion`},
+		},
+		{
+			name:     "protected absolute backtick command substitution",
+			config:   "sandbox:\n  command:\n    argv: [\"codex\"]\n  protected_paths:\n    - absolute: '`pwd`/secrets'",
+			contains: []string{"sandbox.protected_paths[0].absolute \"`pwd`/secrets\" must not use shell, environment, or tilde expansion"},
 		},
 		{
 			name: "absolute cwd",

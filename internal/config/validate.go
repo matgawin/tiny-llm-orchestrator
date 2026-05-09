@@ -108,6 +108,9 @@ func validateSandboxConfig(projectRoot string, sandbox *SandboxConfig) error {
 	if err := validateSandboxPathConfig(sandbox.Path); err != nil {
 		return err
 	}
+	if err := validateSandboxProtectedPaths(sandbox.ProtectedPaths); err != nil {
+		return err
+	}
 	if !sandbox.Bubblewrap.Network.Set {
 		sandbox.Bubblewrap.Network = RequiredBool{Value: true, Set: true}
 	}
@@ -137,6 +140,75 @@ func validateSandboxPathConfig(path SandboxPathConfig) error {
 		return nil
 	}
 	return fmt.Errorf("sandbox.path.mode %q is invalid; allowed: none, host_entries", path.Mode)
+}
+
+func validateSandboxProtectedPaths(paths []SandboxProtectedPath) error {
+	for i, protected := range paths {
+		name := fmt.Sprintf("sandbox.protected_paths[%d]", i)
+		if protected.decodeError != "" {
+			return fmt.Errorf("%s %s", name, protected.decodeError)
+		}
+		if protected.hasUnknownKeys() {
+			return fmt.Errorf("%s contains unsupported key(s): %s", name, protected.unknownKeyList())
+		}
+		if protected.HostHomeSet == protected.AbsoluteSet {
+			return fmt.Errorf("%s must set exactly one of host_home or absolute", name)
+		}
+		if protected.HostHomeSet {
+			if err := validateSandboxProtectedHostHome(name+".host_home", protected.HostHome); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := validateSandboxProtectedAbsolute(name+".absolute", protected.Absolute); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSandboxProtectedHostHome(name, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is empty", name)
+	}
+	if err := validateNoShellTildeOrEnvExpansion(name, value); err != nil {
+		return err
+	}
+	if filepath.IsAbs(value) {
+		return fmt.Errorf("%s %q must be relative", name, value)
+	}
+	clean := filepath.Clean(value)
+	if clean != value || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s %q must be a clean relative descendant path", name, value)
+	}
+	return nil
+}
+
+func validateSandboxProtectedAbsolute(name, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is empty", name)
+	}
+	if err := validateNoShellTildeOrEnvExpansion(name, value); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(value) {
+		return fmt.Errorf("%s %q must be absolute", name, value)
+	}
+	clean := filepath.Clean(value)
+	if clean != value {
+		return fmt.Errorf("%s %q must be clean", name, value)
+	}
+	if clean == string(filepath.Separator) {
+		return fmt.Errorf("%s %q must not be root", name, value)
+	}
+	return nil
+}
+
+func validateNoShellTildeOrEnvExpansion(name, value string) error {
+	if strings.HasPrefix(value, "~") || strings.ContainsAny(value, "$`") {
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
+	}
+	return nil
 }
 
 func validateSandboxCWD(projectRoot, cwd string) error {
