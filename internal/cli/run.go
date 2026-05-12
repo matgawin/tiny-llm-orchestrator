@@ -18,6 +18,8 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return executeRunAddFollowup(args[1:], stdout, stderr)
 	case "advance":
 		return executeRunAdvance(args[1:], stdout, stderr)
+	case "config":
+		return executeRunConfig(args[1:], stdout, stderr)
 	case "continue":
 		return executeRunContinue(args[1:], stdout, stderr)
 	case "start":

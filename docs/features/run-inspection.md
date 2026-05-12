@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Define the read-only run inspection behavior exposed by `orc run status` and
-`orc run next`.
+Define the read-only run inspection behavior exposed by `orc run status`,
+`orc run next`, and `orc run config`.
 
 ## Audience
 
@@ -12,7 +12,7 @@ summary-context inputs.
 
 ## Read This When
 
-- You are changing `orc run status` or `orc run next`.
+- You are changing `orc run status`, `orc run next`, or `orc run config`.
 - You need to know how run inspection reports selected, retrying, blocked, or
   terminal workflow decisions.
 - You are wiring later commands that consume the workflow-selected next step.
@@ -31,6 +31,7 @@ summary-context inputs.
 orc run show <run-id>
 orc run status <run-id>
 orc run next <run-id>
+orc run config <run-id>
 ```
 
 These commands are read-only with respect to run domain state. `orc run show`
@@ -41,12 +42,23 @@ prints the selected action without launching a worker, creating an attempt,
 writing an event, or mutating artifacts. Loading a legacy run may still perform
 the Run Store's metadata-only `.lock` backfill before reading state.
 
+`orc run config` is read-only and prints the current pinned config snapshot
+metadata for the run. It does not evaluate workflow routing and does not load
+live `.orc` files.
+
 Unknown run ids fail with a clear not-found error.
 
 ## Current State Sources
 
-Inspection reads the run through the Run Store and loads the configured
-workflow named by `status.json`.
+Inspection reads the run through the Run Store. For commands that evaluate
+workflow behavior, existing runs load the workflow from the run's current pinned
+config snapshot, not from live `.orc` files. Live `.orc` is loaded when a new
+run starts; after that, live edits affect only future runs unless the existing
+run is explicitly refreshed with `orc run refresh-config <run-id>`.
+
+Existing runs do not silently reload `.orc/config.yaml`, workflow files, agent
+descriptors, or runtime descriptors. Missing or corrupt config snapshots fail
+loudly instead of falling back to live config.
 
 Run start records durable status and task artifacts. Worker launch and
 `orc report` update durable run status; inspection renders those persisted
@@ -98,3 +110,21 @@ For `ready_for_human` and `blocked_for_human`, inspection identifies:
 When persisted report artifacts exist, terminal inspection output includes
 their paths so the orchestrator can tell the human where the relevant context
 lives.
+
+## Config Snapshot Inspection
+
+`orc run config <run-id>` reads `config/current.json`, the selected
+`manifest.json`, and `config_snapshot_refreshed` events from the run store. The
+output includes:
+
+- current snapshot version and six-digit version directory
+- `resolved.json` and `manifest.json` paths under the run directory
+- snapshot creation time from the manifest
+- SHA-256 hash of the current `manifest.json`
+- source file count and deterministic source hash summary from manifest source
+  paths and per-file SHA-256 hashes
+- refresh history with event sequence, time, old/new version directories,
+  refresh manifest hash, and command source
+
+The command is intentionally minimal. Full semantic diffs between config
+versions are future work.

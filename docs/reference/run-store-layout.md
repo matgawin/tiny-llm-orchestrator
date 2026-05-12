@@ -87,14 +87,11 @@ Run-start config snapshots are stored outside the artifact list because they are
 the run-bound runtime contract, not user-facing artifacts:
 
 ```text
-config/
-  current.json
-  000001/
-    resolved.json
-    manifest.json
-  000002/
-    resolved.json
-    manifest.json
+.orc/runs/<run-id>/config/current.json
+.orc/runs/<run-id>/config/000001/resolved.json
+.orc/runs/<run-id>/config/000001/manifest.json
+.orc/runs/<run-id>/config/000002/resolved.json
+.orc/runs/<run-id>/config/000002/manifest.json
 ```
 
 `current.json` is a regular JSON file, never a symlink. Its v1 shape is:
@@ -109,9 +106,11 @@ config/
 
 Version directories are six-digit decimal names. Refreshes publish the next
 version directory and then update `current.json`; they do not use filesystem
-symlinks. `resolved.json` is the schema-versioned, fully resolved runtime input
-for later run-bound commands. `manifest.json` is schema-versioned audit
-metadata for the snapshot source files, including SHA-256 hashes.
+symlinks. `current.json` is the schema-versioned pointer that selects the
+current snapshot. `resolved.json` is the executable config contract for
+run-bound commands; readers must not reread live `.orc` to reconstruct it.
+`manifest.json` is the schema-versioned audit/source metadata for inspection
+and refresh history, including source file SHA-256 hashes.
 
 ## Filesystem Safety
 

@@ -15,6 +15,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
+	"tiny-llm-orchestrator/orc/internal/runconfigrefresh"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/vcs"
@@ -119,6 +120,68 @@ steps:
 	if strings.Contains(output, "selected_step: review") {
 		t.Fatalf("Next used live workflow mutation:\n%s", output)
 	}
+}
+
+func TestConfigShowsSnapshotMetadataAndRefreshHistoryWithoutLiveConfig(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	workflowPath := filepath.Join(root, ".orc", "workflows", "implementation.yaml")
+	workflowContent := string(readFile(t, workflowPath))
+	workflowContent = strings.Replace(workflowContent, "timeout: 30m", "timeout: 45m", 1)
+	writeInspectFile(t, workflowPath, workflowContent)
+
+	if _, err := runconfigrefresh.Refresh(context.Background(), runconfigrefresh.Options{
+		Root:   root,
+		RunID:  runID,
+		Source: "test",
+		Time:   fixedTime().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Refresh returned error: %v", err)
+	}
+	writeInspectFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
+
+	var stdout bytes.Buffer
+	if err := Config(context.Background(), Options{Root: root, RunID: runID, Stdout: &stdout}); err != nil {
+		t.Fatalf("Config returned error after live config mutation: %v", err)
+	}
+
+	output := stdout.String()
+	assertContainsAll(t, "config", output, []string{
+		"run: inspect-run\n",
+		"workflow: implementation\n",
+		"current_config_snapshot:\n",
+		"  version: 2\n",
+		"  version_dir: 000002\n",
+		"  resolved: config/000002/resolved.json\n",
+		"  manifest: config/000002/manifest.json\n",
+		"  created_at: 2026-05-03T12:01:00Z\n",
+		"  manifest_hash: sha256:",
+		"  source_files: ",
+		"  source_hash: sha256:",
+		"refresh_history:\n",
+		"  - sequence: ",
+		"    version: 000001 -> 000002\n",
+		"    source: \"test\"\n",
+	})
+}
+
+func TestConfigShowsEmptyRefreshHistory(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
+	var stdout bytes.Buffer
+	if err := Config(context.Background(), Options{Root: root, RunID: runID, Stdout: &stdout}); err != nil {
+		t.Fatalf("Config returned error: %v", err)
+	}
+
+	assertContainsAll(t, "config", stdout.String(), []string{
+		"current_config_snapshot:\n",
+		"  version: 1\n",
+		"  version_dir: 000001\n",
+		"refresh_history:\n  none\n",
+	})
 }
 
 func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
@@ -1132,9 +1195,23 @@ func writeProject(t *testing.T, root string) {
 
 func writeInspectWorkflow(t *testing.T, root, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, ".orc", "workflows", "implementation.yaml"), []byte(content), 0o600); err != nil {
-		t.Fatalf("write inspect workflow: %v", err)
+	writeInspectFile(t, filepath.Join(root, ".orc", "workflows", "implementation.yaml"), content)
+}
+
+func writeInspectFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write inspect file %s: %v", path, err)
 	}
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file %s: %v", path, err)
+	}
+	return content
 }
 
 func fixedTime() time.Time {

@@ -101,12 +101,20 @@ config/000001/resolved.json
 config/000001/manifest.json
 ```
 
-`current.json` is a regular JSON file, not a symlink. `resolved.json` is the
+`current.json` is a regular JSON file, not a symlink. It selects the current
+snapshot version for this run. `resolved.json` is the schema-versioned,
 canonical fully resolved runtime contract that later run-bound commands load
-for this run. `manifest.json` records audit metadata for the snapshot, including
-the `run_start` reason, workflow name, source file list, and SHA-256 content
-hashes for `.orc/config.yaml`, loaded workflows, loaded agent descriptors, and
-loaded runtime descriptors.
+for this run. `manifest.json` is schema-versioned audit metadata for the
+snapshot, including the `run_start` reason, workflow name, source file list,
+and SHA-256 content hashes for `.orc/config.yaml`, loaded workflows, loaded
+agent descriptors, and loaded runtime descriptors.
+
+New runs always load current live `.orc` before snapshotting. Existing runs use
+their pinned snapshot by default and do not silently adopt later live `.orc`
+edits. To adopt live edits, an operator must run
+`orc run refresh-config <run-id>`, which validates compatibility, writes the
+next version directory such as `config/000002/`, updates `config/current.json`,
+and records `config_snapshot_refreshed`.
 
 Run start then writes:
 

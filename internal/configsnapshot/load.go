@@ -1,11 +1,15 @@
 package configsnapshot
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstore"
@@ -23,6 +27,21 @@ type LoadedSnapshot struct {
 	Version    int
 	VersionDir string
 	Project    *config.Project
+}
+
+// Inspection is the current snapshot metadata operators can inspect without
+// loading live .orc files.
+type Inspection struct {
+	Version               int
+	VersionDir            string
+	ResolvedPath          string
+	ManifestPath          string
+	CreatedAt             time.Time
+	ManifestHashAlgorithm string
+	ManifestHash          string
+	SourceHashAlgorithm   string
+	SourceFileCount       int
+	SourceHash            string
 }
 
 type currentSnapshot struct {
@@ -63,6 +82,44 @@ func LoadCurrent(run *runstore.Run) (LoadedSnapshot, error) {
 		Version:    current.Version,
 		VersionDir: current.VersionDir,
 		Project:    project,
+	}, nil
+}
+
+// InspectCurrent loads current snapshot audit metadata without reading live
+// project config or the snapshot resolved runtime contract.
+func InspectCurrent(run *runstore.Run) (Inspection, error) {
+	if run == nil {
+		return Inspection{}, fmt.Errorf("run is required")
+	}
+	configDir := filepath.Join(run.Path, configDirName)
+	currentPath := filepath.Join(configDir, configCurrentName)
+	current, err := readCurrent(run.ID, currentPath)
+	if err != nil {
+		return Inspection{}, err
+	}
+	versionPath := filepath.Join(configDir, current.VersionDir)
+	manifestPath := filepath.Join(versionPath, configManifestName)
+	content, manifest, err := readManifest(run.ID, manifestPath)
+	if err != nil {
+		return Inspection{}, err
+	}
+	if manifest.Version != current.Version {
+		return Inspection{}, snapshotPathError(run.ID, manifestPath, fmt.Sprintf("version = %d, want %d", manifest.Version, current.Version))
+	}
+	if manifest.VersionDir != current.VersionDir {
+		return Inspection{}, snapshotPathError(run.ID, manifestPath, fmt.Sprintf("version_dir = %q, want %q", manifest.VersionDir, current.VersionDir))
+	}
+	return Inspection{
+		Version:               current.Version,
+		VersionDir:            current.VersionDir,
+		ResolvedPath:          filepath.ToSlash(filepath.Join("config", current.VersionDir, configResolvedName)),
+		ManifestPath:          filepath.ToSlash(filepath.Join("config", current.VersionDir, configManifestName)),
+		CreatedAt:             manifest.CreatedAt,
+		ManifestHashAlgorithm: hashAlgorithm,
+		ManifestHash:          ManifestHash(content),
+		SourceHashAlgorithm:   manifest.HashAlgorithm,
+		SourceFileCount:       len(manifest.SourceFiles),
+		SourceHash:            sourceHash(manifest.SourceFiles),
 	}, nil
 }
 
@@ -110,16 +167,9 @@ func readResolved(runID, path string) (*config.Project, error) {
 }
 
 func validateManifest(runID, path string, current currentSnapshot, workflowName string) error {
-	content, err := readRegularSnapshotFile(path)
+	_, manifest, err := readManifest(runID, path)
 	if err != nil {
-		return snapshotPathError(runID, path, err.Error())
-	}
-	var manifest manifestSnapshot
-	if err := json.Unmarshal(content, &manifest); err != nil {
-		return snapshotPathError(runID, path, fmt.Sprintf("decode manifest: %v", err))
-	}
-	if manifest.SchemaVersion != schemaVersion {
-		return snapshotPathError(runID, path, fmt.Sprintf("schema_version = %d, want %d", manifest.SchemaVersion, schemaVersion))
+		return err
 	}
 	if manifest.Version != current.Version {
 		return snapshotPathError(runID, path, fmt.Sprintf("version = %d, want %d", manifest.Version, current.Version))
@@ -131,6 +181,32 @@ func validateManifest(runID, path string, current currentSnapshot, workflowName 
 		return snapshotPathError(runID, path, fmt.Sprintf("workflow = %q, want run workflow %q", manifest.Workflow, workflowName))
 	}
 	return nil
+}
+
+func readManifest(runID, path string) ([]byte, manifestSnapshot, error) {
+	content, err := readRegularSnapshotFile(path)
+	if err != nil {
+		return nil, manifestSnapshot{}, snapshotPathError(runID, path, err.Error())
+	}
+	var manifest manifestSnapshot
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		return nil, manifestSnapshot{}, snapshotPathError(runID, path, fmt.Sprintf("decode manifest: %v", err))
+	}
+	if manifest.SchemaVersion != schemaVersion {
+		return nil, manifestSnapshot{}, snapshotPathError(runID, path, fmt.Sprintf("schema_version = %d, want %d", manifest.SchemaVersion, schemaVersion))
+	}
+	return content, manifest, nil
+}
+
+func sourceHash(entries []sourceFileEntry) string {
+	sum := sha256.New()
+	for _, entry := range entries {
+		sum.Write([]byte(entry.Path))
+		sum.Write([]byte{0})
+		sum.Write([]byte(strings.ToLower(entry.SHA256)))
+		sum.Write([]byte{0})
+	}
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
 func readRegularSnapshotFile(path string) ([]byte, error) {

@@ -117,6 +117,7 @@ Usage:
 Available Commands:
   add-followup     Record out-of-scope follow-up work
   advance          Launch workflow-selected workers until a conservative stop
+  config           Inspect the current pinned config snapshot
   continue         Continue after an explicit human-reviewed stop
   next             Inspect the next workflow action without launching it
   refresh-config   Refresh an existing run to the current live .orc config
@@ -160,6 +161,22 @@ Usage:
   %s run refresh-config <run-id>
 
 The command rejects active attempts and incompatible workflow changes. There is no --force flag in v1.
+
+Flags:
+  -h, --help  Show command help
+`, appName, appName)
+
+	return err
+}
+
+func printRunConfigHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run config prints the current pinned config snapshot metadata for an existing run.
+
+Usage:
+  %s run config <run-id>
+
+The command reads the run snapshot metadata and refresh events from .orc/runs. It does not load live .orc config.
+Output includes the current snapshot version, version directory, created time, manifest hash, source file count/hash summary, and refresh history.
 
 Flags:
   -h, --help  Show command help

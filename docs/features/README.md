@@ -22,7 +22,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 ## Current Feature Areas
 
 - Run start, task context capture, and dirty-start VCS policy: [run-start.md](run-start.md)
-- Run inspection commands: [run-inspection.md](run-inspection.md)
+- Run inspection commands and config snapshot inspection: [run-inspection.md](run-inspection.md)
 - Summary context rendering: [summary-context.md](summary-context.md)
 - Final summary recording: [final-summary-recording.md](final-summary-recording.md)
 - Follow-up recording: [follow-up-recording.md](follow-up-recording.md)

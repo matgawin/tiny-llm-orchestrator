@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
@@ -66,6 +67,21 @@ func SummaryContext(ctx context.Context, opts Options) error {
 		return err
 	}
 	return renderSummaryContext(ctx, inspection)
+}
+
+// Config prints the current run config snapshot and refresh history. It reads
+// only run-store snapshot metadata and events, never live .orc files.
+func Config(_ context.Context, opts Options) error {
+	_, run, out, err := loadRun(opts)
+	if err != nil {
+		return err
+	}
+	snapshot, err := configsnapshot.InspectCurrent(run)
+	if err != nil {
+		return err
+	}
+	renderConfig(out, run, snapshot)
+	return nil
 }
 
 type inspection struct {
@@ -151,6 +167,31 @@ func loadProjectRun(opts Options) (config.Workflow, *runstore.Store, *runstore.R
 	return loaded.Workflow, loaded.Store, loaded.Run, nil
 }
 
+func loadRun(opts Options) (*runstore.Store, *runstore.Run, io.Writer, error) {
+	if opts.Root == "" {
+		return nil, nil, nil, errors.New("project root is required")
+	}
+	if opts.RunID == "" {
+		return nil, nil, nil, errors.New("run id is required")
+	}
+	store, err := runstore.Open(opts.Root)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	run, err := store.Load(opts.RunID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil, fmt.Errorf("run %q not found", opts.RunID)
+		}
+		return nil, nil, nil, err
+	}
+	out := opts.Stdout
+	if out == nil {
+		out = io.Discard
+	}
+	return store, run, out, nil
+}
+
 func evaluate(workflowConfig config.Workflow, run *runstore.Run) (workflow.Decision, error) {
 	decision, err := workflow.Evaluate(workflowConfig, runstate.WorkflowState(run.Status))
 	if err != nil {
@@ -175,6 +216,58 @@ func renderStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run
 	printReportPaths(w, reports)
 	printArtifacts(w, run.Status.Artifacts)
 	printTerminalHumanState(w, run, decision, reports)
+}
+
+func renderConfig(w io.Writer, run *runstore.Run, snapshot configsnapshot.Inspection) {
+	_, _ = fmt.Fprintf(w, "run: %s\n", run.ID)
+	_, _ = fmt.Fprintf(w, "workflow: %s\n", run.Status.Workflow)
+	_, _ = fmt.Fprintf(w, "current_config_snapshot:\n")
+	_, _ = fmt.Fprintf(w, "  version: %d\n", snapshot.Version)
+	_, _ = fmt.Fprintf(w, "  version_dir: %s\n", snapshot.VersionDir)
+	_, _ = fmt.Fprintf(w, "  resolved: %s\n", snapshot.ResolvedPath)
+	_, _ = fmt.Fprintf(w, "  manifest: %s\n", snapshot.ManifestPath)
+	_, _ = fmt.Fprintf(w, "  created_at: %s\n", formatTime(snapshot.CreatedAt))
+	_, _ = fmt.Fprintf(w, "  manifest_hash: %s:%s\n", snapshot.ManifestHashAlgorithm, snapshot.ManifestHash)
+	_, _ = fmt.Fprintf(w, "  source_files: %d\n", snapshot.SourceFileCount)
+	_, _ = fmt.Fprintf(w, "  source_hash: %s:%s\n", snapshot.SourceHashAlgorithm, snapshot.SourceHash)
+	printConfigRefreshHistory(w, run.Events)
+}
+
+type configRefreshEvent struct {
+	OldVersion            int    `json:"old_version"`
+	OldVersionDir         string `json:"old_version_dir"`
+	NewVersion            int    `json:"new_version"`
+	NewVersionDir         string `json:"new_version_dir"`
+	ManifestHashAlgorithm string `json:"manifest_hash_algorithm"`
+	ManifestHash          string `json:"manifest_hash"`
+	Source                string `json:"source"`
+}
+
+func printConfigRefreshHistory(w io.Writer, events []runstore.Event) {
+	_, _ = fmt.Fprintln(w, "refresh_history:")
+	count := 0
+	for _, event := range events {
+		if event.Type != runstore.EventConfigSnapshotRefreshed {
+			continue
+		}
+		var payload configRefreshEvent
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			_, _ = fmt.Fprintf(w, "  - sequence: %d\n", event.Sequence)
+			_, _ = fmt.Fprintf(w, "    time: %s\n", formatTime(event.Time))
+			_, _ = fmt.Fprintf(w, "    payload_error: %s\n", quoteScalar(err.Error()))
+			count++
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "  - sequence: %d\n", event.Sequence)
+		_, _ = fmt.Fprintf(w, "    time: %s\n", formatTime(event.Time))
+		_, _ = fmt.Fprintf(w, "    version: %s -> %s\n", payload.OldVersionDir, payload.NewVersionDir)
+		_, _ = fmt.Fprintf(w, "    manifest_hash: %s:%s\n", payload.ManifestHashAlgorithm, payload.ManifestHash)
+		_, _ = fmt.Fprintf(w, "    source: %s\n", quoteScalar(payload.Source))
+		count++
+	}
+	if count == 0 {
+		_, _ = fmt.Fprintln(w, "  none")
+	}
 }
 
 func printWorkflowLoopStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run) {

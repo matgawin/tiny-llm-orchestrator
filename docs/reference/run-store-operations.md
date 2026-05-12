@@ -93,6 +93,17 @@ unless the caller adds its own idempotency key in a future event contract.
   `config_snapshot_refreshed`, then refresh `status.json`.
 - The refresh event records old and new version pointers, the SHA-256 manifest
   hash, and the command source. The snapshot files are not run artifacts.
+- Refresh is rejected while an active attempt exists. Compatibility validation
+  is conservative: the workflow name must stay the same, the current workflow
+  state and all past attempt step ids must still exist, and the selected or
+  retryable pending step must keep valid report outcome routing. Adding steps,
+  changing future routing that evaluates cleanly, and changing retry, loop,
+  timeout, report-grace, agent, or runtime settings for future attempts is
+  allowed. If safety cannot be proven, refresh fails instead of publishing a
+  new current snapshot.
+- Existing runs adopt live `.orc` edits only through
+  `orc run refresh-config <run-id>`. There is no silent live reload and no
+  `--force` override in v1.
 
 Attempt lifecycle APIs follow the same status-backed write failure contract:
 ambiguous append and status refresh failures return the candidate attempt/event
