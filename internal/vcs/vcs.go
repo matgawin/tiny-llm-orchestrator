@@ -24,6 +24,7 @@ const (
 
 	PhasePreRun  = "pre_run"
 	PhasePostRun = "post_run"
+	PhaseRefresh = "config_refresh"
 
 	schemaVersion = 1
 )
@@ -62,6 +63,11 @@ func InspectPreRun(ctx context.Context, opts Options) (Snapshot, error) {
 // InspectPostRun records the working-copy state after a run has produced work.
 func InspectPostRun(ctx context.Context, opts Options) (Snapshot, error) {
 	return inspect(ctx, opts, PhasePostRun)
+}
+
+// InspectRefresh records the working-copy state when a run adopts refreshed config.
+func InspectRefresh(ctx context.Context, opts Options) (Snapshot, error) {
+	return inspect(ctx, opts, PhaseRefresh)
 }
 
 // RecordPostRun writes a post-run VCS snapshot artifact for an existing run.

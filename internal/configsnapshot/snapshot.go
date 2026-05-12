@@ -14,11 +14,13 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/vcs"
 )
 
 const (
 	schemaVersion  = 1
 	reasonRunStart = "run_start"
+	reasonRefresh  = "refresh_config"
 	hashAlgorithm  = "sha256"
 )
 
@@ -42,6 +44,39 @@ func BuildInitial(project *config.Project, workflowName string, at time.Time) (r
 	}, nil
 }
 
+// BuildRefresh returns the next run config snapshot files for an explicit refresh.
+func BuildRefresh(project *config.Project, workflowName string, version int, source string, vcsSnapshot vcs.Snapshot, at time.Time) (runstore.ConfigSnapshot, error) {
+	if project == nil {
+		return runstore.ConfigSnapshot{}, fmt.Errorf("project config is required")
+	}
+	if version <= 1 {
+		return runstore.ConfigSnapshot{}, fmt.Errorf("refresh config snapshot version = %d, want > 1", version)
+	}
+	if source == "" {
+		return runstore.ConfigSnapshot{}, fmt.Errorf("refresh config snapshot source is required")
+	}
+	versionDir := fmt.Sprintf("%06d", version)
+	resolved, err := marshalResolved(project)
+	if err != nil {
+		return runstore.ConfigSnapshot{}, err
+	}
+	manifest, err := marshalManifestVersion(project, workflowName, version, versionDir, reasonRefresh, source, &vcsSnapshot, at)
+	if err != nil {
+		return runstore.ConfigSnapshot{}, err
+	}
+	return runstore.ConfigSnapshot{
+		Version:  version,
+		Resolved: resolved,
+		Manifest: manifest,
+	}, nil
+}
+
+// ManifestHash returns the SHA-256 hash over committed manifest.json bytes.
+func ManifestHash(manifest []byte) string {
+	sum := sha256.Sum256(manifest)
+	return hex.EncodeToString(sum[:])
+}
+
 type resolvedSnapshot struct {
 	SchemaVersion int             `json:"schema_version"`
 	Project       *config.Project `json:"project"`
@@ -53,9 +88,12 @@ type manifestSnapshot struct {
 	VersionDir    string            `json:"version_dir"`
 	CreatedAt     time.Time         `json:"created_at"`
 	Reason        string            `json:"reason"`
+	Source        string            `json:"source,omitempty"`
 	Workflow      string            `json:"workflow"`
 	HashAlgorithm string            `json:"hash_algorithm"`
 	SourceFiles   []sourceFileEntry `json:"source_files"`
+	VCSSnapshot   *vcs.Snapshot     `json:"vcs_snapshot,omitempty"`
+	VCSHash       string            `json:"vcs_hash,omitempty"`
 }
 
 type sourceFileEntry struct {
@@ -77,19 +115,35 @@ func marshalResolved(project *config.Project) ([]byte, error) {
 }
 
 func marshalManifest(project *config.Project, workflowName string, at time.Time) ([]byte, error) {
+	return marshalManifestVersion(project, workflowName, 1, "000001", reasonRunStart, "", nil, at)
+}
+
+func marshalManifestVersion(project *config.Project, workflowName string, version int, versionDir, reason, source string, vcsSnapshot *vcs.Snapshot, at time.Time) ([]byte, error) {
 	sourceFiles, err := collectSourceFiles(project)
 	if err != nil {
 		return nil, err
 	}
+	var vcsHash string
+	if vcsSnapshot != nil {
+		content, err := json.Marshal(vcsSnapshot)
+		if err != nil {
+			return nil, fmt.Errorf("marshal VCS refresh snapshot for manifest hash: %w", err)
+		}
+		sum := sha256.Sum256(content)
+		vcsHash = hex.EncodeToString(sum[:])
+	}
 	content, err := json.MarshalIndent(manifestSnapshot{
 		SchemaVersion: schemaVersion,
-		Version:       1,
-		VersionDir:    "000001",
+		Version:       version,
+		VersionDir:    versionDir,
 		CreatedAt:     normalizeTime(at),
-		Reason:        reasonRunStart,
+		Reason:        reason,
+		Source:        source,
 		Workflow:      workflowName,
 		HashAlgorithm: hashAlgorithm,
 		SourceFiles:   sourceFiles,
+		VCSSnapshot:   vcsSnapshot,
+		VCSHash:       vcsHash,
 	}, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal config snapshot manifest: %w", err)

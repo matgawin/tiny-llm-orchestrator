@@ -92,6 +92,9 @@ config/
   000001/
     resolved.json
     manifest.json
+  000002/
+    resolved.json
+    manifest.json
 ```
 
 `current.json` is a regular JSON file, never a symlink. Its v1 shape is:
@@ -104,10 +107,11 @@ config/
 }
 ```
 
-Version directories are six-digit decimal names. `resolved.json` is the
-schema-versioned, fully resolved runtime input for later run-bound commands.
-`manifest.json` is schema-versioned audit metadata for the snapshot source
-files, including SHA-256 hashes.
+Version directories are six-digit decimal names. Refreshes publish the next
+version directory and then update `current.json`; they do not use filesystem
+symlinks. `resolved.json` is the schema-versioned, fully resolved runtime input
+for later run-bound commands. `manifest.json` is schema-versioned audit
+metadata for the snapshot source files, including SHA-256 hashes.
 
 ## Filesystem Safety
 

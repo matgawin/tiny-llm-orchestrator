@@ -210,7 +210,8 @@ The VCS inspector owns the JSON schema for VCS snapshot artifacts:
 }
 ```
 
-`phase` is `pre_run` or `post_run`. `kind` is `jj`, `git`, or `none`.
+`phase` is `pre_run`, `post_run`, or `config_refresh`. `kind` is `jj`, `git`,
+or `none`.
 `changed_paths` are deterministic observations for summary context; they are
 not enforcement rules and are never used to modify the working copy. `error` is
 optional and reserved for future persisted degraded-inspection summaries; run

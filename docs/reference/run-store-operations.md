@@ -80,10 +80,19 @@ unless the caller adds its own idempotency key in a future event contract.
 - Order: write `config/000001/resolved.json`, write
   `config/000001/manifest.json`, then atomically replace
   `config/current.json`.
-- The snapshot files are not run artifacts and do not append events.
+- The initial snapshot files are not run artifacts and do not append events.
 - `current.json` is a regular file with `schema_version`, numeric `version`,
   and six-digit `version_dir`; symlinks are rejected by the same filesystem
   safety checks as other run-store paths.
+
+`RefreshConfigSnapshot`:
+
+- Order: validate the locked run state, write the next
+  `config/<version>/resolved.json`, write `config/<version>/manifest.json`,
+  atomically replace `config/current.json`, append
+  `config_snapshot_refreshed`, then refresh `status.json`.
+- The refresh event records old and new version pointers, the SHA-256 manifest
+  hash, and the command source. The snapshot files are not run artifacts.
 
 Attempt lifecycle APIs follow the same status-backed write failure contract:
 ambiguous append and status refresh failures return the candidate attempt/event
@@ -103,6 +112,9 @@ append-then-status ordering: it commits the report artifact before appending
   [Artifacts](run-store-status-artifacts.md#artifacts).
 - `WriteInitialConfigSnapshot` takes the run-level lock and commits the current
   pointer after the version directory files are durable.
+- `RefreshConfigSnapshot` takes the run-level lock while validating
+  compatibility, committing the next version, updating `current.json`, and
+  appending `config_snapshot_refreshed`.
 - `Load`, `ReadArtifact`, and `OpenArtifactAppend` also take the run-level lock.
   For legacy runs that predate `.lock`, these APIs create the missing lock file
   as metadata-only backfill before replaying state, reading artifact content, or

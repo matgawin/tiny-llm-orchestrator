@@ -30,6 +30,8 @@ const (
 	eventWorkflowHardCap         = "workflow.loop_hard_cap"
 	eventWorkflowHardCapOverride = "workflow.loop_hard_cap_override"
 	eventWorkflowStepSkipped     = "workflow.step_skipped"
+	// EventConfigSnapshotRefreshed records explicit adoption of a new run config snapshot.
+	EventConfigSnapshotRefreshed = "config_snapshot_refreshed"
 
 	KindTaskContext  ArtifactKind = "task_context"
 	KindTaskSnapshot ArtifactKind = "task_snapshot"
@@ -295,6 +297,33 @@ type WorkflowStateEntryRequest struct {
 	PreviousState string
 	TriggerStatus string
 	TriggerResult string
+}
+
+// CurrentConfigSnapshot identifies the current config snapshot pointer observed under the run lock.
+type CurrentConfigSnapshot struct {
+	Version    int
+	VersionDir string
+}
+
+// RefreshConfigSnapshotRequest describes an explicit run config refresh.
+type RefreshConfigSnapshotRequest struct {
+	Snapshot              ConfigSnapshot
+	Source                string
+	ManifestHashAlgorithm string
+	ManifestHash          string
+	Time                  time.Time
+}
+
+// ConfigSnapshotRefresh records a completed config snapshot refresh.
+type ConfigSnapshotRefresh struct {
+	OldVersion            int
+	OldVersionDir         string
+	NewVersion            int
+	NewVersionDir         string
+	ManifestHashAlgorithm string
+	ManifestHash          string
+	Source                string
+	Event                 Event
 }
 
 // WorkflowLoopSoftCap records the first advisory soft-cap hit for a workflow state.

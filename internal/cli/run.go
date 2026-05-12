@@ -32,6 +32,8 @@ func executeRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return executeRunInspect("next", args[1:], stdout, stderr, runinspect.Next)
 	case "record-summary":
 		return executeRunRecordSummary(args[1:], stdout, stderr)
+	case "refresh-config":
+		return executeRunRefreshConfig(args[1:], stdout, stderr)
 	case "summary-context":
 		return executeRunInspect("summary-context", args[1:], stdout, stderr, runinspect.SummaryContext)
 	default:

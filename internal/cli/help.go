@@ -119,6 +119,7 @@ Available Commands:
   advance          Launch workflow-selected workers until a conservative stop
   continue         Continue after an explicit human-reviewed stop
   next             Inspect the next workflow action without launching it
+  refresh-config   Refresh an existing run to the current live .orc config
   record-summary   Record a final ready-for-review summary
   show             Show persisted run state
   skip-step        Skip the currently selected skippable workflow step
@@ -147,6 +148,21 @@ Flags:
 The command only skips the current runnable select_step decision. It rejects active worker attempts, retry, wait, terminal decisions, terminal runs, non-skippable steps, and step ids other than the selected step.
 The persisted outcome is the system-owned done/skipped transition declared by workflow config. Workers cannot report done/skipped, and this command does not imply review approval unless the workflow's done/skipped route says so.
 JSON output and additional confirmation flags are not supported in v1.
+`, appName, appName)
+
+	return err
+}
+
+func printRunRefreshConfigHelp(w io.Writer) error {
+	_, err := fmt.Fprintf(w, `%s run refresh-config validates live .orc config and explicitly refreshes an existing run's pinned config snapshot.
+
+Usage:
+  %s run refresh-config <run-id>
+
+The command rejects active attempts and incompatible workflow changes. There is no --force flag in v1.
+
+Flags:
+  -h, --help  Show command help
 `, appName, appName)
 
 	return err

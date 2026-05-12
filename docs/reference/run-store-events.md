@@ -52,9 +52,9 @@ types are `run.created`, `status.updated`, `artifact.written`,
 `attempt.started`, `attempt.prompted`, `attempt.logged`, `attempt.process_started`,
 `attempt.finished`, `attempt.recovered`, `attempt.reported`, `attempt.warning`,
 `report.ignored`, `run.continued`, `workflow.loop_soft_cap`,
-`workflow.loop_hard_cap`, `workflow.loop_hard_cap_override`, and
-`workflow.step_skipped`; those are written only through the dedicated store
-APIs.
+`workflow.loop_hard_cap`, `workflow.loop_hard_cap_override`,
+`workflow.step_skipped`, and `config_snapshot_refreshed`; those are written
+only through the dedicated store APIs.
 
 For caller events, callers provide:
 
@@ -217,6 +217,22 @@ When the configured `done/skipped` transition targets a terminal run state,
 `state` is that terminal state and the workflow state entry records that
 terminal state. The append-only event remains the source of truth; `status.json`
 materializes `skipped_steps` from these events.
+
+`config_snapshot_refreshed` is written by explicit config refresh after the
+new version directory is committed and `config/current.json` points to it. It
+does not add an artifact reference; config snapshots live under `config/`.
+
+```json
+{
+  "old_version": 1,
+  "old_version_dir": "000001",
+  "new_version": 2,
+  "new_version_dir": "000002",
+  "manifest_hash_algorithm": "sha256",
+  "manifest_hash": "<sha256 of manifest.json bytes>",
+  "source": "cli"
+}
+```
 
 `workflow.loop_soft_cap` is written once per workflow state when a
 worker-selecting transition reaches prospective count `soft + 1`. The launcher
