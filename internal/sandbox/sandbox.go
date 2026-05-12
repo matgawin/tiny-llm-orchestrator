@@ -183,6 +183,10 @@ type sandboxPolicy struct {
 	env         map[string]string
 }
 
+type protectedHostPaths struct {
+	paths []string
+}
+
 type resolvedMount struct {
 	host                     string
 	target                   string
@@ -230,9 +234,13 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 			return sandboxPolicy{}, fmt.Errorf("resolve host HOME for sandbox path policy: %w", err)
 		}
 	}
+	protectedPaths, err := resolveProtectedHostPaths(sandboxConfig.ProtectedPaths, hostHome, hostEnv, opts, evalSymlinks)
+	if err != nil {
+		return sandboxPolicy{}, err
+	}
 	beadsPath := filepath.Clean(filepath.Join(root, "..", ".beads"))
 	sandboxEnv, sandboxMounts, setFromMount := mergeRuntimeSandboxRequirements(project, sandboxConfig)
-	extraMounts, resolvedByID, err := resolveExtraMounts(root, beadsPath, home, hostEnv, opts, sandboxMounts, pathExists, stat, evalSymlinks)
+	extraMounts, resolvedByID, err := resolveExtraMounts(root, beadsPath, home, hostEnv, opts, sandboxMounts, protectedPaths, pathExists, stat, evalSymlinks)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
@@ -240,7 +248,7 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
-	pathMounts, err := resolvePathMounts(root, beadsPath, home, hostHome, effectiveSandboxPath(hostEnv, sandboxEnv), sandboxConfig.Path.Mode, extraMounts, stat, evalSymlinks)
+	pathMounts, err := resolvePathMounts(root, beadsPath, home, hostHome, effectiveSandboxPath(hostEnv, sandboxEnv), sandboxConfig.Path.Mode, extraMounts, protectedPaths, opts.Stderr, stat, evalSymlinks)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
@@ -255,6 +263,63 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 	}
 	policy.env[RuntimeDirCoverageEnv] = runtimeDirCoverageValue(root, extraMounts)
 	return policy, nil
+}
+
+func resolveProtectedHostPaths(paths []config.SandboxProtectedPath, hostHome string, hostEnv map[string]string, opts Options, evalSymlinks func(string) (string, error)) (protectedHostPaths, error) {
+	if len(paths) == 0 {
+		return protectedHostPaths{}, nil
+	}
+	resolved := protectedHostPaths{paths: make([]string, 0, len(paths))}
+	seen := map[string]struct{}{}
+	for i, protected := range paths {
+		entryName := fmt.Sprintf("sandbox.protected_paths[%d]", i)
+		literal := protected.Absolute
+		if protected.HostHomeSet {
+			if hostHome == "" {
+				var err error
+				hostHome, err = resolveHostHome(hostEnv, opts)
+				if err != nil {
+					return protectedHostPaths{}, fmt.Errorf("%s.host_home: %w", entryName, err)
+				}
+			}
+			literal = filepath.Join(hostHome, protected.HostHome)
+		}
+		literal = filepath.Clean(literal)
+		resolved.add(literal, seen)
+		if !literalHostPathExists(literal) {
+			continue
+		}
+		realPath, err := evalSymlinks(literal)
+		if err != nil {
+			return protectedHostPaths{}, fmt.Errorf("%s %q: resolve symlinks: %w", entryName, literal, err)
+		}
+		resolved.add(realPath, seen)
+	}
+	return resolved, nil
+}
+
+func (p *protectedHostPaths) add(path string, seen map[string]struct{}) {
+	clean := filepath.Clean(path)
+	if _, ok := seen[clean]; ok {
+		return
+	}
+	seen[clean] = struct{}{}
+	p.paths = append(p.paths, clean)
+}
+
+func (p protectedHostPaths) conflict(path string) (string, bool) {
+	clean := filepath.Clean(path)
+	for _, protected := range p.paths {
+		if pathIntersects(clean, protected) {
+			return protected, true
+		}
+	}
+	return "", false
+}
+
+func literalHostPathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 func runtimeDirCoverageValue(root string, extraMounts []resolvedMount) string {
@@ -396,11 +461,11 @@ type runtimeMountKey struct {
 	mountID   string
 }
 
-func resolveExtraMounts(root, beadsPath, sandboxHome string, hostEnv map[string]string, opts Options, mounts []sourcedSandboxMount, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, map[runtimeMountKey]resolvedMount, error) {
+func resolveExtraMounts(root, beadsPath, sandboxHome string, hostEnv map[string]string, opts Options, mounts []sourcedSandboxMount, protectedPaths protectedHostPaths, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, map[runtimeMountKey]resolvedMount, error) {
 	resolved := make([]resolvedMount, 0, len(mounts))
 	resolvedByID := map[runtimeMountKey]resolvedMount{}
 	for _, sourced := range mounts {
-		mount, ok, err := resolveSourcedMount(root, sandboxHome, hostEnv, opts, sourced, pathExists, stat, evalSymlinks)
+		mount, ok, err := resolveSourcedMount(root, sandboxHome, hostEnv, opts, sourced, protectedPaths, pathExists, stat, evalSymlinks)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -438,11 +503,11 @@ func indexResolvedRuntimeMount(resolvedByID map[runtimeMountKey]resolvedMount, m
 	}
 }
 
-func resolveSourcedMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+func resolveSourcedMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, protectedPaths protectedHostPaths, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
 	if sourced.runtime && sourced.runtimeMount.Host == "" {
-		return resolveRuntimeSandboxMount(root, sandboxHome, hostEnv, opts, sourced, pathExists, stat, evalSymlinks)
+		return resolveRuntimeSandboxMount(root, sandboxHome, hostEnv, opts, sourced, protectedPaths, pathExists, stat, evalSymlinks)
 	}
-	return resolveStaticSandboxMount(root, staticSandboxMount(sourced), pathExists, evalSymlinks)
+	return resolveStaticSandboxMount(root, staticSandboxMount(sourced), protectedPaths, pathExists, evalSymlinks)
 }
 
 type staticSandboxMountDescriptor struct {
@@ -478,7 +543,7 @@ func staticSandboxMount(sourced sourcedSandboxMount) staticSandboxMountDescripto
 	}
 }
 
-func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, pathExists func(string) bool, evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, protectedPaths protectedHostPaths, pathExists func(string) bool, evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
 	host := mount.host
 	if !filepath.IsAbs(host) {
 		host = filepath.Join(root, host)
@@ -489,6 +554,11 @@ func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, 
 			return resolvedMount{}, false, nil
 		}
 		return resolvedMount{}, false, fmt.Errorf("%s.host %q does not exist", mount.source, mount.host)
+	}
+	if protected, ok, err := protectedMountConflict(host, protectedPaths, evalSymlinks); err != nil {
+		return resolvedMount{}, false, fmt.Errorf("%s.host %q: %w", mount.source, mount.host, err)
+	} else if ok {
+		return resolvedMount{}, false, fmt.Errorf("%s.host %q conflicts with sandbox.protected_paths host path %q", mount.source, host, protected)
 	}
 	if !filepath.IsAbs(mount.host) && mount.mode == "rw" {
 		realRoot, err := evalSymlinks(root)
@@ -513,7 +583,7 @@ func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, 
 	}, true, nil
 }
 
-func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, protectedPaths protectedHostPaths, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
 	mount := sourced.runtimeMount
 	host, usedFallback, err := resolveRuntimeMountSource(sourced.source, mount, hostEnv, opts)
 	if err != nil {
@@ -526,6 +596,9 @@ func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]str
 		}
 		if !mount.Source.Create {
 			return resolvedMount{}, false, fmt.Errorf("%s.source resolved path %q does not exist", sourced.source, host)
+		}
+		if protected, ok := protectedPaths.conflict(host); ok {
+			return resolvedMount{}, false, fmt.Errorf("%s.source %q conflicts with sandbox.protected_paths host path %q", sourced.source, host, protected)
 		}
 		mkdirAll := os.MkdirAll
 		if opts.MkdirAll != nil {
@@ -545,6 +618,12 @@ func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]str
 	realHost, err := evalSymlinks(host)
 	if err != nil {
 		return resolvedMount{}, false, fmt.Errorf("%s.source %q: %w", sourced.source, host, err)
+	}
+	if protected, ok := protectedPaths.conflict(host); ok {
+		return resolvedMount{}, false, fmt.Errorf("%s.source %q conflicts with sandbox.protected_paths host path %q", sourced.source, host, protected)
+	}
+	if protected, ok := protectedPaths.conflict(realHost); ok {
+		return resolvedMount{}, false, fmt.Errorf("%s.source %q conflicts with sandbox.protected_paths host path %q", sourced.source, host, protected)
 	}
 	target := host
 	if usedFallback {
@@ -594,7 +673,24 @@ func applyEnvFromMount(env config.SandboxEnvConfig, requirements []envFromMountR
 	return env, nil
 }
 
-func resolvePathMounts(root, beadsPath, sandboxHome, hostHome, pathValue, mode string, explicitMounts []resolvedMount, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, error) {
+func protectedMountConflict(host string, protectedPaths protectedHostPaths, evalSymlinks func(string) (string, error)) (string, bool, error) {
+	if protected, ok := protectedPaths.conflict(host); ok {
+		return protected, true, nil
+	}
+	if !literalHostPathExists(host) {
+		return "", false, nil
+	}
+	realHost, err := evalSymlinks(host)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve symlinks: %w", err)
+	}
+	if protected, ok := protectedPaths.conflict(realHost); ok {
+		return protected, true, nil
+	}
+	return "", false, nil
+}
+
+func resolvePathMounts(root, beadsPath, sandboxHome, hostHome, pathValue, mode string, explicitMounts []resolvedMount, protectedPaths protectedHostPaths, stderr io.Writer, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, error) {
 	if mode == "" || mode == config.SandboxPathModeNone {
 		return nil, nil
 	}
@@ -624,6 +720,14 @@ func resolvePathMounts(root, beadsPath, sandboxHome, hostHome, pathValue, mode s
 		if err := validatePathMountTarget(root, beadsPath, sandboxHome, hostHome, target); err != nil {
 			return nil, err
 		}
+		if protected, ok := protectedPaths.conflict(target); ok {
+			warnProtectedPathMount(stderr, target, protected)
+			continue
+		}
+		if protected, ok := protectedPaths.conflict(resolvedSource); ok {
+			warnProtectedPathMount(stderr, target, protected)
+			continue
+		}
 		for _, explicit := range explicitMounts {
 			if explicit.target == target {
 				return nil, fmt.Errorf("sandbox.path.mode host_entries generated mount target %q conflicts with explicit sandbox mount target %q; explicit mounts cannot override automatic PATH mounts", target, explicit.target)
@@ -645,6 +749,13 @@ func resolvePathMounts(root, beadsPath, sandboxHome, hostHome, pathValue, mode s
 		})
 	}
 	return pathMounts, nil
+}
+
+func warnProtectedPathMount(stderr io.Writer, target, protected string) {
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	_, _ = fmt.Fprintf(stderr, "warning: sandbox.path.mode host_entries skipped PATH entry %q because it conflicts with sandbox.protected_paths host path %q\n", target, protected)
 }
 
 func pathUnderExistingMount(target, mountRoot string) bool {

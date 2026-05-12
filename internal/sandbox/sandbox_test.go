@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -817,6 +818,350 @@ func TestBuildSpecSkipsMissingOptionalExtraMount(t *testing.T) {
 	if containsSequence(spec.Args, "--bind", filepath.Join(root, "missing"), "/workspace/missing") {
 		t.Fatalf("bwrap args = %#v, want optional missing mount skipped", spec.Args)
 	}
+}
+
+func TestBuildSpecProtectedHostHomeRequiresResolvedHostHome(t *testing.T) {
+	project := sandboxProject(t.TempDir(), config.SandboxConfig{
+		Command:        config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:            ".",
+		ProtectedPaths: []config.SandboxProtectedPath{protectedHostHome(".ssh")},
+		Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+
+	_, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		Environ: func() []string {
+			return []string{"PATH=/usr/bin"}
+		},
+		UserHomeDir: func() (string, error) {
+			return "relative-home", nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "sandbox.protected_paths[0].host_home") || !strings.Contains(err.Error(), "must resolve to an absolute path") {
+		t.Fatalf("BuildSpec error = %v, want host_home HOME resolution error", err)
+	}
+}
+
+func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
+	t.Run("conflicting explicit mount fails", func(t *testing.T) {
+		root := t.TempDir()
+		secret := filepath.Join(root, "host-home", ".ssh")
+		if err := os.MkdirAll(secret, 0o755); err != nil {
+			t.Fatalf("create protected path: %v", err)
+		}
+		project := sandboxProject(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(secret)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			Mounts: []config.SandboxMount{
+				{Host: secret, Target: "/workspace/ssh", Mode: "ro"},
+			},
+		})
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     testEnv(filepath.Join(root, "home")),
+		})
+		if err == nil || !strings.Contains(err.Error(), `sandbox.mounts[0].host`) || !strings.Contains(err.Error(), "conflicts with sandbox.protected_paths") || !strings.Contains(err.Error(), secret) {
+			t.Fatalf("BuildSpec error = %v, want protected explicit mount conflict", err)
+		}
+	})
+
+	t.Run("optional missing explicit mount is skipped", func(t *testing.T) {
+		root := t.TempDir()
+		missing := filepath.Join(root, "host-home", ".ssh")
+		project := sandboxProject(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(missing)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			Mounts: []config.SandboxMount{
+				{Host: missing, Target: "/workspace/ssh", Mode: "ro", Optional: config.RequiredBool{Value: true, Set: true}},
+			},
+		})
+
+		spec, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     testEnv(filepath.Join(root, "home")),
+		})
+		if err != nil {
+			t.Fatalf("BuildSpec returned error: %v", err)
+		}
+		if containsSequence(spec.Args, "--ro-bind", missing, "/workspace/ssh") {
+			t.Fatalf("bwrap args = %#v, want optional protected missing mount skipped", spec.Args)
+		}
+	})
+
+	t.Run("broad parent conflicts with missing protected child", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "host-home")
+		if err := os.MkdirAll(home, 0o755); err != nil {
+			t.Fatalf("create home: %v", err)
+		}
+		missingSecret := filepath.Join(home, ".ssh")
+		project := sandboxProject(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(missingSecret)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			Mounts: []config.SandboxMount{
+				{Host: home, Target: "/workspace/home", Mode: "ro"},
+			},
+		})
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     testEnv(home),
+		})
+		if err == nil || !strings.Contains(err.Error(), missingSecret) {
+			t.Fatalf("BuildSpec error = %v, want broad parent conflict with missing protected child", err)
+		}
+	})
+}
+
+func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
+	t.Run("simple runtime mount conflict fails", func(t *testing.T) {
+		root := t.TempDir()
+		cache := filepath.Join(root, ".orc", "cache", "custom")
+		if err := os.MkdirAll(cache, 0o755); err != nil {
+			t.Fatalf("create cache: %v", err)
+		}
+		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(cache)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		}, config.RuntimeSandboxRequirements{
+			Mounts: []config.RuntimeSandboxMount{
+				{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: "/workspace/cache"}, Mode: "ro"},
+			},
+		})
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     testEnv(filepath.Join(root, "home")),
+		})
+		if err == nil || !strings.Contains(err.Error(), `runtime "custom" sandbox.requirements.mounts[0].host`) || !strings.Contains(err.Error(), cache) {
+			t.Fatalf("BuildSpec error = %v, want protected runtime mount conflict", err)
+		}
+	})
+
+	t.Run("optional missing runtime mount is skipped", func(t *testing.T) {
+		root := t.TempDir()
+		cache := filepath.Join(root, ".orc", "cache", "custom")
+		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(cache)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		}, config.RuntimeSandboxRequirements{
+			Mounts: []config.RuntimeSandboxMount{
+				{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: "/workspace/cache"}, Mode: "ro", Optional: config.RequiredBool{Value: true, Set: true}},
+			},
+		})
+
+		spec, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     testEnv(filepath.Join(root, "home")),
+		})
+		if err != nil {
+			t.Fatalf("BuildSpec returned error: %v", err)
+		}
+		if containsSequence(spec.Args, "--ro-bind", cache, "/workspace/cache") {
+			t.Fatalf("bwrap args = %#v, want optional missing runtime mount skipped", spec.Args)
+		}
+	})
+
+	t.Run("env sourced runtime mount conflict fails", func(t *testing.T) {
+		root := t.TempDir()
+		source := filepath.Join(root, "custom-home")
+		if err := os.MkdirAll(source, 0o755); err != nil {
+			t.Fatalf("create source: %v", err)
+		}
+		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(source)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ: func() []string {
+				return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), `runtime "custom" sandbox.requirements.mounts[0].source`) || !strings.Contains(err.Error(), source) {
+			t.Fatalf("BuildSpec error = %v, want protected env-sourced runtime mount conflict", err)
+		}
+	})
+
+	t.Run("create true checks protected path before creating source", func(t *testing.T) {
+		root := t.TempDir()
+		home := filepath.Join(root, "home")
+		source := filepath.Join(home, ".custom")
+		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedHostHome(".custom")},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		}, fallbackRuntimeRequirements(true))
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
+		})
+		if err == nil || !strings.Contains(err.Error(), source) || !strings.Contains(err.Error(), "conflicts with sandbox.protected_paths") {
+			t.Fatalf("BuildSpec error = %v, want create protected source conflict", err)
+		}
+		if _, statErr := os.Stat(source); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("created source stat error = %v, want not exist", statErr)
+		}
+	})
+}
+
+func TestBuildSpecProtectedPathsPathHostEntriesSkipsWithWarning(t *testing.T) {
+	root := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	hostRoot, err := os.MkdirTemp(cwd, ".sandbox-path-test-")
+	if err != nil {
+		t.Fatalf("create host path root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(hostRoot) })
+	protectedBin := filepath.Join(hostRoot, "secret", "bin")
+	openBin := filepath.Join(hostRoot, "open", "bin")
+	for _, dir := range []string{protectedBin, openBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create path entry: %v", err)
+		}
+	}
+	pathValue := protectedBin + string(os.PathListSeparator) + openBin
+	stderr := &bytes.Buffer{}
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:        config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:            ".",
+		Path:           config.SandboxPathConfig{Mode: config.SandboxPathModeHostEntries},
+		ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(protectedBin), protectedAbsolute(protectedBin)},
+		Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+
+	spec, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		Stderr:      stderr,
+		Environ: func() []string {
+			return []string{"PATH=" + pathValue, "HOME=" + filepath.Join(root, "home")}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildSpec returned error: %v", err)
+	}
+	assertEnvContains(t, spec.Env, "PATH="+pathValue)
+	assertNoPathMount(t, spec.Args, protectedBin, protectedBin)
+	assertPathMount(t, spec.Args, openBin, openBin)
+	if got := stderr.String(); !strings.Contains(got, "protected_paths") || !strings.Contains(got, protectedBin) {
+		t.Fatalf("stderr warning = %q, want protected_paths warning naming PATH entry", got)
+	}
+	if count := strings.Count(stderr.String(), "protected_paths"); count != 1 {
+		t.Fatalf("stderr warning count = %d, want deduplicated warning", count)
+	}
+	for _, entry := range spec.Env {
+		if strings.HasPrefix(entry, RuntimeDirCoverageEnv+"=") && strings.Contains(entry, protectedBin) {
+			t.Fatalf("coverage env = %q, want skipped PATH mount excluded", entry)
+		}
+	}
+}
+
+func TestBuildSpecProtectedPathsMissingPathWithoutMountSucceeds(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "home", ".ssh")
+	project := sandboxProject(root, config.SandboxConfig{
+		Command:        config.SandboxCommand{Argv: []string{"sh"}},
+		CWD:            ".",
+		ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(missing)},
+		Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+	})
+
+	if _, err := BuildSpec(project, Options{
+		RuntimeGOOS: "linux",
+		LookPath:    foundBwrap,
+		Environ:     testEnv(filepath.Join(root, "home")),
+	}); err != nil {
+		t.Fatalf("BuildSpec returned error for missing protected path: %v", err)
+	}
+}
+
+func TestBuildSpecProtectedPathsSymlinkBehavior(t *testing.T) {
+	t.Run("existing symlink protects resolved target", func(t *testing.T) {
+		root := t.TempDir()
+		realSecret := filepath.Join(root, "real-secret")
+		protectedLink := filepath.Join(root, "home", ".ssh")
+		if err := os.MkdirAll(filepath.Dir(protectedLink), 0o755); err != nil {
+			t.Fatalf("create home: %v", err)
+		}
+		if err := os.MkdirAll(realSecret, 0o755); err != nil {
+			t.Fatalf("create real secret: %v", err)
+		}
+		if err := os.Symlink(realSecret, protectedLink); err != nil {
+			t.Fatalf("create protected symlink: %v", err)
+		}
+		project := sandboxProject(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(protectedLink)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+			Mounts: []config.SandboxMount{
+				{Host: realSecret, Target: "/workspace/secret", Mode: "ro"},
+			},
+		})
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     testEnv(filepath.Join(root, "home")),
+		})
+		if err == nil || !strings.Contains(err.Error(), realSecret) {
+			t.Fatalf("BuildSpec error = %v, want resolved symlink target protected", err)
+		}
+	})
+
+	t.Run("existing protected path symlink resolution failure fails", func(t *testing.T) {
+		root := t.TempDir()
+		loop := filepath.Join(root, "home", ".ssh")
+		if err := os.MkdirAll(filepath.Dir(loop), 0o755); err != nil {
+			t.Fatalf("create home: %v", err)
+		}
+		if err := os.Symlink(loop, loop); err != nil {
+			t.Fatalf("create symlink loop: %v", err)
+		}
+		project := sandboxProject(root, config.SandboxConfig{
+			Command:        config.SandboxCommand{Argv: []string{"sh"}},
+			CWD:            ".",
+			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(loop)},
+			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
+		})
+
+		_, err := BuildSpec(project, Options{
+			RuntimeGOOS: "linux",
+			LookPath:    foundBwrap,
+			Environ:     testEnv(filepath.Join(root, "home")),
+		})
+		if err == nil || !strings.Contains(err.Error(), "sandbox.protected_paths[0]") || !strings.Contains(err.Error(), "resolve symlinks") {
+			t.Fatalf("BuildSpec error = %v, want protected symlink resolution failure", err)
+		}
+	})
 }
 
 func TestBuildSpecIncludesSelectedRuntimeSandboxRequirements(t *testing.T) {
@@ -1755,6 +2100,14 @@ func fallbackRuntimeRequirements(create bool) config.RuntimeSandboxRequirements 
 			},
 		},
 	}
+}
+
+func protectedHostHome(path string) config.SandboxProtectedPath {
+	return config.SandboxProtectedPath{HostHome: path, HostHomeSet: true}
+}
+
+func protectedAbsolute(path string) config.SandboxProtectedPath {
+	return config.SandboxProtectedPath{Absolute: path, AbsoluteSet: true}
 }
 
 func foundBwrap(string) (string, error) {
