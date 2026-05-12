@@ -145,6 +145,114 @@ func TestListenerRateLimitDropsExcessMessages(t *testing.T) {
 	assertNoAccepted(t, l)
 }
 
+func TestListenerRateLimiterRefillsExactlyOneTokenPerSecond(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	l := newRegisteredListenerWithClock(t, validRegistration, func() time.Time {
+		return now
+	})
+
+	for i := range 3 {
+		resp := l.evaluate(requestWithMessage("burst"))
+		if resp.Status != StatusAccepted {
+			t.Fatalf("response %d status = %q, want accepted: %s", i, resp.Status, resp.Error)
+		}
+	}
+	resp := l.evaluate(requestWithMessage("burst"))
+	if resp.Status != StatusDropped {
+		t.Fatalf("fourth response status = %q, want dropped", resp.Status)
+	}
+	for range 3 {
+		_ = receiveAccepted(t, l)
+	}
+	assertNoAccepted(t, l)
+
+	now = now.Add(time.Second)
+	resp = l.evaluate(requestWithMessage("refilled"))
+	if resp.Status != StatusAccepted {
+		t.Fatalf("one-second refill status = %q, want accepted: %s", resp.Status, resp.Error)
+	}
+	_ = receiveAccepted(t, l)
+
+	resp = l.evaluate(requestWithMessage("still limited"))
+	if resp.Status != StatusDropped {
+		t.Fatalf("second same-timestamp response status = %q, want dropped", resp.Status)
+	}
+	assertNoAccepted(t, l)
+}
+
+func TestListenerRateLimiterCapacityStaysCappedAtBurst(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	l := newRegisteredListenerWithClock(t, validRegistration, func() time.Time {
+		return now
+	})
+
+	for range 3 {
+		resp := l.evaluate(requestWithMessage("burst"))
+		if resp.Status != StatusAccepted {
+			t.Fatalf("initial burst status = %q, want accepted: %s", resp.Status, resp.Error)
+		}
+	}
+	for range 3 {
+		_ = receiveAccepted(t, l)
+	}
+
+	now = now.Add(10 * time.Second)
+	for i := range 3 {
+		resp := l.evaluate(requestWithMessage("capped"))
+		if resp.Status != StatusAccepted {
+			t.Fatalf("capped burst response %d status = %q, want accepted: %s", i, resp.Status, resp.Error)
+		}
+	}
+	resp := l.evaluate(requestWithMessage("over cap"))
+	if resp.Status != StatusDropped {
+		t.Fatalf("post-refill fourth response status = %q, want dropped", resp.Status)
+	}
+	for range 3 {
+		_ = receiveAccepted(t, l)
+	}
+	assertNoAccepted(t, l)
+}
+
+func TestListenerRateLimiterResetsOnRegistration(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	l := newRegisteredListenerWithClock(t, validRegistration, func() time.Time {
+		return now
+	})
+
+	for range 3 {
+		resp := l.evaluate(requestWithMessage("first attempt"))
+		if resp.Status != StatusAccepted {
+			t.Fatalf("initial attempt status = %q, want accepted: %s", resp.Status, resp.Error)
+		}
+	}
+	resp := l.evaluate(requestWithMessage("first attempt"))
+	if resp.Status != StatusDropped {
+		t.Fatalf("initial attempt fourth status = %q, want dropped", resp.Status)
+	}
+	for range 3 {
+		_ = receiveAccepted(t, l)
+	}
+
+	nextRegistration := validRegistration
+	nextRegistration.AttemptID = "attempt-002"
+	nextRegistration.Token = "token-002"
+	if err := l.Register(nextRegistration); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	resp = l.evaluate(Request{
+		RunID:     nextRegistration.RunID,
+		StepID:    nextRegistration.StepID,
+		AttemptID: nextRegistration.AttemptID,
+		Token:     nextRegistration.Token,
+		Message:   "new attempt",
+	})
+	if resp.Status != StatusAccepted {
+		t.Fatalf("new registration status = %q, want accepted: %s", resp.Status, resp.Error)
+	}
+	_ = receiveAccepted(t, l)
+	assertNoAccepted(t, l)
+}
+
 func TestListenerDropsWhenAcceptedChannelIsFullWithoutBlockingClose(t *testing.T) {
 	l := newRegisteredListener(t, validRegistration)
 	for range cap(l.accepted) {
@@ -280,6 +388,11 @@ func TestPackageHasNoRunStoreWorkflowOrReportDependencies(t *testing.T) {
 
 func newRegisteredListener(t *testing.T, reg Registration) *Listener {
 	t.Helper()
+	return newRegisteredListenerWithClock(t, reg, time.Now)
+}
+
+func newRegisteredListenerWithClock(t *testing.T, reg Registration, now func() time.Time) *Listener {
+	t.Helper()
 	l, err := NewListener()
 	if err != nil {
 		t.Fatalf("NewListener returned error: %v", err)
@@ -289,6 +402,7 @@ func newRegisteredListener(t *testing.T, reg Registration) *Listener {
 			t.Fatalf("Close returned error: %v", err)
 		}
 	})
+	l.now = now
 	if err := l.Register(reg); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}

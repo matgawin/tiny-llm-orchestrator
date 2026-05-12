@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -66,7 +68,7 @@ type Listener struct {
 	mu           sync.Mutex
 	closed       bool
 	registration Registration
-	limiter      tokenBucket
+	limiter      progressLimiter
 	conns        map[net.Conn]struct{}
 
 	accepted chan AcceptedMessage
@@ -176,7 +178,7 @@ func (l *Listener) Register(reg Registration) error {
 		return errors.New("listener is closed")
 	}
 	l.registration = reg
-	l.limiter = newTokenBucket(l.now())
+	l.limiter = newProgressLimiter()
 	return nil
 }
 
@@ -358,29 +360,19 @@ func consumeEscape(s string) int {
 	}
 }
 
-type tokenBucket struct {
-	tokens float64
-	last   time.Time
+type progressLimiter struct {
+	limiter *rate.Limiter
 }
 
-func newTokenBucket(now time.Time) tokenBucket {
-	return tokenBucket{tokens: 3, last: now}
+func newProgressLimiter() progressLimiter {
+	return progressLimiter{
+		limiter: rate.NewLimiter(rate.Limit(1), 3),
+	}
 }
 
-func (b *tokenBucket) allow(now time.Time) bool {
-	if b.last.IsZero() {
-		*b = newTokenBucket(now)
-	}
-	if now.After(b.last) {
-		b.tokens += now.Sub(b.last).Seconds()
-		if b.tokens > 3 {
-			b.tokens = 3
-		}
-		b.last = now
-	}
-	if b.tokens < 1 {
+func (l progressLimiter) allow(now time.Time) bool {
+	if l.limiter == nil {
 		return false
 	}
-	b.tokens--
-	return true
+	return l.limiter.AllowN(now, 1)
 }
