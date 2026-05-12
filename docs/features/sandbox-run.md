@@ -180,6 +180,16 @@ explicit mount targets the same sandbox path as an automatic PATH mount, Orc
 fails instead of silently letting the explicit mount override the generated
 read-only mount.
 
+If `sandbox.protected_paths` is configured, automatic PATH entries that would
+expose a protected host path are skipped instead of failing sandbox startup.
+The PATH environment string remains unchanged. Orc writes a warning to stderr
+that includes `protected_paths`, the skipped PATH entry, and the matching
+protected host path. Skipped protected PATH entries are not emitted as
+bubblewrap mounts and are not included in
+`ORC_SANDBOX_RUNTIME_DIR_COVERAGE`. Other PATH skip cases, such as missing,
+relative, non-directory, unresolvable, or already covered entries, keep their
+existing quiet skip behavior.
+
 ## Home Policy
 
 `sandbox.home.mode` controls the sandbox HOME path. The allowed values are
@@ -255,6 +265,54 @@ backtick command substitutions are treated as literal strings and are rejected
 when they are not clean absolute paths. Orc does not perform shell expansion,
 tilde expansion, environment interpolation, command substitution, or command
 execution while loading sandbox config.
+
+## Protected Host Paths
+
+`sandbox.protected_paths` declares host paths that Orc-managed mounts must not
+expose inside the whole bubblewrap environment. Protection is resolved before
+any child agents or workers launch. The v1 guarantee is limited to refusing or
+skipping Orc-managed mounts that would expose protected host contents; it does
+not mask arbitrary paths made visible by non-Orc base system mounts.
+
+The default protected path list is empty. No implicit `.ssh`, `.gnupg`, or
+other default host-home protection is enabled. Supported entries are only:
+
+```yaml
+sandbox:
+  protected_paths:
+    - host_home: .ssh
+    - host_home: .gnupg
+    - absolute: /var/lib/orc/secrets
+```
+
+Bare strings, repository-relative paths, `~`, shell or environment expansion,
+and command substitution are invalid. `host_home` means a clean relative
+descendant under the resolved host HOME, not the repository root. It cannot be
+empty, `.`, absolute, unclean, or contain `..`. `absolute` must be a clean
+absolute host path and cannot be `/`.
+
+Missing protected paths are allowed and do not fail startup. Missing means the
+configured literal host path does not exist. If a protected path exists as any
+filesystem object, Orc protects both the literal cleaned host path and the
+resolved real path after symlink evaluation. If an existing protected path
+cannot be resolved with `filepath.EvalSymlinks`, sandbox preparation fails
+rather than guessing what should be protected. Duplicate resolved protected
+paths are deduplicated so the same PATH entry is not warned about repeatedly
+for the same protected path.
+
+A mount conflicts when its resolved host source equals a protected path, is
+under a protected path, or is a parent that would expose a protected child.
+This parent check still applies when the protected child is currently missing.
+Explicit project `sandbox.mounts` and runtime
+`sandbox.requirements.mounts` fail during sandbox preparation when they
+conflict with protected paths. Optional missing project and runtime mounts keep
+their existing skip behavior; if the optional source exists, protected-path
+conflicts apply normally.
+
+Runtime env-sourced mounts are checked after source resolution and before any
+source creation. If `source.create: true` would create a directory that equals,
+contains, or sits under a protected path, sandbox preparation fails without
+creating the directory.
 
 ## Explicit Non-Defaults
 

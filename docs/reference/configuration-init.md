@@ -125,6 +125,21 @@ runtime sandbox requirements; the schema is documented in
 [configuration-runtimes.md](configuration-runtimes.md). Existing user-owned
 `.orc` directories are not automatically migrated when scaffold output changes.
 
+The scaffolded `.orc/config.yaml` includes a commented sandbox example. The
+example includes commented `sandbox.protected_paths` entries for common
+host-home secrets:
+
+```yaml
+# sandbox:
+#   protected_paths:
+#     - host_home: .ssh
+#     - host_home: .gnupg
+```
+
+The example remains commented so the scaffold keeps the v1 default empty
+protected path list. Operators who enable it should keep object-form entries;
+bare strings such as `.ssh` are intentionally invalid.
+
 Implementation, bugfix, mechanical-change, and test-only workflows block dirty
 starts by default so unrelated pre-existing changes do not mix with new work.
 Review and review-fix workflows allow dirty starts by default because their

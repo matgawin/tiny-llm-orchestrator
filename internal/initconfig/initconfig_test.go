@@ -59,6 +59,7 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "# Optional sandbox runner for Codex yolo mode.")
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "#   require_for_workers: true")
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "#   #   mode: host_path")
+	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "#   # protected_paths:\n#   #   - host_home: .ssh\n#   #   - host_home: .gnupg")
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "#     network: true")
 	assertFileContains(t, filepath.Join(root, ".gitignore"), runsIgnoreEntry)
 	if info, err := os.Stat(filepath.Join(root, ".orc", "runs")); err != nil {

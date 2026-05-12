@@ -50,5 +50,11 @@ runtimes:
 #   # mounts without binding the whole host home, set:
 #   # path:
 #   #   mode: host_entries
+#   # Protect specific host-home secret descendants from Orc-managed mounts.
+#   # Missing paths are allowed. Bare strings such as ".ssh" are invalid; use
+#   # object entries so the paths resolve against the host HOME.
+#   # protected_paths:
+#   #   - host_home: .ssh
+#   #   - host_home: .gnupg
 #   bubblewrap:
 #     network: true

@@ -18,6 +18,13 @@ sandbox:
     mode: host_path
   path:
     mode: host_entries
+  protected_paths:
+    - host_home: .ssh
+    - host_home: .gnupg
+    - host_home: .docker
+    - host_home: .password-store
+    - host_home: .pki
+    - host_home: .local/share/keyrings
   bubblewrap:
     network: true
   mounts:

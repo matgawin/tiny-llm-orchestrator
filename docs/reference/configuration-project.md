@@ -236,9 +236,34 @@ behavior.
 declarations. Each entry must set exactly one of `host_home` or `absolute`.
 `host_home` values are clean relative descendant paths under the host HOME,
 such as `.ssh` or `.config/tool/secrets`; absolute values must be clean
-absolute paths and cannot be `/`. These declarations are parsed and validated
-with project config so later sandbox path handling can rely on explicit,
-non-shell-expanded paths.
+absolute paths and cannot be `/`.
+
+The default list is empty. Orc v1 does not implicitly protect `.ssh`,
+`.gnupg`, or any other host-home path unless the project config declares it.
+Entries must use object form:
+
+```yaml
+sandbox:
+  protected_paths:
+    - host_home: .ssh
+    - host_home: .gnupg
+    - absolute: /var/lib/orc/secrets
+```
+
+Bare strings and repository-relative protected paths are invalid. Use
+`host_home: .ssh`, not a bare `.ssh`, because `host_home` means a descendant
+of the resolved host HOME and never a path relative to the repository.
+`host_home` values must not be empty, `.`, absolute, unclean, or contain any
+`..` traversal segment. `absolute` values must not be empty, relative, unclean,
+or `/`. Protected path values are not shell-expanded or interpolated; `~`,
+`$HOME`, `${HOME}`, `$(pwd)`, and backtick command substitutions are literal
+YAML text and are rejected.
+
+Static syntax validation happens while loading project config. Host-dependent
+validation happens while building the sandbox spec for `orc sandbox run`, after
+the host HOME and mount sources are resolved. That phase handles missing
+protected paths, symlink evaluation, and conflicts with project mounts, runtime
+mount requirements, and automatic PATH mounts.
 
 `sandbox.bubblewrap.enabled` is reserved for bubblewrap policy selection; v1
 `orc sandbox run` always shells out to `bwrap` and never treats this field as
