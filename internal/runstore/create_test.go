@@ -32,6 +32,7 @@ func TestCreateRunCreatesInitialArtifacts(t *testing.T) {
 	for _, rel := range artifactDirs() {
 		assertDir(t, filepath.Join(run.Path, rel))
 	}
+	assertDir(t, filepath.Join(run.Path, configDirName))
 	assertFile(t, filepath.Join(run.Path, followupsName))
 	status := readRunStatus(t, run)
 	if status.RunID != run.ID || status.Workflow != "implementation" || status.State != stateRunning {

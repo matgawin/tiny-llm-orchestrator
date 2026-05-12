@@ -91,7 +91,24 @@ V1 never writes bead notes, updates beads, creates beads, or closes beads.
 
 ## Persisted Task Artifacts
 
-Each successful start creates a run through the Run Store and writes:
+Each successful start first loads and validates the live project `.orc`
+configuration, then creates a run through the Run Store and writes config
+snapshot version `000001`:
+
+```text
+config/current.json
+config/000001/resolved.json
+config/000001/manifest.json
+```
+
+`current.json` is a regular JSON file, not a symlink. `resolved.json` is the
+canonical fully resolved runtime contract that later run-bound commands load
+for this run. `manifest.json` records audit metadata for the snapshot, including
+the `run_start` reason, workflow name, source file list, and SHA-256 content
+hashes for `.orc/config.yaml`, loaded workflows, loaded agent descriptors, and
+loaded runtime descriptors.
+
+Run start then writes:
 
 - `task/context.md`: the captured task context used by later prompt and summary
   commands.

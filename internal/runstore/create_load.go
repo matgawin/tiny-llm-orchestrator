@@ -46,6 +46,9 @@ func (s *Store) Create(req CreateRunRequest) (*Run, error) {
 			return nil, fmt.Errorf("create run %q artifact directory %s: %w", runID, dir, err)
 		}
 	}
+	if err := os.Mkdir(filepath.Join(tempDir, configDirName), 0o750); err != nil {
+		return nil, fmt.Errorf("create run %q config directory: %w", runID, err)
+	}
 	if err := writeAtomic(filepath.Join(tempDir, followupsName), nil); err != nil {
 		return nil, fmt.Errorf("create run %q followups.md: %w", runID, err)
 	}
@@ -170,7 +173,7 @@ func publishReservedRunDir(tempDir string, reservation *runDirReservation) error
 	if err := os.Remove(filepath.Join(tempDir, ".lock")); err != nil {
 		return err
 	}
-	for _, name := range append(artifactDirs(), followupsName, eventsName, statusName) {
+	for _, name := range append(artifactDirs(), configDirName, followupsName, eventsName, statusName) {
 		if err := os.Rename(filepath.Join(tempDir, name), filepath.Join(reservation.path, name)); err != nil {
 			return err
 		}

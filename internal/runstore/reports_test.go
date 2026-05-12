@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+const (
+	reportStatusDone  = "done"
+	reportResultReady = "ready"
+)
+
 func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-run")
@@ -23,8 +28,8 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 			StepID:       "plan",
 			AgentID:      "planner",
 			AttemptID:    "attempt-001",
-			Status:       "done",
-			Result:       "ready",
+			Status:       reportStatusDone,
+			Result:       reportResultReady,
 			Summary:      "Plan is ready.",
 			ChangedPaths: []string{"README.md"},
 			Commands:     []string{"go test ./internal/runstore"},
@@ -37,7 +42,7 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
-	if recorded.State != AttemptStateReported || recorded.Status != "done" || recorded.Result != "ready" {
+	if recorded.State != AttemptStateReported || recorded.Status != reportStatusDone || recorded.Result != reportResultReady {
 		t.Fatalf("reported attempt = %+v, want reported done/ready", recorded)
 	}
 	if recorded.Report == nil || recorded.Report.Summary != "Plan is ready." || len(recorded.Report.Followups) != 1 {
@@ -90,8 +95,8 @@ func TestRecordAttemptReportFollowupStageFailureLeavesAttemptActive(t *testing.T
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: attemptID,
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 			Followups: []Followup{{Title: "Later"}},
 		},
@@ -126,8 +131,8 @@ func TestRecordAttemptReportRequiresReportRunID(t *testing.T) {
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: "attempt-001",
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
 	})
@@ -148,8 +153,8 @@ func TestRecordAttemptReportReturnsTargetErrorForStaleAttempt(t *testing.T) {
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: "old-attempt",
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
 	})
@@ -174,8 +179,8 @@ func TestRecordAttemptReportRejectsStartingAttempt(t *testing.T) {
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: "attempt-001",
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
 		ReportName:       "plan",
@@ -213,8 +218,8 @@ func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: "attempt-001",
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
 		ReportName:       "plan",
@@ -260,8 +265,8 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: attemptID,
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 			ReportRef: &ref,
 		},
@@ -317,8 +322,8 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 			StepID:    "plan",
 			AgentID:   "planner",
 			AttemptID: "attempt-001",
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
 		ReportName:       "plan",

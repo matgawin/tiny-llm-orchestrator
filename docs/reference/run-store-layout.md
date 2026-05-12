@@ -70,6 +70,7 @@ Each created run starts with this layout:
   logs/
   snapshots/
   summaries/
+  config/
   followups.md
 ```
 
@@ -82,8 +83,36 @@ task/snapshot.json
 
 Task artifact contents are caller-owned.
 
+Run-start config snapshots are stored outside the artifact list because they are
+the run-bound runtime contract, not user-facing artifacts:
+
+```text
+config/
+  current.json
+  000001/
+    resolved.json
+    manifest.json
+```
+
+`current.json` is a regular JSON file, never a symlink. Its v1 shape is:
+
+```json
+{
+  "schema_version": 1,
+  "version": 1,
+  "version_dir": "000001"
+}
+```
+
+Version directories are six-digit decimal names. `resolved.json` is the
+schema-versioned, fully resolved runtime input for later run-bound commands.
+`manifest.json` is schema-versioned audit metadata for the snapshot source
+files, including SHA-256 hashes.
+
 ## Filesystem Safety
 
 `.orc`, `.orc/runs`, and each run directory must be real directories, not
 symlinks. Bootstrap files and artifact files must be regular files, not
-directories, symlinks, devices, sockets, or FIFOs.
+directories, symlinks, devices, sockets, or FIFOs. Config snapshot directories
+must also be real directories, and `current.json`, `resolved.json`, and
+`manifest.json` must be regular files.

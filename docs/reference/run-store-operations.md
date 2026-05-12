@@ -25,6 +25,10 @@ half-published run layout.
 Public read APIs acquire the same per-run lock before replaying state or
 reading artifacts, so inspection and reload paths observe a stable committed
 snapshot rather than an in-progress event append.
+Config snapshot writes also take the per-run lock. Snapshot version content is
+written before `config/current.json`, so readers never observe a new current
+version that points at partially written `resolved.json` or `manifest.json`
+content.
 
 V1 writes `schema_version: 1` and does not implement schema migrations. The
 only metadata backfill is `.lock` creation for legacy run directories that
@@ -71,6 +75,16 @@ appended, the store attempts to roll back the artifact file. Retrying after a
 successful event append or status materialization failure is not idempotent
 unless the caller adds its own idempotency key in a future event contract.
 
+`WriteInitialConfigSnapshot`:
+
+- Order: write `config/000001/resolved.json`, write
+  `config/000001/manifest.json`, then atomically replace
+  `config/current.json`.
+- The snapshot files are not run artifacts and do not append events.
+- `current.json` is a regular file with `schema_version`, numeric `version`,
+  and six-digit `version_dir`; symlinks are rejected by the same filesystem
+  safety checks as other run-store paths.
+
 Attempt lifecycle APIs follow the same status-backed write failure contract:
 ambiguous append and status refresh failures return the candidate attempt/event
 when the event may have committed, and callers should reload before retrying.
@@ -87,6 +101,8 @@ append-then-status ordering: it commits the report artifact before appending
   `RecordIgnoredReport` take a run-level lock, append their event, then refresh
   `status.json`, except for the report-content commit-order case described in
   [Artifacts](run-store-status-artifacts.md#artifacts).
+- `WriteInitialConfigSnapshot` takes the run-level lock and commits the current
+  pointer after the version directory files are durable.
 - `Load`, `ReadArtifact`, and `OpenArtifactAppend` also take the run-level lock.
   For legacy runs that predate `.lock`, these APIs create the missing lock file
   as metadata-only backfill before replaying state, reading artifact content, or

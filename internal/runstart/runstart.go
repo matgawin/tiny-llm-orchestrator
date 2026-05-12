@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
@@ -122,10 +123,14 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return createRun(opts, store, workflow.Start, task, vcsSnapshot)
+	return createRun(opts, project, store, workflow.Start, task, vcsSnapshot)
 }
 
-func createRun(opts Options, store *runstore.Store, initialState string, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
+func createRun(opts Options, project *config.Project, store *runstore.Store, initialState string, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
+	configSnapshot, err := configsnapshot.BuildInitial(project, opts.Workflow, opts.Time)
+	if err != nil {
+		return Result{}, err
+	}
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        opts.RunID,
 		Workflow:     opts.Workflow,
@@ -135,6 +140,9 @@ func createRun(opts Options, store *runstore.Store, initialState string, task re
 	})
 	if err != nil {
 		return Result{}, err
+	}
+	if err := store.WriteInitialConfigSnapshot(run.ID, configSnapshot); err != nil {
+		return Result{}, cleanupStartedRun(run.Path, err)
 	}
 	if err := writeTaskArtifact(store, run.ID, runstore.KindTaskContext, task.context, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)

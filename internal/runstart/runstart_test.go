@@ -42,6 +42,7 @@ func TestStartTaskFilePersistsContextAndSnapshot(t *testing.T) {
 	if snapshot.BeadLookup.Attempted {
 		t.Fatalf("bead lookup attempted = true, want false")
 	}
+	assertInitialConfigSnapshot(t, result.Path, "implementation")
 	vcsSnapshot := readPreRunVCSSnapshot(t, result.Path)
 	if vcsSnapshot.Kind != vcs.KindNone || vcsSnapshot.Dirty {
 		t.Fatalf("vcs snapshot kind/dirty = %s/%t, want none/false", vcsSnapshot.Kind, vcsSnapshot.Dirty)
@@ -240,6 +241,43 @@ func TestCleanupStartedRunReportsCleanupFailure(t *testing.T) {
 	}
 }
 
+func TestConfigSnapshotWriteFailureCleanupRemovesStartedRun(t *testing.T) {
+	root := t.TempDir()
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("open run store: %v", err)
+	}
+	run, err := store.Create(runstore.CreateRunRequest{RunID: "snapshot-cleanup-run", Workflow: "implementation"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if err := os.Remove(filepath.Join(run.Path, "config")); err != nil {
+		t.Fatalf("remove config dir: %v", err)
+	}
+	outside := filepath.Join(root, "outside-config")
+	if err := os.Mkdir(outside, 0o750); err != nil {
+		t.Fatalf("mkdir outside config: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(run.Path, "config")); err != nil {
+		t.Fatalf("symlink config dir: %v", err)
+	}
+
+	writeErr := store.WriteInitialConfigSnapshot(run.ID, runstore.ConfigSnapshot{
+		Version:  1,
+		Resolved: []byte("{\"schema_version\":1}\n"),
+		Manifest: []byte("{\"schema_version\":1}\n"),
+	})
+	if writeErr == nil {
+		t.Fatal("WriteInitialConfigSnapshot returned nil error, want symlink failure")
+	}
+	if err := cleanupStartedRun(run.Path, writeErr); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("cleanup error = %v, want original snapshot write failure", err)
+	}
+	if _, statErr := os.Stat(run.Path); !os.IsNotExist(statErr) {
+		t.Fatalf("run path stat err = %v, want cleanup removal", statErr)
+	}
+}
+
 func TestStartEnforcesWorkflowTaskContextPolicy(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -355,6 +393,82 @@ func readTaskSnapshot(t *testing.T, runPath string) Snapshot {
 		t.Fatalf("unmarshal task snapshot: %v\n%s", err, string(content))
 	}
 	return snapshot
+}
+
+func assertInitialConfigSnapshot(t *testing.T, runPath, workflow string) {
+	t.Helper()
+	currentContent := readRunStartFile(t, filepath.Join(runPath, "config", "current.json"))
+	var current struct {
+		SchemaVersion int    `json:"schema_version"`
+		Version       int    `json:"version"`
+		VersionDir    string `json:"version_dir"`
+	}
+	if err := json.Unmarshal(currentContent, &current); err != nil {
+		t.Fatalf("unmarshal config current.json: %v\n%s", err, string(currentContent))
+	}
+	if current.SchemaVersion != 1 || current.Version != 1 || current.VersionDir != "000001" {
+		t.Fatalf("config current = %+v, want schema 1 version 1 dir 000001", current)
+	}
+
+	resolvedContent := readRunStartFile(t, filepath.Join(runPath, "config", "000001", "resolved.json"))
+	var resolved struct {
+		SchemaVersion int `json:"schema_version"`
+		Project       struct {
+			Config    json.RawMessage            `json:"Config"`
+			Workflows map[string]json.RawMessage `json:"Workflows"`
+			Agents    map[string]json.RawMessage `json:"Agents"`
+			Runtimes  map[string]json.RawMessage `json:"Runtimes"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(resolvedContent, &resolved); err != nil {
+		t.Fatalf("unmarshal resolved config snapshot: %v\n%s", err, string(resolvedContent))
+	}
+	if resolved.SchemaVersion != 1 {
+		t.Fatalf("resolved schema_version = %d, want 1", resolved.SchemaVersion)
+	}
+	if _, ok := resolved.Project.Workflows[workflow]; !ok {
+		t.Fatalf("resolved workflows = %+v, want %q", resolved.Project.Workflows, workflow)
+	}
+	if len(resolved.Project.Agents) != 1 || len(resolved.Project.Runtimes) != 1 || len(resolved.Project.Config) == 0 {
+		t.Fatalf("resolved project missing config/agents/runtimes: %+v", resolved.Project)
+	}
+
+	manifestContent := readRunStartFile(t, filepath.Join(runPath, "config", "000001", "manifest.json"))
+	var manifest struct {
+		SchemaVersion int    `json:"schema_version"`
+		Version       int    `json:"version"`
+		VersionDir    string `json:"version_dir"`
+		Reason        string `json:"reason"`
+		Workflow      string `json:"workflow"`
+		HashAlgorithm string `json:"hash_algorithm"`
+		SourceFiles   []struct {
+			Path      string `json:"path"`
+			SHA256    string `json:"sha256"`
+			SourceID  string `json:"source_id"`
+			SourceRef string `json:"source_ref"`
+		} `json:"source_files"`
+	}
+	if err := json.Unmarshal(manifestContent, &manifest); err != nil {
+		t.Fatalf("unmarshal config manifest: %v\n%s", err, string(manifestContent))
+	}
+	if manifest.SchemaVersion != 1 || manifest.Version != 1 || manifest.VersionDir != "000001" || manifest.Reason != "run_start" || manifest.Workflow != workflow || manifest.HashAlgorithm != "sha256" {
+		t.Fatalf("manifest metadata = %+v, want initial run_start snapshot metadata", manifest)
+	}
+	wantPaths := map[string]bool{
+		".orc/config.yaml":                   true,
+		".orc/workflows/implementation.yaml": true,
+		".orc/agents/planner.md":             true,
+		".orc/runtimes/codex.yaml":           true,
+	}
+	for _, source := range manifest.SourceFiles {
+		if len(source.SHA256) != 64 {
+			t.Fatalf("source %s sha256 len = %d, want 64", source.Path, len(source.SHA256))
+		}
+		delete(wantPaths, source.Path)
+	}
+	if len(wantPaths) != 0 {
+		t.Fatalf("manifest missing source paths: %+v", wantPaths)
+	}
 }
 
 func assertLoadedRunHasTaskArtifacts(t *testing.T, root, runID string) {
