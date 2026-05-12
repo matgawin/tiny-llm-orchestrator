@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
@@ -124,6 +125,7 @@ func createCommandLauncherRun(t *testing.T, opts commandWorkflowOptions) (string
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeLauncherConfigSnapshot(t, root, store, run.ID)
 	return root, run.ID
 }
 
@@ -141,6 +143,7 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeLauncherConfigSnapshot(t, root, store, run.ID)
 	if opts.TaskContext {
 		if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
 			Kind:    runstore.KindTaskContext,
@@ -168,6 +171,7 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeLauncherConfigSnapshot(t, root, store, run.ID)
 	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    "task",
@@ -177,6 +181,21 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 		t.Fatalf("WriteArtifact task returned error: %v", err)
 	}
 	return root, run.ID
+}
+
+func writeLauncherConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
+	t.Helper()
+	project, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("Load config returned error: %v", err)
+	}
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", fixedLauncherTime())
+	if err != nil {
+		t.Fatalf("BuildInitial returned error: %v", err)
+	}
+	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
+	}
 }
 
 func writeLoopCapLauncherProject(t *testing.T, root, defaultCaps, workflowCaps string) {

@@ -185,30 +185,33 @@ func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
 	}
 }
 
-func TestLaunchNextRejectsUnsupportedCustomRuntimeCapabilitiesBeforeLaunch(t *testing.T) {
+func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) {
 	for _, tt := range []struct {
-		name     string
-		runtime  customRuntimeDescriptor
-		workflow customRuntimeWorkflow
-		wantErr  string
+		name       string
+		liveUpdate func(t *testing.T, root, recordPath string)
+		wantRecord string
 	}{
 		{
-			name:    "model request without model capability",
-			runtime: customRuntimeDescriptor{DirsSupported: true},
-			workflow: customRuntimeWorkflow{
-				DefaultsRuntime: "recorder",
-				DefaultsModel:   "workflow-model",
+			name: "live runtime removes model capability",
+			liveUpdate: func(t *testing.T, root, recordPath string) {
+				t.Helper()
+				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
+					ModelSupported: false,
+					DirsSupported:  true,
+				}))
 			},
-			wantErr: `defaults.model requires runtime "recorder" model.supported=true`,
+			wantRecord: "arg:7=snapshot-model",
 		},
 		{
-			name:    "runtime dirs request without directory capability",
-			runtime: customRuntimeDescriptor{ModelSupported: true},
-			workflow: customRuntimeWorkflow{
-				DefaultsRuntime: "recorder",
-				DefaultsDirs:    []string{"shared"},
+			name: "live runtime removes directory capability",
+			liveUpdate: func(t *testing.T, root, recordPath string) {
+				t.Helper()
+				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
+					ModelSupported: true,
+					DirsSupported:  false,
+				}))
 			},
-			wantErr: `runtime_dirs require runtime "recorder" directories.supported=true`,
+			wantRecord: "arg:9=",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -216,24 +219,34 @@ func TestLaunchNextRejectsUnsupportedCustomRuntimeCapabilitiesBeforeLaunch(t *te
 			recordPath := filepath.Join(root, "runtime-record.txt")
 			runID := writeCustomRuntimeLauncherProject(t, root, customRuntimeProject{
 				RecordPath:     recordPath,
-				PromptDelivery: runtimePromptDeliveryStdin,
-				Runtime:        tt.runtime,
-				Workflow:       tt.workflow,
+				PromptDelivery: runtimePromptDeliveryFile,
+				Runtime: customRuntimeDescriptor{
+					ModelSupported: true,
+					DirsSupported:  true,
+				},
+				Workflow: customRuntimeWorkflow{
+					DefaultsRuntime: "recorder",
+					DefaultsModel:   "snapshot-model",
+					DefaultsDirs:    []string{"shared"},
+				},
 			})
+			tt.liveUpdate(t, root, recordPath)
 
 			result, err := LaunchNext(context.Background(), Options{
 				Root:  root,
 				RunID: runID,
 				Time:  fixedLauncherTime(),
 			})
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("LaunchNext error = %v, want %q", err, tt.wantErr)
+			if err != nil {
+				t.Fatalf("LaunchNext returned error after live config mutation: %v", err)
 			}
-			if result.Launched || result.Attempt.AttemptID != "" {
-				t.Fatalf("result = %+v, want validation failure before attempt launch", result)
+			if !result.Launched {
+				t.Fatal("Launched = false, want snapshot-backed launch")
 			}
-			if _, statErr := os.Stat(recordPath); !os.IsNotExist(statErr) {
-				t.Fatalf("record stat error = %v, want fixture not launched", statErr)
+			record := string(readLauncherFile(t, recordPath))
+			assertRecordContains(t, record, tt.wantRecord)
+			if !strings.Contains(record, "prompt_file_content:# Tiny Orc Worker Prompt") {
+				t.Fatalf("record = %q, want prompt from snapshot-backed launch", record)
 			}
 		})
 	}
@@ -307,6 +320,7 @@ runtimes:
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeLauncherConfigSnapshot(t, root, store, run.ID)
 	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    "task",

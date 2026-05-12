@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/workflow"
@@ -100,6 +102,39 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 	}
 	if got := latestEventType(t, loaded.Events); got != "artifact.written" {
 		t.Fatalf("latest event type = %s, want artifact.written", got)
+	}
+}
+
+func TestRenderUsesPinnedAgentDescriptorAfterLiveMutation(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n\nUse the pinned descriptor.\n", fixedPromptTime())
+	writePromptFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), `---
+id: planner
+role: planner
+description: Live mutated planner.
+---
+
+LIVE MUTATED BODY
+`)
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-1",
+		Time:      fixedPromptTime().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	prompt := string(result.Content)
+	assertPromptContainsAll(t, prompt, []string{"Creates implementation plans and scope boundaries.", "Plan the work and report readiness."})
+	if strings.Contains(prompt, "LIVE MUTATED BODY") {
+		t.Fatalf("prompt used live mutated agent descriptor:\n%s", prompt)
 	}
 }
 
@@ -201,6 +236,7 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	runID := run.ID
+	writePromptConfigSnapshot(t, root, store, runID)
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
 	recordReportedLoopPromptAttempt(t, store, runID, "attempt-1", "")
 	recordReportedLoopPromptAttempt(t, store, runID, "attempt-2", "attempt-1")
@@ -586,12 +622,28 @@ func createPromptRun(t *testing.T, root, state string) string {
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writePromptConfigSnapshot(t, root, store, run.ID)
 	if state != workflow.RunStatusRunning {
 		if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: state, Time: fixedPromptTime().Add(time.Minute)}); err != nil {
 			t.Fatalf("UpdateStatus returned error: %v", err)
 		}
 	}
 	return run.ID
+}
+
+func writePromptConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
+	t.Helper()
+	project, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("Load config returned error: %v", err)
+	}
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", fixedPromptTime())
+	if err != nil {
+		t.Fatalf("BuildInitial returned error: %v", err)
+	}
+	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
+	}
 }
 
 func openPromptStore(t *testing.T, root string) *runstore.Store {

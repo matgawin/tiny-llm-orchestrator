@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
@@ -34,6 +36,7 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeReportConfigSnapshot(t, root, store, run.ID)
 	startActiveAttempt(t, store, run.ID, "attempt-001")
 
 	result, err := Submit(context.Background(), Options{
@@ -66,6 +69,65 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
 	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != reportStatusFailed || attempt.Result != runstore.AttemptResultInvalidReport {
 		t.Fatalf("persisted attempt = %+v, want failed/invalid_report", attempt)
+	}
+}
+
+func TestSubmitValidatesReportAgainstPinnedWorkflowAfterLiveMutation(t *testing.T) {
+	root := t.TempDir()
+	writeSkippableReportProject(t, root)
+	store, err := runstore.Open(root)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	run, err := store.Create(runstore.CreateRunRequest{
+		RunID:    "pinned-report-run",
+		Workflow: "implementation",
+		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	writeReportConfigSnapshot(t, root, store, run.ID)
+	startActiveAttempt(t, store, run.ID, "attempt-1")
+	writeReportWorkflow(t, root, `name: implementation
+start: plan
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  runtime: codex
+  retries: {}
+steps:
+  plan:
+    agent: planner
+    allowed_results:
+      blocked: [needs_human]
+    on:
+      blocked/needs_human: blocked_for_human
+`)
+
+	result, err := Submit(context.Background(), Options{
+		Root: root,
+		Report: runstore.Report{
+			RunID:     run.ID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-1",
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Pinned workflow accepted this.",
+		},
+		Time: time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Submit returned error after live workflow mutation: %v", err)
+	}
+	if result.Attempt.State != runstore.AttemptStateReported {
+		t.Fatalf("attempt state = %q, want reported", result.Attempt.State)
 	}
 }
 
@@ -134,6 +196,7 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeReportConfigSnapshot(t, root, store, run.ID)
 	startActiveAttempt(t, store, run.ID, "attempt-001")
 
 	report := runstore.Report{
@@ -180,6 +243,21 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 	}
 }
 
+func writeReportConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
+	t.Helper()
+	project, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("Load config returned error: %v", err)
+	}
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildInitial returned error: %v", err)
+	}
+	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
+	}
+}
+
 func writeSkippableReportProject(t *testing.T, root string) {
 	t.Helper()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
@@ -210,6 +288,13 @@ steps:
 `
 	if err := os.WriteFile(filepath.Join(root, ".orc", "workflows", "implementation.yaml"), []byte(workflow), 0o600); err != nil {
 		t.Fatalf("write skippable workflow: %v", err)
+	}
+}
+
+func writeReportWorkflow(t *testing.T, root, workflow string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, ".orc", "workflows", "implementation.yaml"), []byte(workflow), 0o600); err != nil {
+		t.Fatalf("write report workflow: %v", err)
 	}
 }
 

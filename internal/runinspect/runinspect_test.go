@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/vcs"
@@ -76,6 +78,46 @@ func TestNextShowsSelectedStepWithoutLaunching(t *testing.T) {
 	after := snapshotRunDir(t, root, runID)
 	if !maps.Equal(before, after) {
 		t.Fatalf("Next mutated run directory:\nbefore: %+v\nafter: %+v", before, after)
+	}
+}
+
+func TestNextUsesPinnedWorkflowAfterLiveMutation(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root)
+	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+	writeInspectWorkflow(t, root, `name: implementation
+start: review
+execution:
+  mode: sequential
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  runtime: codex
+  retries: {}
+steps:
+  review:
+    agent: reviewer
+    allowed_results:
+      done: [ready]
+    on:
+      done/ready: ready_for_human
+`)
+
+	var stdout bytes.Buffer
+	if err := Next(context.Background(), Options{Root: root, RunID: runID, Stdout: &stdout}); err != nil {
+		t.Fatalf("Next returned error after live workflow mutation: %v", err)
+	}
+	output := stdout.String()
+	assertContainsAll(t, "next", output, []string{
+		"decision: select_step\n",
+		"selected_step: plan\n",
+		"agent: planner\n",
+	})
+	if strings.Contains(output, "selected_step: review") {
+		t.Fatalf("Next used live workflow mutation:\n%s", output)
 	}
 }
 
@@ -1046,6 +1088,7 @@ func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) st
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeInspectConfigSnapshot(t, root, store, run.ID)
 	if artifact != nil {
 		if _, err := store.WriteArtifact(run.ID, *artifact); err != nil {
 			t.Fatalf("WriteArtifact returned error: %v", err)
@@ -1063,6 +1106,21 @@ func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) st
 	return run.ID
 }
 
+func writeInspectConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
+	t.Helper()
+	project, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("Load config returned error: %v", err)
+	}
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", fixedTime())
+	if err != nil {
+		t.Fatalf("BuildInitial returned error: %v", err)
+	}
+	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
+	}
+}
+
 func writeProject(t *testing.T, root string) {
 	t.Helper()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
@@ -1070,6 +1128,13 @@ func writeProject(t *testing.T, root string) {
 		BlockedResults:   []string{"blocked"},
 		FailedResults:    []string{"missing_report", "process_error", "timeout", "invalid_report"},
 	})
+}
+
+func writeInspectWorkflow(t *testing.T, root, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, ".orc", "workflows", "implementation.yaml"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write inspect workflow: %v", err)
+	}
 }
 
 func fixedTime() time.Time {

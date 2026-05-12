@@ -521,14 +521,15 @@ func newStartedAttempt(runID string, req StartAttemptRequest) (Attempt, error) {
 		return Attempt{}, errors.New("report exit grace must be > 0")
 	}
 	return Attempt{
-		RunID:           runID,
-		StepID:          req.StepID,
-		AgentID:         req.AgentID,
-		AttemptID:       req.AttemptID,
-		State:           AttemptStateStarting,
-		Timeout:         req.Timeout.String(),
-		ReportExitGrace: req.ReportExitGrace.String(),
-		StartedAt:       normalizeTime(req.Time),
+		RunID:                 runID,
+		StepID:                req.StepID,
+		AgentID:               req.AgentID,
+		AttemptID:             req.AttemptID,
+		ConfigSnapshotVersion: req.ConfigSnapshotVersion,
+		State:                 AttemptStateStarting,
+		Timeout:               req.Timeout.String(),
+		ReportExitGrace:       req.ReportExitGrace.String(),
+		StartedAt:             normalizeTime(req.Time),
 	}, nil
 }
 

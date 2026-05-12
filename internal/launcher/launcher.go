@@ -147,6 +147,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		StepID:                             decision.Step,
 		AgentID:                            step.EffectiveAgentID(),
 		AttemptID:                          attemptID,
+		ConfigSnapshotVersion:              loaded.ConfigSnapshotVersion,
 		Timeout:                            loaded.Workflow.Defaults.Timeout.Duration,
 		ReportExitGrace:                    loaded.Workflow.Defaults.ReportExitGrace.Duration,
 		Time:                               at,

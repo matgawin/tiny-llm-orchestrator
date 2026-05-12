@@ -95,6 +95,7 @@ shape as `active_attempt`.
     "step_id": "plan",
     "agent_id": "planner",
     "attempt_id": "20260504T120000Z-plan-a1b2c3",
+    "config_snapshot_version": 1,
     "state": "active",
     "pid": 12345,
     "process_start_time": "123456789",
@@ -117,6 +118,7 @@ shape as `active_attempt`.
   "attempts": [
     {
       "attempt_id": "20260504T120000Z-plan-a1b2c3",
+      "config_snapshot_version": 1,
       "state": "active",
       "prompt_ref": {
         "path": "prompts/000002-plan.md"
@@ -135,6 +137,10 @@ shape as `active_attempt`.
   }
 }
 ```
+
+`config_snapshot_version` records the run config snapshot version used when the
+attempt was started. Historical attempts that predate config snapshot loading
+may omit it.
 
 Attempt states currently materialized by the launcher are:
 

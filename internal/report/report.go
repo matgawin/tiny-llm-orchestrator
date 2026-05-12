@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
@@ -102,7 +103,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 		return recordInvalidReport(store, payload, validationErrs, opts.Time, beforeRecord)
 	}
 
-	workflowConfig, err := loadWorkflowConfig(opts.Root, run)
+	workflowConfig, err := loadWorkflowConfig(run)
 	if err != nil {
 		return Result{}, err
 	}
@@ -170,12 +171,12 @@ func recordTargetRaceResult(store *runstore.Store, report runstore.Report, at ti
 	return Result{RunID: report.RunID, Event: ignoreErr.Event, Ignored: true}, ignoreErr.Err, true
 }
 
-func loadWorkflowConfig(root string, run *runstore.Run) (config.Workflow, error) {
-	project, err := config.Load(root)
+func loadWorkflowConfig(run *runstore.Run) (config.Workflow, error) {
+	snapshot, err := configsnapshot.LoadCurrent(run)
 	if err != nil {
-		return config.Workflow{}, fmt.Errorf("load project config: %w", err)
+		return config.Workflow{}, err
 	}
-	workflowConfig, ok := project.Workflows[run.Status.Workflow]
+	workflowConfig, ok := snapshot.Project.Workflows[run.Status.Workflow]
 	if !ok {
 		return config.Workflow{}, fmt.Errorf("workflow %q from run %q is not configured", run.Status.Workflow, run.ID)
 	}

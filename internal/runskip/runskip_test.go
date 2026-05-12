@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
@@ -22,6 +23,7 @@ func TestSkipPersistsAuditedTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeSkipConfigSnapshot(t, root, store, run.ID)
 	at := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
 
 	result, err := Skip(context.Background(), Options{
@@ -65,6 +67,7 @@ func TestSkipConsumesPriorOutcomeWhenSelectedStepCameFromRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+	writeSkipConfigSnapshot(t, root, store, run.ID)
 	recordReportedAttempt(t, store, run.ID, "plan-attempt", "plan", "planner", "done", "ready")
 
 	before, err := store.Load(run.ID)
@@ -204,6 +207,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create returned error: %v", err)
 			}
+			writeSkipConfigSnapshot(t, root, store, run.ID)
 			tt.setup(t, store, run.ID)
 			before, err := store.Load(run.ID)
 			if err != nil {
@@ -245,6 +249,7 @@ func TestSkipRejectsWrongStepNonSkippableAndBlankReason(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create returned error: %v", err)
 			}
+			writeSkipConfigSnapshot(t, root, store, run.ID)
 
 			_, err = Skip(context.Background(), Options{Root: root, RunID: run.ID, StepID: tt.stepID, Reason: tt.reason})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -258,6 +263,21 @@ func TestSkipRejectsWrongStepNonSkippableAndBlankReason(t *testing.T) {
 				t.Fatalf("state mutated after rejection: %+v", loaded.Status)
 			}
 		})
+	}
+}
+
+func writeSkipConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
+	t.Helper()
+	project, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("Load config returned error: %v", err)
+	}
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildInitial returned error: %v", err)
+	}
+	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
 }
 

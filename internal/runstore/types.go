@@ -159,30 +159,31 @@ type ArtifactRef struct {
 
 // Attempt is a durable worker attempt materialized from attempt events.
 type Attempt struct {
-	RunID            string       `json:"run_id"`
-	StepID           string       `json:"step_id"`
-	AgentID          string       `json:"agent_id"`
-	AttemptID        string       `json:"attempt_id"`
-	State            string       `json:"state"`
-	Status           string       `json:"status,omitempty"`
-	Result           string       `json:"result,omitempty"`
-	PID              int          `json:"pid,omitempty"`
-	ProcessStartTime string       `json:"process_start_time,omitempty"`
-	ExitCode         *int         `json:"exit_code,omitempty"`
-	ExitState        string       `json:"exit_state,omitempty"`
-	Timeout          string       `json:"timeout"`
-	ReportExitGrace  string       `json:"report_exit_grace"`
-	PromptRef        *ArtifactRef `json:"prompt_ref,omitempty"`
-	LogRef           *ArtifactRef `json:"log_ref,omitempty"`
-	ReportRef        *ArtifactRef `json:"report_ref,omitempty"`
-	Report           *Report      `json:"report,omitempty"`
-	StartedAt        time.Time    `json:"started_at"`
-	FinishedAt       *time.Time   `json:"finished_at,omitempty"`
-	Recovered        bool         `json:"recovered,omitempty"`
-	SupersededBy     string       `json:"superseded_by,omitempty"`
-	SupersededAt     *time.Time   `json:"superseded_at,omitempty"`
-	SupersededReason string       `json:"superseded_reason,omitempty"`
-	ConsumedByEvent  int          `json:"consumed_by_event,omitempty"`
+	RunID                 string       `json:"run_id"`
+	StepID                string       `json:"step_id"`
+	AgentID               string       `json:"agent_id"`
+	AttemptID             string       `json:"attempt_id"`
+	ConfigSnapshotVersion int          `json:"config_snapshot_version,omitempty"`
+	State                 string       `json:"state"`
+	Status                string       `json:"status,omitempty"`
+	Result                string       `json:"result,omitempty"`
+	PID                   int          `json:"pid,omitempty"`
+	ProcessStartTime      string       `json:"process_start_time,omitempty"`
+	ExitCode              *int         `json:"exit_code,omitempty"`
+	ExitState             string       `json:"exit_state,omitempty"`
+	Timeout               string       `json:"timeout"`
+	ReportExitGrace       string       `json:"report_exit_grace"`
+	PromptRef             *ArtifactRef `json:"prompt_ref,omitempty"`
+	LogRef                *ArtifactRef `json:"log_ref,omitempty"`
+	ReportRef             *ArtifactRef `json:"report_ref,omitempty"`
+	Report                *Report      `json:"report,omitempty"`
+	StartedAt             time.Time    `json:"started_at"`
+	FinishedAt            *time.Time   `json:"finished_at,omitempty"`
+	Recovered             bool         `json:"recovered,omitempty"`
+	SupersededBy          string       `json:"superseded_by,omitempty"`
+	SupersededAt          *time.Time   `json:"superseded_at,omitempty"`
+	SupersededReason      string       `json:"superseded_reason,omitempty"`
+	ConsumedByEvent       int          `json:"consumed_by_event,omitempty"`
 }
 
 const (
@@ -382,12 +383,13 @@ type artifactWrittenPayload struct {
 
 // StartAttemptRequest describes the active worker attempt to persist.
 type StartAttemptRequest struct {
-	StepID          string
-	AgentID         string
-	AttemptID       string
-	Timeout         time.Duration
-	ReportExitGrace time.Duration
-	Time            time.Time
+	StepID                string
+	AgentID               string
+	AttemptID             string
+	ConfigSnapshotVersion int
+	Timeout               time.Duration
+	ReportExitGrace       time.Duration
+	Time                  time.Time
 	// ConsumeAttemptID records the latest terminal attempt ID this start consumes.
 	ConsumeAttemptID string
 	// RetryLineage records updated retry counts when the consumed outcome is retried.
