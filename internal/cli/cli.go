@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
+
+	"github.com/spf13/cobra"
 
 	"tiny-llm-orchestrator/orc/internal/sandbox"
 )
@@ -25,39 +28,82 @@ func Execute(args []string, stdout, stderr io.Writer) error {
 
 // ExecuteWithInput runs the orc command with explicit streams.
 func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if len(args) == 0 {
-		return printHelp(stdout)
+	root := newRootCommand(stdin, stdout, stderr)
+	root.SetArgs(args)
+	err := root.Execute()
+	if err != nil && isRootRoutingError(err) {
+		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+			return writeErr
+		}
 	}
+	return err
+}
 
-	switch args[0] {
-	case "-h", helpFlag, helpCommand:
-		return printHelp(stdout)
-	case "version":
-		if _, err := fmt.Fprintf(stdout, "%s %s\n", appName, version); err != nil {
-			return err
-		}
-		return nil
-	case "init":
-		return executeInit(args[1:], stdin, stdout, stderr)
-	case "progress":
-		return executeProgress(args[1:], stdout, stderr)
-	case "run":
-		return executeRun(args[1:], stdin, stdout, stderr)
-	case "sandbox":
-		return executeSandbox(args[1:], stdin, stdout, stderr)
-	case "worker":
-		return executeWorker(args[1:], stdout, stderr)
-	case "report":
-		return executeReport(args[1:], stdout, stderr)
-	default:
-		if _, err := fmt.Fprintf(stderr, "%s: unknown command %q\n\n", appName, args[0]); err != nil {
-			return err
-		}
-		if err := printHelp(stderr); err != nil {
-			return err
-		}
-		return fmt.Errorf("unknown command: %s", args[0])
+func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           appName,
+		Short:         "Tiny LLM Orchestrator control plane",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
 	}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	if stdin != nil {
+		cmd.SetIn(stdin)
+	}
+	cmd.DisableSuggestions = true
+	cmd.CompletionOptions.DisableDefaultCmd = true
+
+	cmd.AddCommand(
+		legacyCommand("init", "Scaffold project-local Tiny Orc config", func(args []string) error {
+			return executeInit(args, stdin, stdout, stderr)
+		}),
+		legacyCommand("progress", "Send optional live worker progress to the supervising listener", func(args []string) error {
+			return executeProgress(args, stdout, stderr)
+		}),
+		legacyCommand("report", "Validate and persist a worker report", func(args []string) error {
+			return executeReport(args, stdout, stderr)
+		}),
+		legacyCommand("run", "Manage orchestration runs", func(args []string) error {
+			return executeRun(args, stdin, stdout, stderr)
+		}),
+		legacyCommand("sandbox", "Run configured commands through bubblewrap", func(args []string) error {
+			return executeSandbox(args, stdin, stdout, stderr)
+		}),
+		legacyCommand("worker", "Launch and supervise worker attempts", func(args []string) error {
+			return executeWorker(args, stdout, stderr)
+		}),
+		legacyCommand("version", "Print version information", func(args []string) error {
+			_, err := fmt.Fprintf(stdout, "%s %s\n", appName, version)
+			return err
+		}),
+	)
+
+	return cmd
+}
+
+func legacyCommand(use, short string, run func([]string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:                use,
+		Short:              short,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		SilenceErrors:      true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(args)
+		},
+	}
+}
+
+func isRootRoutingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.HasPrefix(message, "unknown command ") || strings.HasPrefix(message, "unknown flag: ")
 }
 
 // ExitCode returns the process exit code represented by err.

@@ -5,29 +5,6 @@ import (
 	"io"
 )
 
-func printHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s is the Tiny LLM Orchestrator control plane.
-
-Usage:
-  %s [command]
-
-Available Commands:
-  help        Show command help
-  init        Scaffold project-local Tiny Orc config
-  progress    Send optional live worker progress to the supervising listener
-  report      Validate and persist a worker report
-  run         Manage orchestration runs
-  sandbox     Run configured commands through bubblewrap
-  worker      Launch and supervise worker attempts
-  version     Print version information
-
-Flags:
-  -h, --help  Show command help
-`, appName, appName)
-
-	return err
-}
-
 func printProgressHelp(w io.Writer) error {
 	_, err := fmt.Fprintf(w, `%s progress sends optional live worker progress to the supervising listener.
 

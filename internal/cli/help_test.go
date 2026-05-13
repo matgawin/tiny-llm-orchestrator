@@ -24,6 +24,38 @@ func TestExecuteHelp(t *testing.T) {
 	}
 }
 
+func TestRootCommandUsesInjectedStreams(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	root := newRootCommand(strings.NewReader(""), &stdout, &stderr)
+	root.SetArgs([]string{"help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("root Execute returned error: %v", err)
+	}
+
+	if output := stdout.String(); !strings.Contains(output, "Usage:") || !strings.Contains(output, "Available Commands:") {
+		t.Fatalf("stdout missing Cobra help:\n%s", output)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestExecuteRootNoArgsShowsHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Execute(nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if output := stdout.String(); !strings.Contains(output, "Usage:") {
+		t.Fatalf("stdout missing help:\n%s", output)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestExecuteVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	oldVersion := version
