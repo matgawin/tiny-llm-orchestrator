@@ -40,51 +40,6 @@ Flags:
 	return err
 }
 
-func printSandboxHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s sandbox runs configured commands through bubblewrap.
-
-Usage:
-  %s sandbox [command]
-
-Available Commands:
-  run  Run sandbox.command.argv from .orc/config.yaml through bwrap
-
-Flags:
-  -h, --help  Show command help
-`, appName, appName)
-
-	return err
-}
-
-func printSandboxRunHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s sandbox run launches the configured sandbox command through the system bwrap binary.
-
-Usage:
-  %s sandbox run
-
-The sandbox command must be declared as sandbox.command.argv in .orc/config.yaml.
-orc sandbox run is Linux-only, requires bubblewrap on PATH, and refuses to run the command unsandboxed.
-`, appName, appName)
-
-	return err
-}
-
-func printWorkerHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s worker launches and supervises worker attempts.
-
-Usage:
-  %s worker [command]
-
-Available Commands:
-  launch-next  Launch the workflow-selected worker for a run
-
-Flags:
-  -h, --help  Show command help
-`, appName, appName)
-
-	return err
-}
-
 func printRunHelp(w io.Writer) error {
 	_, err := fmt.Fprintf(w, `%s run manages orchestration runs.
 

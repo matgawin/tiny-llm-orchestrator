@@ -8,42 +8,47 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/spf13/cobra"
+
 	"tiny-llm-orchestrator/orc/internal/sandbox"
 )
 
-func executeSandbox(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if len(args) == 0 {
-		return printSandboxHelp(stdout)
+func newSandboxCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sandbox",
+		Short: "Run configured commands through bubblewrap",
+		Long:  appName + " sandbox runs configured commands through bubblewrap.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
 	}
-	switch args[0] {
-	case "-h", helpFlag, helpCommand:
-		return printSandboxHelp(stdout)
-	case "run":
-		return executeSandboxRun(args[1:], stdin, stdout, stderr)
-	default:
-		if _, err := fmt.Fprintf(stderr, "%s sandbox: unknown command %q\n\n", appName, args[0]); err != nil {
-			return err
-		}
-		if err := printSandboxHelp(stderr); err != nil {
-			return err
-		}
-		return fmt.Errorf("unknown sandbox command: %s", args[0])
+
+	cmd.AddCommand(newSandboxRunCommand(stdin, stdout, stderr))
+	return cmd
+}
+
+func newSandboxRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "run",
+		Short: "Run sandbox.command.argv from .orc/config.yaml through bwrap",
+		Long:  appName + " sandbox run launches the configured sandbox command through the system bwrap binary.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return nil
+			}
+			if _, err := fmt.Fprintf(stderr, "%s sandbox run: unexpected argument %q\n\n", appName, args[0]); err != nil {
+				return err
+			}
+			return fmt.Errorf("unexpected sandbox run argument: %s", args[0])
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return executeSandboxRun(stdin, stdout, stderr)
+		},
 	}
 }
 
-func executeSandboxRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if len(args) > 0 {
-		if args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand {
-			return printSandboxRunHelp(stdout)
-		}
-		if _, err := fmt.Fprintf(stderr, "%s sandbox run: unexpected argument %q\n\n", appName, args[0]); err != nil {
-			return err
-		}
-		if err := printSandboxRunHelp(stderr); err != nil {
-			return err
-		}
-		return fmt.Errorf("unexpected sandbox run argument: %s", args[0])
-	}
+func executeSandboxRun(stdin io.Reader, stdout, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return err

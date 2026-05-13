@@ -32,6 +32,32 @@ func TestExecuteWorkerHelp(t *testing.T) {
 	assertCLIOutputContainsAll(t, stdout.String(), []string{"orc worker launches", "launch-next"})
 }
 
+func TestExecuteWorkerLaunchNextHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Execute([]string{"worker", "launch-next", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	assertCLIOutputContainsAll(t, stdout.String(), []string{"Usage:", "launch-next <run-id>"})
+}
+
+func TestExecuteWorkerUnknownSubcommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Execute([]string{"worker", "unknown"}, &stdout, &stderr); err == nil {
+		t.Fatal("Execute returned nil error, want unknown subcommand")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, `unknown command "unknown" for "orc worker"`) {
+		t.Fatalf("stderr = %q, want Cobra unknown command diagnostic", got)
+	}
+}
+
 func TestExecuteWorkerLaunchNextRequiresRunID(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -43,6 +69,20 @@ func TestExecuteWorkerLaunchNextRequiresRunID(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "orc worker launch-next: requires <run-id>") {
 		t.Fatalf("stderr = %q, want missing run id", got)
+	}
+}
+
+func TestExecuteWorkerLaunchNextRejectsExtraArgs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if err := Execute([]string{"worker", "launch-next", "run-1", "extra"}, &stdout, &stderr); err == nil {
+		t.Fatal("Execute returned nil error, want extra arg rejection")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "orc worker launch-next: accepts exactly one <run-id>") {
+		t.Fatalf("stderr = %q, want extra arg diagnostic", got)
 	}
 }
 

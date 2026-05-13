@@ -70,12 +70,8 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		legacyCommand("run", "Manage orchestration runs", func(args []string) error {
 			return executeRun(args, stdin, stdout, stderr)
 		}),
-		legacyCommand("sandbox", "Run configured commands through bubblewrap", func(args []string) error {
-			return executeSandbox(args, stdin, stdout, stderr)
-		}),
-		legacyCommand("worker", "Launch and supervise worker attempts", func(args []string) error {
-			return executeWorker(args, stdout, stderr)
-		}),
+		newSandboxCommand(stdin, stdout, stderr),
+		newWorkerCommand(stdout, stderr),
 		legacyCommand("version", "Print version information", func(args []string) error {
 			_, err := fmt.Fprintf(stdout, "%s %s\n", appName, version)
 			return err

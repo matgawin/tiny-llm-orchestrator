@@ -8,36 +8,52 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/spf13/cobra"
+
 	"tiny-llm-orchestrator/orc/internal/launcher"
 )
 
-func executeWorker(args []string, stdout, stderr io.Writer) error {
-	if len(args) == 0 {
-		return printWorkerHelp(stdout)
+func newWorkerCommand(stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "worker",
+		Short: "Launch and supervise worker attempts",
+		Long:  appName + " worker launches and supervises worker attempts.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
 	}
-	switch args[0] {
-	case "-h", helpFlag, helpCommand:
-		return printWorkerHelp(stdout)
-	case "launch-next":
-		return executeWorkerLaunchNext(args[1:], stdout, stderr)
-	default:
-		if _, err := fmt.Fprintf(stderr, "%s worker: unknown command %q\n\n", appName, args[0]); err != nil {
-			return err
-		}
-		if err := printWorkerHelp(stderr); err != nil {
-			return err
-		}
-		return fmt.Errorf("unknown worker command: %s", args[0])
+
+	cmd.AddCommand(newWorkerLaunchNextCommand(stdout, stderr))
+	return cmd
+}
+
+func newWorkerLaunchNextCommand(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "launch-next <run-id>",
+		Short: "Launch the workflow-selected worker for a run",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && args[0] != "" {
+				return nil
+			}
+			if len(args) == 0 || args[0] == "" {
+				if _, err := fmt.Fprintf(stderr, "%s worker launch-next: requires <run-id>\n", appName); err != nil {
+					return err
+				}
+				return fmt.Errorf("worker launch-next requires run id")
+			}
+			if _, err := fmt.Fprintf(stderr, "%s worker launch-next: accepts exactly one <run-id>\n", appName); err != nil {
+				return err
+			}
+			return fmt.Errorf("worker launch-next accepts exactly one run id")
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return executeWorkerLaunchNext(args[0], stdout, stderr)
+		},
 	}
 }
 
-func executeWorkerLaunchNext(args []string, stdout, stderr io.Writer) error {
-	if len(args) != 1 || args[0] == "" {
-		if _, err := fmt.Fprintf(stderr, "%s worker launch-next: requires <run-id>\n", appName); err != nil {
-			return err
-		}
-		return fmt.Errorf("worker launch-next requires run id")
-	}
+func executeWorkerLaunchNext(runID string, stdout, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return err
@@ -48,7 +64,7 @@ func executeWorkerLaunchNext(args []string, stdout, stderr io.Writer) error {
 	defer restoreSignals()
 	if _, err := launcher.LaunchNext(ctx, launcher.Options{
 		Root:   root,
-		RunID:  args[0],
+		RunID:  runID,
 		Stdout: stdout,
 	}); err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s worker launch-next: %v\n", appName, err); writeErr != nil {
