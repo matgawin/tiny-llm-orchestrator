@@ -68,10 +68,29 @@ func TestExecuteInitUnknownFlag(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 	output := stderr.String()
-	for _, want := range []string{`unknown flag "--bogus"`, "Usage:", "orc init"} {
+	for _, want := range []string{`unknown flag: --bogus`, "Usage:", "orc init"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestExecuteInitYesCreatesScaffold(t *testing.T) {
+	root := withTempCwd(t)
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"init", "--yes"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "created .orc/config.yaml") {
+		t.Fatalf("stdout = %q, want scaffold creation output", got)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".orc", "config.yaml")); err != nil {
+		t.Fatalf("config stat error: %v", err)
 	}
 }
 

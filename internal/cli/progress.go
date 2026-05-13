@@ -7,19 +7,36 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"tiny-llm-orchestrator/orc/internal/progress"
 )
 
-func executeProgress(args []string, stdout, stderr io.Writer) error {
+func newProgressCommand(stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "progress <message>",
+		Short:              "Send optional live worker progress to the supervising listener",
+		Long:               progressHelpLong(),
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		SilenceErrors:      true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return executeProgress(cmd, args, stdout, stderr)
+		},
+	}
+	return cmd
+}
+
+func executeProgress(cmd *cobra.Command, args []string, stdout, stderr io.Writer) error {
 	message, help, err := parseProgressMessage(args)
 	if help {
-		return printProgressHelp(stdout)
+		return cmd.Help()
 	}
 	if err != nil {
-		return progressFlagError(stderr, err)
+		return progressFlagError(cmd, stderr, err)
 	}
 	if err := progress.ValidateMessage(message); err != nil {
-		return progressFlagError(stderr, err)
+		return progressFlagError(cmd, stderr, err)
 	}
 	socketPath := os.Getenv("ORC_PROGRESS_SOCKET")
 	if socketPath == "" {
@@ -34,7 +51,7 @@ func executeProgress(args []string, stdout, stderr io.Writer) error {
 		Message:   message,
 	}
 	if req.RunID == "" || req.StepID == "" || req.AttemptID == "" || req.Token == "" {
-		return progressFlagError(stderr, errors.New("ORC_RUN_ID, ORC_STEP_ID, ORC_ATTEMPT_ID, and ORC_PROGRESS_TOKEN must be set when ORC_PROGRESS_SOCKET is set"))
+		return progressFlagError(cmd, stderr, errors.New("ORC_RUN_ID, ORC_STEP_ID, ORC_ATTEMPT_ID, and ORC_PROGRESS_TOKEN must be set when ORC_PROGRESS_SOCKET is set"))
 	}
 	resp, err := progress.Send(socketPath, req)
 	if err != nil {
@@ -42,7 +59,7 @@ func executeProgress(args []string, stdout, stderr io.Writer) error {
 			_, writeErr := fmt.Fprintf(stderr, "orc progress: live progress channel unavailable: %v\n", err)
 			return writeErr
 		}
-		return progressFlagError(stderr, err)
+		return progressFlagError(cmd, stderr, err)
 	}
 	switch resp.Status {
 	case progress.StatusAccepted:
@@ -54,9 +71,9 @@ func executeProgress(args []string, stdout, stderr io.Writer) error {
 		if resp.Error == "" {
 			resp.Error = "progress listener rejected the update"
 		}
-		return progressFlagError(stderr, errors.New(resp.Error))
+		return progressFlagError(cmd, stderr, errors.New(resp.Error))
 	default:
-		return progressFlagError(stderr, fmt.Errorf("progress listener returned unknown status %q", resp.Status))
+		return progressFlagError(cmd, stderr, fmt.Errorf("progress listener returned unknown status %q", resp.Status))
 	}
 }
 
@@ -85,12 +102,13 @@ func parseProgressMessage(args []string) (message string, help bool, err error) 
 	return strings.Join(words, " "), false, nil
 }
 
-func progressFlagError(stderr io.Writer, err error) error {
+func progressFlagError(cmd *cobra.Command, stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s progress: %v\n\n", appName, err); writeErr != nil {
 		return writeErr
 	}
-	if helpErr := printProgressHelp(stderr); helpErr != nil {
+	cmd.SetOut(stderr)
+	if helpErr := cmd.Usage(); helpErr != nil {
 		return helpErr
 	}
-	return err
+	return fmt.Errorf("%s progress: %w", appName, err)
 }

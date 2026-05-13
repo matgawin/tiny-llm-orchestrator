@@ -58,15 +58,9 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	cmd.CompletionOptions.DisableDefaultCmd = true
 
 	cmd.AddCommand(
-		legacyCommand("init", "Scaffold project-local Tiny Orc config", func(args []string) error {
-			return executeInit(args, stdin, stdout, stderr)
-		}),
-		legacyCommand("progress", "Send optional live worker progress to the supervising listener", func(args []string) error {
-			return executeProgress(args, stdout, stderr)
-		}),
-		legacyCommand("report", "Validate and persist a worker report", func(args []string) error {
-			return executeReport(args, stdout, stderr)
-		}),
+		newInitCommand(stdin, stdout, stderr),
+		newProgressCommand(stdout, stderr),
+		newReportCommand(stdout, stderr),
 		legacyCommand("run", "Manage orchestration runs", func(args []string) error {
 			return executeRun(args, stdin, stdout, stderr)
 		}),

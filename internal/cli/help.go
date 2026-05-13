@@ -5,11 +5,8 @@ import (
 	"io"
 )
 
-func printProgressHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s progress sends optional live worker progress to the supervising listener.
-
-Usage:
-  %s progress <message>
+func progressHelpLong() string {
+	return fmt.Sprintf(`%s progress sends optional live worker progress to the supervising listener.
 
 The message may be one quoted argument or multiple positional words, which are joined with single spaces.
 Use -- before a message word that starts with '-' because v1 has no progress flags other than help.
@@ -31,13 +28,7 @@ Input:
   Invalid identity or token rejections are errors and exit non-zero.
 
 This command is only live operator feedback. It does not create final worker reports, workflow outcomes, run events, Beads comments, or persisted status fields.
-Use %s report --status <status> --result <result> for final worker outcome reporting.
-
-Flags:
-  -h, --help  Show command help
-`, appName, appName, appName)
-
-	return err
+Use %s report --status <status> --result <result> for final worker outcome reporting.`, appName, appName)
 }
 
 func printRunHelp(w io.Writer) error {
@@ -219,45 +210,6 @@ Flags:
 	return err
 }
 
-func printReportHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s report validates and persists a worker report.
-
-Usage:
-  %s report --run <run-id> --step <step-id> --agent <agent-id> --attempt <attempt-id> --status <status> --result <result> --summary <summary> [flags]
-  %s report --json-file <path>
-
-Flags:
-      --json-file <path>     Read report fields from a JSON file
-      --run <run-id>         Run id
-      --step <step-id>       Workflow step id
-      --agent <agent-id>     Agent id
-      --attempt <attempt-id> Attempt id
-      --status <status>      Report status
-      --result <result>      Report result
-      --summary <summary>    Compact report summary
-      --changed-path <path>  Changed path; repeatable
-      --command <command>    Command run; repeatable
-      --test <test>          Test run; repeatable
-      --risk <risk>          Risk or caveat; repeatable
-      --follow-up <title>    Follow-up suggestion title; repeatable
-      --report-file <path>   Markdown detail file to copy into the run store
-  -h, --help                 Show command help
-`, appName, appName, appName)
-
-	return err
-}
-
-func printInitHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s init scaffolds project-local Tiny Orc config in the current directory.
-
-Usage:
-  %s init [--dry-run | --yes]
-
-Flags:
-      --dry-run  Print planned changes without writing files
-      --yes      Create missing scaffold files without prompts
-  -h, --help     Show command help
-`, appName, appName)
-
-	return err
+func initHelpLong() string {
+	return fmt.Sprintf("%s init scaffolds project-local Tiny Orc config in the current directory.", appName)
 }

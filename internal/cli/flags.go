@@ -9,12 +9,3 @@ func assignFlagValue(args []string, index *int, target *string) bool {
 	*target = args[next]
 	return true
 }
-
-func appendFlagValue(args []string, index *int, target *[]string) bool {
-	var value string
-	if !assignFlagValue(args, index, &value) {
-		return false
-	}
-	*target = append(*target, value)
-	return true
-}

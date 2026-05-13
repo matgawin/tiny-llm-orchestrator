@@ -22,14 +22,15 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 
 	output := executeCLICommand(t, []string{
 		"report",
-		"--run", result.runID,
+		"--run=" + result.runID,
 		"--step", "plan",
 		"--agent", "planner",
 		"--attempt", "attempt-001",
 		"--status", "done",
 		"--result", "ready",
 		"--summary", "Plan is ready.",
-		"--changed-path", "README.md",
+		"--changed-path=README.md",
+		"--changed-path", "internal/cli/report.go",
 		"--command", "go test ./internal/cli",
 		"--test", "go test ./internal/cli",
 		"--risk", "none",
@@ -48,6 +49,9 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 	}
 	if attempt.Report.ChangedPaths[0] != "README.md" || attempt.Report.Commands[0] != "go test ./internal/cli" {
 		t.Fatalf("report = %+v, want preserved optional fields", attempt.Report)
+	}
+	if attempt.Report.ChangedPaths[1] != "internal/cli/report.go" {
+		t.Fatalf("changed paths = %+v, want repeated flag order preserved", attempt.Report.ChangedPaths)
 	}
 	if attempt.Report.Tests[0] != "go test ./internal/cli" || attempt.Report.Risks[0] != "none" || attempt.Report.Followups[0].Title != "Document report summaries" {
 		t.Fatalf("report = %+v, want preserved tests, risks, and followups", attempt.Report)
@@ -69,6 +73,40 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 		"Agent: planner",
 		"Attempt: attempt-001",
 	})
+}
+
+func TestExecuteReportHelp(t *testing.T) {
+	output := executeCLICommand(t, []string{"report", "--help"})
+	for _, want := range []string{"Usage:", "--json-file", "--changed-path", "--follow-up", "--report-file"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("report help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestExecuteReportFlagParsingErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "unknown", args: []string{"report", "--bogus"}, want: "unknown flag: --bogus"},
+		{name: "missing value", args: []string{"report", "--run"}, want: "flag needs an argument"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := Execute(tt.args, &stdout, &stderr); err == nil {
+				t.Fatal("Execute returned nil error, want flag parsing error")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if got := stderr.String(); !strings.Contains(got, tt.want) || !strings.Contains(got, "Usage:") {
+				t.Fatalf("stderr = %q, want %q and usage", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
@@ -485,7 +523,7 @@ func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
   ]
 }`, result.runID))
 
-	output := executeCLICommand(t, []string{"report", "--json-file", jsonPath})
+	output := executeCLICommand(t, []string{"report", "--json-file=" + jsonPath})
 	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
 	loaded, err := openCLIStore(t, root).Load(result.runID)
 	if err != nil {

@@ -87,6 +87,7 @@ func TestExecuteProgressInputValidation(t *testing.T) {
 		{name: "whitespace only", args: []string{"progress", " \n\t "}, want: "empty after sanitization"},
 		{name: "oversized", args: []string{"progress", strings.Repeat("x", 1001)}, want: "exceeds 1000 bytes"},
 		{name: "unknown flag", args: []string{"progress", "--status", "working"}, want: "unknown flag"},
+		{name: "dash message requires terminator", args: []string{"progress", "-working"}, want: "use -- before a message word that starts with '-'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,6 +103,18 @@ func TestExecuteProgressInputValidation(t *testing.T) {
 				t.Fatalf("stderr = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExecuteProgressSendsLiteralHelpMessage(t *testing.T) {
+	l := newCLIProgressListener(t)
+	setCLIProgressEnv(t, l.SocketPath(), "token-001")
+
+	if err := Execute([]string{"progress", "help"}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if got := receiveCLIProgress(t, l).Message; got != "help" {
+		t.Fatalf("accepted message = %q, want literal help message", got)
 	}
 }
 
