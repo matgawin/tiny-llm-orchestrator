@@ -21,4 +21,5 @@ Maintainers and contributors changing runtime contracts, toolchain-sensitive beh
 
 ## Docs
 
+- [release-builds.md](release-builds.md): Nix build version contract for local and release artifacts
 - [runtime-stack.md](runtime-stack.md): runtime dependencies and local toolchain stack
