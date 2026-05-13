@@ -22,5 +22,5 @@ Maintainers and contributors changing runtime contracts, toolchain-sensitive beh
 ## Docs
 
 - [release-builds.md](release-builds.md): Nix build version contract for local and release artifacts
-- [release-workflow.md](release-workflow.md): GitHub Release artifact workflow and upload contract
+- [release-workflow.md](release-workflow.md): manual GitHub Release creation workflow and artifact upload contract
 - [runtime-stack.md](runtime-stack.md): runtime dependencies and local toolchain stack

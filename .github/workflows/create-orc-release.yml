@@ -1,0 +1,197 @@
+name: Create Orc Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Numeric release version without leading v.
+        required: true
+        type: string
+      commit:
+        description: Optional full 40-character commit SHA. Empty uses origin/main HEAD.
+        required: false
+        type: string
+      previous_tag:
+        description: Optional vX.Y.Z lower-bound tag for release notes.
+        required: false
+        type: string
+      draft:
+        description: Create the release as a draft.
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: Mark the release as a prerelease.
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: create-orc-release-v${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create or update release metadata
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve release inputs
+        id: release
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT_INPUT: ${{ inputs.commit }}
+          PREVIOUS_TAG_INPUT: ${{ inputs.previous_tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must match exact numeric X.Y.Z without a leading v: $VERSION" >&2
+            exit 1
+          fi
+
+          TAG="v$VERSION"
+
+          git fetch --force --prune origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/tags/*:refs/tags/*
+
+          if [[ -z "$COMMIT_INPUT" ]]; then
+            SELECTED_COMMIT="$(git rev-parse origin/main^{commit})"
+          else
+            if [[ ! "$COMMIT_INPUT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "commit must be empty or a full 40-character commit SHA: $COMMIT_INPUT" >&2
+              exit 1
+            fi
+            if ! git cat-file -e "$COMMIT_INPUT^{commit}"; then
+              echo "commit does not exist in the fetched repository: $COMMIT_INPUT" >&2
+              exit 1
+            fi
+            SELECTED_COMMIT="$(git rev-parse "$COMMIT_INPUT^{commit}")"
+          fi
+
+          if ! git merge-base --is-ancestor "$SELECTED_COMMIT" origin/main; then
+            echo "selected commit is not reachable from origin/main: $SELECTED_COMMIT" >&2
+            exit 1
+          fi
+
+          if [[ -n "$PREVIOUS_TAG_INPUT" ]]; then
+            if [[ ! "$PREVIOUS_TAG_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "previous_tag must match exact vX.Y.Z: $PREVIOUS_TAG_INPUT" >&2
+              exit 1
+            fi
+            if ! git rev-parse -q --verify "refs/tags/$PREVIOUS_TAG_INPUT^{commit}" >/dev/null; then
+              echo "previous_tag does not exist: $PREVIOUS_TAG_INPUT" >&2
+              exit 1
+            fi
+            PREVIOUS_TAG="$PREVIOUS_TAG_INPUT"
+            PREVIOUS_COMMIT="$(git rev-list -n 1 "$PREVIOUS_TAG")"
+            if ! git merge-base --is-ancestor "$PREVIOUS_COMMIT" "$SELECTED_COMMIT"; then
+              echo "previous_tag is not reachable from selected commit: $PREVIOUS_TAG" >&2
+              exit 1
+            fi
+          else
+            PREVIOUS_TAG=""
+            mapfile -t FIRST_PARENT_COMMITS < <(git log --first-parent --format=%H "$SELECTED_COMMIT")
+            for ((i = 1; i < ${#FIRST_PARENT_COMMITS[@]}; i++)); do
+              CANDIDATE_COMMIT="${FIRST_PARENT_COMMITS[$i]}"
+              while IFS= read -r CANDIDATE_TAG; do
+                if [[ "$CANDIDATE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  PREVIOUS_TAG="$CANDIDATE_TAG"
+                  break 2
+                fi
+              done < <(git tag --points-at "$CANDIDATE_COMMIT" --list 'v[0-9]*.[0-9]*.[0-9]*' | sort)
+            done
+            if [[ -z "$PREVIOUS_TAG" ]]; then
+              echo "no previous semver tag was found on the selected commit first-parent history; provide previous_tag for first-release or unusual-history cases" >&2
+              exit 1
+            fi
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+            TAG_COMMIT="$(git rev-list -n 1 "$TAG")"
+            if [[ "$TAG_COMMIT" != "$SELECTED_COMMIT" ]]; then
+              echo "tag $TAG already exists at $TAG_COMMIT, not selected commit $SELECTED_COMMIT" >&2
+              exit 1
+            fi
+            echo "Tag $TAG already points at selected commit $SELECTED_COMMIT."
+          else
+            git tag "$TAG" "$SELECTED_COMMIT"
+            git push origin "refs/tags/$TAG"
+          fi
+
+          {
+            echo "tag=$TAG"
+            echo "selected_commit=$SELECTED_COMMIT"
+            echo "previous_tag=$PREVIOUS_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        shell: bash
+        env:
+          PREVIOUS_TAG: ${{ steps.release.outputs.previous_tag }}
+          SELECTED_COMMIT: ${{ steps.release.outputs.selected_commit }}
+          REPOSITORY_URL: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          go run ./cmd/release-notes --repository-url "$REPOSITORY_URL" "$PREVIOUS_TAG..$SELECTED_COMMIT" > release-notes.md
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          SELECTED_COMMIT: ${{ steps.release.outputs.selected_commit }}
+          DRAFT: ${{ inputs.draft }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>release-view.err)"; then
+            if [[ "$IS_DRAFT" != "true" ]]; then
+              echo "GitHub Release $TAG already exists and is published; refusing to rewrite release notes or state" >&2
+              exit 1
+            fi
+            if [[ "$DRAFT" != "true" ]]; then
+              echo "GitHub Release $TAG already exists as a draft; refusing to publish it as a side effect of draft=false" >&2
+              exit 1
+            fi
+            gh release edit "$TAG" \
+              --title "Orc $TAG" \
+              --notes-file release-notes.md \
+              --prerelease="$PRERELEASE"
+          else
+            if ! grep -qi "not found" release-view.err; then
+              cat release-view.err >&2
+              exit 1
+            fi
+            CREATE_ARGS=(
+              "$TAG"
+              --target "$SELECTED_COMMIT"
+              --title "Orc $TAG"
+              --notes-file release-notes.md
+              --verify-tag
+            )
+            if [[ "$DRAFT" == "true" ]]; then
+              CREATE_ARGS+=(--draft)
+            fi
+            if [[ "$PRERELEASE" == "true" ]]; then
+              CREATE_ARGS+=(--prerelease)
+            fi
+            gh release create "${CREATE_ARGS[@]}"
+          fi

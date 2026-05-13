@@ -56,3 +56,12 @@ tasks:
     aliases: ["l"]
     cmds:
       - golangci-lint run --config .golangci.yml
+
+  release-notes-preview:
+    desc: Preview generated release notes for a first-parent git revision range.
+    requires:
+      vars: [RANGE]
+    vars:
+      REPOSITORY_URL: '{{default "" .REPOSITORY_URL}}'
+    cmds:
+      - go run ./cmd/release-notes --repository-url "{{.REPOSITORY_URL}}" "{{.RANGE}}"

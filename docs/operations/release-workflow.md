@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Describe the GitHub Release workflow contract that builds and uploads Orc release artifacts.
+Describe the GitHub Release workflow contract that creates Orc release metadata
+and builds uploaded Orc release artifacts.
 
 ## Audience
 
@@ -10,7 +11,7 @@ Maintainers publishing or reviewing Orc GitHub Releases.
 
 ## Read This When
 
-- You need to publish a release that produces downloadable artifacts.
+- You need to create or publish a release that produces downloadable artifacts.
 - A release workflow failed before uploading assets.
 - You are changing release artifact packaging, naming, or platform scope.
 
@@ -20,10 +21,59 @@ Maintainers publishing or reviewing Orc GitHub Releases.
 - [runtime-stack.md](runtime-stack.md)
 - [../contributing/repository-workflow.md](../contributing/repository-workflow.md)
 
-## Trigger
+## Manual Release Creation
+
+Release metadata is prepared by the separate `Create Orc Release`
+`workflow_dispatch` workflow. It creates or updates the GitHub Release for tag
+`vX.Y.Z` from a selected commit on `origin/main`; the published-release workflow
+below remains responsible for building and uploading artifacts after the release
+is published.
+
+Manual inputs are:
+
+- `version`: required exact numeric `X.Y.Z` version without a leading `v`;
+- `commit`: optional full 40-character commit SHA only; empty resolves
+  `origin/main` HEAD;
+- `previous_tag`: optional exact `vX.Y.Z` lower-bound tag for release notes;
+- `draft`: optional boolean, default `true`;
+- `prerelease`: optional boolean, default `false`.
+
+The selected commit must be reachable from `origin/main`. The workflow creates a
+lightweight `vX.Y.Z` tag at that commit when missing, continues when the tag
+already points at that commit, and fails when the tag points elsewhere. Existing
+published releases are not rewritten. Existing draft releases may have their
+generated body and prerelease setting updated, but a run with `draft=false`
+fails instead of publishing an existing draft as a side effect. New releases use
+title `Orc vX.Y.Z` and apply the `draft` and `prerelease` inputs exactly.
+
+Release notes come from first-parent commits in `previous_tag..selected_commit`.
+When `previous_tag` is omitted, the workflow discovers the nearest reachable
+ancestor tag matching `v[0-9]+.[0-9]+.[0-9]+` on the selected commit's
+first-parent history before creating the new tag. If no previous semver tag is
+found, the workflow fails and asks the operator to provide `previous_tag`.
+
+Release-note generation groups Conventional Commit subjects into deterministic
+sections for breaking changes, features, fixes, performance, documentation, CI,
+maintenance, and other changes. Breaking changes are detected from `!` subjects
+and `BREAKING CHANGE:` footers and appear only in the breaking section.
+Non-conventional commits are included under other changes. Entries are listed
+oldest to newest within each section and include the commit subject plus a short
+SHA link in GitHub Actions. The local preview path uses plain short SHAs unless
+`REPOSITORY_URL` is provided:
+
+```bash
+task release-notes-preview RANGE=v1.2.2..HEAD
+task release-notes-preview RANGE=v1.2.2..HEAD REPOSITORY_URL=https://github.com/OWNER/REPO
+```
+
+Generated release notes replace the managed release body. Maintainers can edit a
+draft afterward for custom prose.
+
+## Artifact Trigger
 
 Release artifact automation runs only when a GitHub Release is published. It does
-not run on tag push and does not provide a manual `workflow_dispatch` trigger.
+not run on tag push. Manual release creation only prepares metadata and does not
+build or upload artifacts.
 
 The workflow builds and uploads the current release artifacts for one platform:
 Linux x86_64. This is the only release platform because the flake currently
