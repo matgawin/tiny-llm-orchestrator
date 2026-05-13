@@ -33,7 +33,8 @@ Manual inputs are:
 
 - `version`: required exact numeric `X.Y.Z` version without a leading `v`;
 - `commit`: optional full 40-character commit SHA only; empty resolves
-  `origin/main` HEAD;
+  `origin/main` HEAD. Branch names, tag names, short SHAs, and arbitrary refs
+  are not accepted;
 - `previous_tag`: optional exact `vX.Y.Z` lower-bound tag for release notes;
 - `draft`: optional boolean, default `true`;
 - `prerelease`: optional boolean, default `false`.
@@ -45,21 +46,40 @@ published releases are not rewritten. Existing draft releases may have their
 generated body and prerelease setting updated, but a run with `draft=false`
 fails instead of publishing an existing draft as a side effect. New releases use
 title `Orc vX.Y.Z` and apply the `draft` and `prerelease` inputs exactly.
+Tag and release operations explicitly target the resolved selected commit and
+tag, not the runner checkout. Workflow concurrency is keyed by release version,
+so only one manual release-creation run for a given `vX.Y.Z` proceeds at a time.
 
 Release notes come from first-parent commits in `previous_tag..selected_commit`.
 When `previous_tag` is omitted, the workflow discovers the nearest reachable
 ancestor tag matching `v[0-9]+.[0-9]+.[0-9]+` on the selected commit's
-first-parent history before creating the new tag. If no previous semver tag is
-found, the workflow fails and asks the operator to provide `previous_tag`.
+first-parent history before creating the new tag; this is not highest semver and
+not newest tag date. If no previous semver tag is found, the workflow fails and
+asks the operator to provide `previous_tag`. When `previous_tag` is provided, it
+must match exact `vX.Y.Z`, exist, and be reachable from the selected commit.
 
 Release-note generation groups Conventional Commit subjects into deterministic
-sections for breaking changes, features, fixes, performance, documentation, CI,
-maintenance, and other changes. Breaking changes are detected from `!` subjects
-and `BREAKING CHANGE:` footers and appear only in the breaking section.
-Non-conventional commits are included under other changes. Entries are listed
-oldest to newest within each section and include the commit subject plus a short
-SHA link in GitHub Actions. The local preview path uses plain short SHAs unless
-`REPOSITORY_URL` is provided:
+Markdown sections:
+
+- `Breaking Changes`: commits with `!` subjects or `BREAKING CHANGE:` footers;
+- `Features`: `feat`;
+- `Fixes`: `fix`;
+- `Performance`: `perf`;
+- `Documentation`: `docs`;
+- `CI`: `ci`;
+- `Maintenance`: `refactor`, `chore`, `build`, and `test`;
+- `Other Changes`: non-conventional commits and Conventional Commit types
+  outside the supported groups.
+
+Breaking changes appear only in `Breaking Changes`; they are not duplicated
+under their normal type section. The rendered entry text is the commit subject,
+including for `BREAKING CHANGE:` footer detection. Entries are listed oldest to
+newest within each section and include the commit subject plus a short SHA link
+to `https://github.com/<owner>/<repo>/commit/<full_sha>` in GitHub Actions;
+authors are not included by default. Empty sections are omitted, but the
+generated body always includes an Artifact Build note explaining that artifacts
+are produced by the published-release workflow after publication. The local
+preview path uses plain short SHAs unless `REPOSITORY_URL` is provided:
 
 ```bash
 task release-notes-preview RANGE=v1.2.2..HEAD
@@ -106,8 +126,10 @@ causes the workflow to fail before building or uploading assets.
 
 ## Release Build
 
-Nix is the canonical release artifact build path. For a release tag `v1.2.3`,
-the workflow builds the Orc package with:
+Nix is the canonical release artifact build path. See
+[release-builds.md](release-builds.md) for the full release build and version
+contract. For a release tag `v1.2.3`, the published-release workflow builds the
+Orc package with:
 
 ```bash
 ORC_RELEASE_VERSION=1.2.3 nix build --impure .#orc
@@ -120,19 +142,6 @@ this exact output:
 ```bash
 ./result/bin/orc version
 orc 1.2.3
-```
-
-For local development, plain Nix builds remain the development path:
-
-```bash
-nix build .#orc
-```
-
-With no release version injected, the local development build reports:
-
-```bash
-./result/bin/orc version
-orc dev
 ```
 
 Taskfile build commands are useful for local development checks, but they are
