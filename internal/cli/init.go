@@ -22,9 +22,6 @@ func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) > 0 {
 				return initFlagError(cmd, stderr, fmt.Errorf("unexpected argument %q", args[0]))
 			}

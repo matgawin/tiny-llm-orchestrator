@@ -10,9 +10,6 @@ import (
 )
 
 func executeRunRefreshConfig(args []string, stdout, stderr io.Writer) error {
-	if len(args) > 0 && (args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand) {
-		return printRunRefreshConfigHelp(stdout)
-	}
 	if len(args) != 1 {
 		if _, err := fmt.Fprintf(stderr, "%s run refresh-config: requires <run-id>\n", appName); err != nil {
 			return err

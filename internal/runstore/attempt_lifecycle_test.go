@@ -888,7 +888,7 @@ func TestFinishAttemptRejectsInvalidTerminalOutcomeTuple(t *testing.T) {
 	_, _, err := store.FinishAttempt(run.ID, FinishAttemptRequest{
 		AttemptID: "attempt-001",
 		State:     AttemptStateTimedOut,
-		Status:    "done",
+		Status:    reportStatusDone,
 		Result:    "process_error",
 	})
 	requireErrorContains(t, err, "terminal outcome", "invalid")
@@ -956,7 +956,7 @@ func TestLoadRejectsInvalidTerminalOutcomeTuple(t *testing.T) {
 		t.Fatalf("FinishAttempt returned error: %v", err)
 	}
 	mutateRunEventPayload(t, run, eventAttemptFinished, func(payload *attemptFinishedPayload) {
-		payload.Status = "done"
+		payload.Status = reportStatusDone
 		payload.Result = "process_error"
 	})
 

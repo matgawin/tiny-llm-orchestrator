@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -56,13 +56,10 @@ Usage:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) > 0 {
 				return runFlagError(cmd, stderr, "start", fmt.Errorf("unexpected argument %q", args[0]))
 			}
-			return executeRunStart(runStartArgs(workflow, bead, fallbackTaskFile, taskFile, task, taskStdin), stdin, stdout, stderr)
+			return executeRunStart(runstartOptions(workflow, bead, fallbackTaskFile, taskFile, task, taskStdin, stdin), stdout, stderr)
 		},
 	}
 	flags := cmd.Flags()
@@ -74,24 +71,6 @@ Usage:
 	flags.BoolVar(&taskStdin, "task-stdin", false, "Read Markdown task context from stdin")
 	setRunFlagError(cmd, stderr, "start")
 	return cmd
-}
-
-func runStartArgs(workflow, bead, fallbackTaskFile, taskFile, task string, taskStdin bool) []string {
-	var args []string
-	appendStringFlag := func(name, value string) {
-		if value != "" {
-			args = append(args, name, value)
-		}
-	}
-	appendStringFlag("--workflow", workflow)
-	appendStringFlag("--bead", bead)
-	appendStringFlag("--fallback-task-file", fallbackTaskFile)
-	appendStringFlag("--task-file", taskFile)
-	appendStringFlag("--task", task)
-	if taskStdin {
-		args = append(args, "--task-stdin")
-	}
-	return args
 }
 
 func newRunAdvanceCommand(stdout, stderr io.Writer) *cobra.Command {
@@ -109,20 +88,13 @@ With --json, progress and launcher diagnostics are written to stderr so stdout c
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) != 1 || args[0] == "" {
-				return runAdvanceFlagError(stderr, fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "advance", fmt.Errorf("requires <run-id>"))
 			}
-			advanceArgs := []string{args[0], "--max-steps", strconv.Itoa(maxSteps)}
-			if once {
-				advanceArgs = append(advanceArgs, "--once")
+			if maxSteps < 1 {
+				return runFlagError(cmd, stderr, "advance", fmt.Errorf("--max-steps must be a positive integer"))
 			}
-			if jsonOutput {
-				advanceArgs = append(advanceArgs, "--json")
-			}
-			return executeRunAdvance(advanceArgs, stdout, stderr)
+			return executeRunAdvance(args[0], maxSteps, once, jsonOutput, stdout, stderr)
 		},
 	}
 	flags := cmd.Flags()
@@ -147,23 +119,28 @@ Usage:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) != 1 || args[0] == "" {
-				return runContinueFlagError(stderr, fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("requires <run-id>"))
 			}
-			continueArgs := []string{args[0]}
-			if allowLoopCap {
-				continueArgs = append(continueArgs, "--allow-loop-cap")
+			if allowLoopCap && resolveBlock {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--resolve-block and --allow-loop-cap are mutually exclusive continuation modes"))
 			}
-			if resolveBlock {
-				continueArgs = append(continueArgs, "--resolve-block")
+			if len(reason.Values) > 1 {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("repeated --reason flags are ambiguous"))
 			}
-			for _, value := range reason.Values {
-				continueArgs = append(continueArgs, "--reason", value)
+			if len(reason.Values) > 0 && !resolveBlock {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is only valid with --resolve-block"))
 			}
-			return executeRunContinue(continueArgs, stdout, stderr)
+			if resolveBlock && len(reason.Values) == 0 {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is required for --resolve-block"))
+			}
+			if !allowLoopCap && !resolveBlock {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("choose one continuation mode: --allow-loop-cap or --resolve-block --reason <text>"))
+			}
+			if resolveBlock && strings.TrimSpace(reason.Values[0]) == "" {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is required for --resolve-block and must be non-empty after trimming"))
+			}
+			return executeRunContinue(args[0], allowLoopCap, resolveBlock, reason.Values, stdout, stderr)
 		},
 	}
 	flags := cmd.Flags()
@@ -191,20 +168,22 @@ JSON output and additional confirmation flags are not supported in v1.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) != 1 || args[0] == "" {
-				return runSkipStepFlagError(stderr, fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("requires <run-id>"))
 			}
-			skipArgs := []string{args[0]}
-			for _, value := range step.Values {
-				skipArgs = append(skipArgs, "--step", value)
+			if len(step.Values) > 1 {
+				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("repeated --step flags are ambiguous"))
 			}
-			for _, value := range reason.Values {
-				skipArgs = append(skipArgs, "--reason", value)
+			if len(reason.Values) > 1 {
+				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("repeated --reason flags are ambiguous"))
 			}
-			return executeRunSkipStep(skipArgs, stdout, stderr)
+			if len(step.Values) == 0 || strings.TrimSpace(step.Values[0]) == "" {
+				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("--step is required"))
+			}
+			if len(reason.Values) == 0 || strings.TrimSpace(reason.Values[0]) == "" {
+				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("--reason is required and must be non-empty after trimming"))
+			}
+			return executeRunSkipStep(args[0], step.Values, reason.Values, stdout, stderr)
 		},
 	}
 	flags := cmd.Flags()
@@ -226,20 +205,13 @@ Usage:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) != 1 || args[0] == "" {
-				return runAddFollowupFlagError(stderr, fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "add-followup", fmt.Errorf("requires <run-id>"))
 			}
-			followupArgs := []string{args[0]}
-			if title != "" {
-				followupArgs = append(followupArgs, "--title", title)
+			if strings.TrimSpace(title) == "" {
+				return runFlagError(cmd, stderr, "add-followup", fmt.Errorf("--title is required"))
 			}
-			if details != "" {
-				followupArgs = append(followupArgs, "--details", details)
-			}
-			return executeRunAddFollowup(followupArgs, stdout, stderr)
+			return executeRunAddFollowup(args[0], title, details, stdout, stderr)
 		},
 	}
 	flags := cmd.Flags()
@@ -261,17 +233,13 @@ Usage:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) != 1 || args[0] == "" {
-				return runRecordSummaryFlagError(stderr, fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "record-summary", fmt.Errorf("requires <run-id>"))
 			}
-			summaryArgs := []string{args[0]}
-			if file != "" {
-				summaryArgs = append(summaryArgs, "--file", file)
+			if strings.TrimSpace(file) == "" {
+				return runFlagError(cmd, stderr, "record-summary", fmt.Errorf("--file is required"))
 			}
-			return executeRunRecordSummary(summaryArgs, stdout, stderr)
+			return executeRunRecordSummary(args[0], file, stdout, stderr)
 		},
 	}
 	cmd.Flags().StringVar(&file, "file", "", "Markdown summary file to copy into the run store")
@@ -287,9 +255,6 @@ func newRunConfigCommand(stdout, stderr io.Writer) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			return executeRunConfig(args, stdout, stderr)
 		},
 	}
@@ -305,9 +270,6 @@ func newRunRefreshConfigCommand(stdout, stderr io.Writer) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			return executeRunRefreshConfig(args, stdout, stderr)
 		},
 	}
@@ -322,9 +284,6 @@ func newRunInspectCommand(command, short string, stdout, stderr io.Writer, inspe
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			return executeRunInspect(command, args, stdout, stderr, inspect)
 		},
 	}

@@ -15,7 +15,6 @@ const (
 	appName        = "orc"
 	defaultVersion = "dev"
 	helpFlag       = "--help"
-	helpCommand    = "help"
 )
 
 var version = defaultVersion

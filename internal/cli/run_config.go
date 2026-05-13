@@ -10,9 +10,6 @@ import (
 )
 
 func executeRunConfig(args []string, stdout, stderr io.Writer) error {
-	if len(args) > 0 && (args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand) {
-		return printRunConfigHelp(stdout)
-	}
 	if len(args) != 1 || args[0] == "" {
 		if _, err := fmt.Fprintf(stderr, "%s run config: requires <run-id>\n", appName); err != nil {
 			return err

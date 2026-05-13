@@ -10,68 +10,9 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runskip"
 )
 
-func executeRunSkipStep(args []string, stdout, stderr io.Writer) error {
-	if len(args) == 0 {
-		return runSkipStepFlagError(stderr, fmt.Errorf("requires <run-id>"))
-	}
-	if args[0] == "-h" || args[0] == helpFlag || args[0] == helpCommand {
-		return printRunSkipStepHelp(stdout)
-	}
-	runID := args[0]
-	if runID == "" {
-		return runSkipStepFlagError(stderr, fmt.Errorf("requires <run-id>"))
-	}
-	var stepID, reason string
-	stepSet := false
-	reasonSet := false
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		switch arg {
-		case "--step":
-			if stepSet {
-				return runSkipStepFlagError(stderr, fmt.Errorf("repeated --step flags are ambiguous"))
-			}
-			if !assignFlagValue(args, &i, &stepID) {
-				return runSkipStepFlagError(stderr, fmt.Errorf("--step requires a value"))
-			}
-			stepSet = true
-		case "--reason":
-			if reasonSet {
-				return runSkipStepFlagError(stderr, fmt.Errorf("repeated --reason flags are ambiguous"))
-			}
-			if !assignFlagValue(args, &i, &reason) {
-				return runSkipStepFlagError(stderr, fmt.Errorf("--reason requires a value"))
-			}
-			reasonSet = true
-		case "-h", helpFlag, helpCommand:
-			return printRunSkipStepHelp(stdout)
-		default:
-			if value, ok := strings.CutPrefix(arg, "--step="); ok {
-				if stepSet {
-					return runSkipStepFlagError(stderr, fmt.Errorf("repeated --step flags are ambiguous"))
-				}
-				stepID = value
-				stepSet = true
-				continue
-			}
-			if value, ok := strings.CutPrefix(arg, "--reason="); ok {
-				if reasonSet {
-					return runSkipStepFlagError(stderr, fmt.Errorf("repeated --reason flags are ambiguous"))
-				}
-				reason = value
-				reasonSet = true
-				continue
-			}
-			return runSkipStepFlagError(stderr, fmt.Errorf("unknown flag %q", arg))
-		}
-	}
-	if !stepSet || strings.TrimSpace(stepID) == "" {
-		return runSkipStepFlagError(stderr, fmt.Errorf("--step is required"))
-	}
-	reason = strings.TrimSpace(reason)
-	if !reasonSet || reason == "" {
-		return runSkipStepFlagError(stderr, fmt.Errorf("--reason is required and must be non-empty after trimming"))
-	}
+func executeRunSkipStep(runID string, stepValues, reasonValues []string, stdout, stderr io.Writer) error {
+	stepID := stepValues[0]
+	reason := strings.TrimSpace(reasonValues[0])
 	root, err := os.Getwd()
 	if err != nil {
 		return err
@@ -90,16 +31,6 @@ func executeRunSkipStep(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	return printRunSkipStepResult(stdout, result, reason)
-}
-
-func runSkipStepFlagError(stderr io.Writer, err error) error {
-	if _, writeErr := fmt.Fprintf(stderr, "%s run skip-step: %v\n\n", appName, err); writeErr != nil {
-		return writeErr
-	}
-	if helpErr := printRunSkipStepHelp(stderr); helpErr != nil {
-		return helpErr
-	}
-	return err
 }
 
 func printRunSkipStepResult(w io.Writer, result runskip.Result, reason string) error {

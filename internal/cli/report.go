@@ -26,9 +26,6 @@ Use a JSON report file or direct report flags. JSON input is validated with stri
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 && args[0] == helpCommand {
-				return cmd.Help()
-			}
 			if len(args) > 0 {
 				return reportFlagError(cmd, stderr, fmt.Errorf("unexpected argument %q", args[0]))
 			}
