@@ -1,0 +1,88 @@
+name: Release Orc Linux x86_64
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux-x86_64:
+    name: Build and upload Linux x86_64 artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Validate release tag and main history
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vX.Y.Z: $TAG" >&2
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          TAG_COMMIT="$(git rev-list -n 1 "$TAG")"
+
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+            echo "Release tag commit is not reachable from origin/main: $TAG_COMMIT" >&2
+            exit 1
+          fi
+
+          {
+            echo "TAG=$TAG"
+            echo "VERSION=$VERSION"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Build Orc
+        run: ORC_RELEASE_VERSION="$VERSION" nix build --impure .#orc
+
+      - name: Verify Orc version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ACTUAL_VERSION="$(./result/bin/orc version)"
+          EXPECTED_VERSION="orc $VERSION"
+          if [[ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]]; then
+            echo "Unexpected Orc version: got '$ACTUAL_VERSION', want '$EXPECTED_VERSION'" >&2
+            exit 1
+          fi
+
+      - name: Package Orc artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TARBALL="orc-v${VERSION}-linux-x86_64.tar.gz"
+          CHECKSUM="${TARBALL}.sha256"
+          PACKAGE_DIR="$(mktemp -d)"
+
+          cp ./result/bin/orc "$PACKAGE_DIR/orc"
+          cp ./LICENSE "$PACKAGE_DIR/LICENSE"
+          tar -C "$PACKAGE_DIR" -czf "$TARBALL" orc LICENSE
+          sha256sum "$TARBALL" > "$CHECKSUM"
+
+          {
+            echo "TARBALL=$TARBALL"
+            echo "CHECKSUM=$CHECKSUM"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$TARBALL" "$CHECKSUM" --clobber
