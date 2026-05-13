@@ -31,33 +31,6 @@ This command is only live operator feedback. It does not create final worker rep
 Use %s report --status <status> --result <result> for final worker outcome reporting.`, appName, appName)
 }
 
-func printRunHelp(w io.Writer) error {
-	_, err := fmt.Fprintf(w, `%s run manages orchestration runs.
-
-Usage:
-  %s run [command]
-
-Available Commands:
-  add-followup     Record out-of-scope follow-up work
-  advance          Launch workflow-selected workers until a conservative stop
-  config           Inspect the current pinned config snapshot
-  continue         Continue after an explicit human-reviewed stop
-  next             Inspect the next workflow action without launching it
-  refresh-config   Refresh an existing run to the current live .orc config
-  record-summary   Record a final ready-for-review summary
-  show             Show persisted run state
-  skip-step        Skip the currently selected skippable workflow step
-  start            Start a run from explicit task context
-  status           Show persisted run state
-  summary-context  Render persisted review context
-
-Flags:
-  -h, --help  Show command help
-`, appName, appName)
-
-	return err
-}
-
 func printRunSkipStepHelp(w io.Writer) error {
 	_, err := fmt.Fprintf(w, `%s run skip-step records an explicit human decision to bypass the currently selected skippable workflow step.
 

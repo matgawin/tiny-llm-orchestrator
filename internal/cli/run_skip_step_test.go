@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
@@ -59,8 +60,8 @@ func TestExecuteRunSkipStepFlagValidation(t *testing.T) {
 		{name: "whitespace reason", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", " \t "}, want: []string{"non-empty after trimming"}},
 		{name: "duplicate step", args: []string{"run", "skip-step", "run-1", "--step", "review", "--step=code", "--reason", "skip"}, want: []string{"repeated --step"}},
 		{name: "duplicate reason", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "one", "--reason=two"}, want: []string{"repeated --reason"}},
-		{name: "unknown json", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--json"}, want: []string{`unknown flag "--json"`}},
-		{name: "unknown flag", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--force"}, want: []string{`unknown flag "--force"`}},
+		{name: "unknown json", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--json"}, want: []string{`unknown flag: --json`}},
+		{name: "unknown flag", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--force"}, want: []string{`unknown flag: --force`}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -156,7 +157,7 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 	}
 }
 
-func TestExecuteRunHelpListsSkipStep(t *testing.T) {
+func TestExecuteRunHelpListsMigratedSubcommands(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := Execute([]string{"run", "--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
@@ -164,7 +165,34 @@ func TestExecuteRunHelpListsSkipStep(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	assertCLIOutputContainsAll(t, stdout.String(), []string{"skip-step", "Skip the currently selected skippable workflow step"})
+	assertCLIOutputContainsAll(t, stdout.String(), []string{
+		"add-followup",
+		"advance",
+		"config",
+		"continue",
+		"next",
+		"record-summary",
+		"refresh-config",
+		"show",
+		"skip-step",
+		"start",
+		"status",
+		"summary-context",
+		"Skip the currently selected skippable workflow step",
+	})
+}
+
+func TestExecuteRunUnknownSubcommandFailsThroughCobra(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"run", "unknown"}, &stdout, &stderr); err == nil {
+		t.Fatal("Execute returned nil error, want unknown command failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, `unknown command "unknown" for "orc run"`) {
+		t.Fatalf("stderr = %q, want Cobra unknown command diagnostic", got)
+	}
 }
 
 func TestExecuteRunSkipStepHelpDocumentsContract(t *testing.T) {

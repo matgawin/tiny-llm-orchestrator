@@ -34,8 +34,8 @@ func TestExecuteRunRefreshConfigRejectsForceFlag(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "requires <run-id>") {
-		t.Fatalf("stderr = %q, want arity rejection without --force support", stderr.String())
+	if !strings.Contains(stderr.String(), "unknown flag: --force") {
+		t.Fatalf("stderr = %q, want unsupported --force rejection", stderr.String())
 	}
 }
 

@@ -61,9 +61,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		newInitCommand(stdin, stdout, stderr),
 		newProgressCommand(stdout, stderr),
 		newReportCommand(stdout, stderr),
-		legacyCommand("run", "Manage orchestration runs", func(args []string) error {
-			return executeRun(args, stdin, stdout, stderr)
-		}),
+		newRunCommand(stdin, stdout, stderr),
 		newSandboxCommand(stdin, stdout, stderr),
 		newWorkerCommand(stdout, stderr),
 		legacyCommand("version", "Print version information", func(args []string) error {

@@ -37,7 +37,7 @@ func TestExecuteRunStartTaskFileCreatesRun(t *testing.T) {
 	taskPath := filepath.Join(root, "task.md")
 	writeCLIFile(t, taskPath, "# File Task\n")
 
-	result := executeCLIRunStart(t, root, []string{"--task-file", taskPath}, nil)
+	result := executeCLIRunStart(t, root, []string{"--task-file=" + taskPath}, nil)
 	if result.snapshot.Source.Type != "task_file" || result.snapshot.Source.Path != taskPath {
 		t.Fatalf("snapshot source = %+v, want task file %q", result.snapshot.Source, taskPath)
 	}
@@ -68,7 +68,7 @@ func TestExecuteRunStartRejectsUnknownFlag(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 	output := stderr.String()
-	for _, want := range []string{`unknown flag "--bogus"`, "Usage:", "run start"} {
+	for _, want := range []string{`unknown flag: --bogus`, "Usage:", "run start"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, output)
 		}

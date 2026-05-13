@@ -16,8 +16,8 @@ func TestExecuteRunAddFollowupAppendsFollowup(t *testing.T) {
 
 	output := executeCLICommand(t, []string{
 		"run", "add-followup", result.runID,
-		"--title", "Create release note",
-		"--details", "Mention the follow-up recorder.",
+		"--title=Create release note",
+		"--details=Mention the follow-up recorder.",
 	})
 	assertCLIOutputContainsAll(t, output, []string{"recorded follow-up for run " + result.runID})
 	content := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md")))
@@ -83,7 +83,7 @@ func TestRunRecordSummaryOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 	summaryPath := filepath.Join(root, "final-summary.md")
 	writeCLIFile(t, summaryPath, "# Final Summary\n\nSuggested bead note for the human.\n")
 
-	output := executeCLICommand(t, []string{"run", "record-summary", result.runID, "--file", summaryPath})
+	output := executeCLICommand(t, []string{"run", "record-summary", result.runID, "--file=" + summaryPath})
 	assertCLIOutputContainsAll(t, output, []string{"recorded final summary for run " + result.runID, "summaries/"})
 	_, content := latestCLIArtifactContent(t, root, result.runID, runstore.KindSummary)
 	if !strings.Contains(content, "Suggested bead note for the human.") {

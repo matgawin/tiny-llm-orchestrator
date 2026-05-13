@@ -56,7 +56,7 @@ func TestExecuteRunContinueResolveBlockRetriesBlockedStep(t *testing.T) {
 	launchCLIWorkerReport(t, run.runID, blocked("Tests require network approval."))
 	terminalizeCLIWorkflow(t, run.root, run.runID, "blocked_for_human", 3, "Tests require network approval.")
 
-	output := executeCLICommand(t, []string{"run", "continue", run.runID, "--resolve-block", "--reason", " fixed network config "})
+	output := executeCLICommand(t, []string{"run", "continue", run.runID, "--resolve-block", "--reason= fixed network config "})
 	assertCLIOutputContainsAll(t, output, []string{
 		"continued run " + run.runID,
 		"after human-resolved block",

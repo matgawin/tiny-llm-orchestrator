@@ -128,7 +128,7 @@ func TestRunAdvanceContinuesAfterReviewChangesRequestedRoute(t *testing.T) {
 `, "")
 	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 
-	output := executeCLICommand(t, []string{"run", "advance", result.runID, "--max-steps", "8"})
+	output := executeCLICommand(t, []string{"run", "advance", result.runID, "--max-steps=8"})
 	assertCLIOutputContainsAll(t, output, []string{
 		"launched attempts: 7",
 		"final status: ready_for_human",
@@ -221,7 +221,7 @@ func TestRunAdvanceOnceJSONActiveAttemptAndInvalidMaxSteps(t *testing.T) {
 	run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{"run", "advance", run.runID, "--once", "--json"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{"run", "advance", run.runID, "--once=true", "--json=true"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 	var payload struct {
