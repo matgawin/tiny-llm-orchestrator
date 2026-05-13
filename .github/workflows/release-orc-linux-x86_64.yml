@@ -33,6 +33,12 @@ jobs:
 
           VERSION="${TAG#v}"
           TAG_COMMIT="$(git rev-list -n 1 "$TAG")"
+          SOURCE_VERSION="$(cat VERSION)"
+
+          if [[ "$SOURCE_VERSION" != "$VERSION" ]]; then
+            echo "VERSION file must match release tag: got '$SOURCE_VERSION', want '$VERSION'" >&2
+            exit 1
+          fi
 
           git fetch --no-tags origin main:refs/remotes/origin/main
           if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
@@ -49,7 +55,7 @@ jobs:
         uses: cachix/install-nix-action@v31
 
       - name: Build Orc
-        run: ORC_RELEASE_VERSION="$VERSION" nix build --impure .#orc
+        run: nix build .#orc
 
       - name: Verify Orc version
         shell: bash

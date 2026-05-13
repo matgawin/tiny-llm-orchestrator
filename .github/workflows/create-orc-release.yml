@@ -89,6 +89,12 @@ jobs:
             exit 1
           fi
 
+          SOURCE_VERSION="$(git show "$SELECTED_COMMIT:VERSION")"
+          if [[ "$SOURCE_VERSION" != "$VERSION" ]]; then
+            echo "VERSION file at selected commit must match requested version: got '$SOURCE_VERSION', want '$VERSION'" >&2
+            exit 1
+          fi
+
           if [[ -n "$PREVIOUS_TAG_INPUT" ]]; then
             if [[ ! "$PREVIOUS_TAG_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "previous_tag must match exact vX.Y.Z: $PREVIOUS_TAG_INPUT" >&2

@@ -27,6 +27,7 @@ Contributors running the repo locally for development, debugging, or test verifi
 - `golangci-lint`, `gofumpt`, and `goimports` for the standard check workflow
 
 The repository's Nix flake exposes a development shell with the expected toolchain. Use it when your host machine is missing tools or maps `task` to a different program.
+The shell also includes the flake-built `orc` CLI for project orchestration.
 
 ```bash
 nix develop
@@ -79,7 +80,8 @@ go run ./cmd/orc version
 
 ## Notes
 
-- `task build` builds `cmd/orc` to `bin/orc`.
+- `task build` builds `cmd/orc` to `bin/orc` with the `dev` version.
+- `orc` in the Nix development shell is the flake-built CLI used for project orchestration.
 - `task tests` runs `go test ./...`.
 - `task tests-race` runs `go test -race ./...` through `task test-unit-race`.
 - `task check` runs fix, format, lint, tests, and build.

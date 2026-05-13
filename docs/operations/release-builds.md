@@ -27,8 +27,8 @@ The canonical local Nix build path is:
 nix build .#orc
 ```
 
-When `ORC_RELEASE_VERSION` is unset or empty, the Nix package version is `dev`.
-The linker-injected CLI version is also `dev`, so the built binary reports:
+The repository `VERSION` file is the canonical binary version source. Plain Nix
+builds use that version, so the built binary reports the same value:
 
 ```bash
 ./result/bin/orc version
@@ -39,16 +39,16 @@ Plain local builds must not require `--impure`.
 
 ## Release Build
 
-Release automation injects the released version through `ORC_RELEASE_VERSION`.
-Release tags include the leading `v`, but this environment variable must not.
+Release automation validates that the exact `vX.Y.Z` release tag matches the
+repository `VERSION` file after stripping the leading `v`.
 
 For a release tag `v1.2.3`, build the release artifact with:
 
 ```bash
-ORC_RELEASE_VERSION=1.2.3 nix build --impure .#orc
+nix build .#orc
 ```
 
-The Nix package version and linker-injected CLI version use the same value, so
+The Nix package version and linker-injected CLI version use `VERSION`, so
 the built binary reports:
 
 ```bash
@@ -56,6 +56,6 @@ the built binary reports:
 orc 1.2.3
 ```
 
-`ORC_RELEASE_VERSION` must match exact numeric `X.Y.Z` semver shape. Values with
-a leading `v`, missing components, prerelease metadata, or build metadata fail
-during Nix evaluation before a release artifact is produced.
+`VERSION` must match exact numeric `X.Y.Z` semver shape. Values with a leading
+`v`, missing components, prerelease metadata, build metadata, or extra
+whitespace fail before a release artifact is produced.

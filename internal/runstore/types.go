@@ -11,6 +11,7 @@ const (
 
 	stateRunning        = "running"
 	stateBlockedHuman   = "blocked_for_human"
+	attemptStatusDone   = "done"
 	attemptStatusFailed = "failed"
 
 	eventRunCreated              = "run.created"

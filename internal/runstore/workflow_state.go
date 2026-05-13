@@ -202,7 +202,7 @@ func (s *Store) RecordStepSkip(runID string, req RecordStepSkipRequest, validate
 		}
 		payload, err := marshalPayload(workflowStepSkippedPayload{
 			StepID:             req.StepID,
-			Status:             "done",
+			Status:             attemptStatusDone,
 			Result:             "skipped",
 			Reason:             req.Reason,
 			Source:             req.Source,
@@ -221,7 +221,7 @@ func (s *Store) RecordStepSkip(runID string, req RecordStepSkipRequest, validate
 			applyAttemptOutcomeConsumption(status, event, consumeAttemptID)
 			applyStepSkipped(status, SkippedStep{
 				StepID:        req.StepID,
-				Status:        "done",
+				Status:        attemptStatusDone,
 				Result:        "skipped",
 				Reason:        req.Reason,
 				EventSequence: event.Sequence,
@@ -417,8 +417,8 @@ func validateWorkflowStepSkippedPayload(status Status, event Event, payload work
 	switch {
 	case payload.StepID == "":
 		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped step_id is required", event.Sequence)
-	case payload.Status != "done":
-		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped status = %q, want done", event.Sequence, payload.Status)
+	case payload.Status != attemptStatusDone:
+		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped status = %q, want %s", event.Sequence, payload.Status, attemptStatusDone)
 	case payload.Result != "skipped":
 		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped result = %q, want skipped", event.Sequence, payload.Result)
 	case reason == "":

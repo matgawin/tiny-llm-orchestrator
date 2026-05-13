@@ -39,13 +39,14 @@ Manual inputs are:
 - `draft`: optional boolean, default `true`;
 - `prerelease`: optional boolean, default `false`.
 
-The selected commit must be reachable from `origin/main`. The workflow creates a
-lightweight `vX.Y.Z` tag at that commit when missing, continues when the tag
-already points at that commit, and fails when the tag points elsewhere. Existing
-published releases are not rewritten. Existing draft releases may have their
-generated body and prerelease setting updated, but a run with `draft=false`
-fails instead of publishing an existing draft as a side effect. New releases use
-title `Orc vX.Y.Z` and apply the `draft` and `prerelease` inputs exactly.
+The selected commit must be reachable from `origin/main`, and its `VERSION` file
+must match the requested `version` input. The workflow creates a lightweight
+`vX.Y.Z` tag at that commit when missing, continues when the tag already points
+at that commit, and fails when the tag points elsewhere. Existing published
+releases are not rewritten. Existing draft releases may have their generated
+body and prerelease setting updated, but a run with `draft=false` fails instead
+of publishing an existing draft as a side effect. New releases use title
+`Orc vX.Y.Z` and apply the `draft` and `prerelease` inputs exactly.
 Tag and release operations explicitly target the resolved selected commit and
 tag, not the runner checkout. Workflow concurrency is keyed by release version,
 so only one manual release-creation run for a given `vX.Y.Z` proceeds at a time.
@@ -114,15 +115,17 @@ vX.Y.Z
 missing components, and tags without the leading `v` are invalid for release
 artifact publication.
 
-The workflow derives the binary version by stripping the leading `v` from the
-release tag. For example, tag `v1.2.3` produces binary version `1.2.3`.
+The workflow derives the expected binary version by stripping the leading `v`
+from the release tag, then requires the repository `VERSION` file to match it.
+For example, tag `v1.2.3` requires `VERSION` to contain `1.2.3`.
 
 Before building, the workflow resolves the release tag commit and checks that it
 is reachable from `origin/main`. Release artifact publication is allowed only
 for tags whose commit is in main history.
 
-Invalid tag format or a tag commit that is not reachable from `origin/main`
-causes the workflow to fail before building or uploading assets.
+Invalid tag format, a mismatched `VERSION` file, or a tag commit that is not
+reachable from `origin/main` causes the workflow to fail before building or
+uploading assets.
 
 ## Release Build
 
@@ -132,12 +135,12 @@ contract. For a release tag `v1.2.3`, the published-release workflow builds the
 Orc package with:
 
 ```bash
-ORC_RELEASE_VERSION=1.2.3 nix build --impure .#orc
+nix build .#orc
 ```
 
-The `ORC_RELEASE_VERSION` value is the tag-derived `X.Y.Z` version without the
-leading `v`. The workflow verifies the built binary before packaging by requiring
-this exact output:
+The workflow validates that the repository `VERSION` file matches the
+tag-derived `X.Y.Z` version without the leading `v`. It then verifies the built
+binary before packaging by requiring this exact output:
 
 ```bash
 ./result/bin/orc version
@@ -146,7 +149,7 @@ orc 1.2.3
 
 Taskfile build commands are useful for local development checks, but they are
 not the release artifact build path. Release artifacts are produced from the Nix
-package with `ORC_RELEASE_VERSION=X.Y.Z nix build --impure .#orc`.
+package with `nix build .#orc`.
 
 ## Uploaded Artifacts
 
@@ -177,10 +180,11 @@ duplicates for repeated runs of the same release.
 The workflow exits before artifact upload when:
 
 - the GitHub Release tag does not match exact `vX.Y.Z` format;
+- the repository `VERSION` file does not match the release tag;
 - the release tag commit is not reachable from `origin/main`;
 - the Nix release build fails;
 - `./result/bin/orc version` does not print exactly `orc X.Y.Z`.
 
-Failures in tag validation or main-history validation happen before the build
-starts. Build failures and binary-version mismatches happen before packaging or
-uploading release assets.
+Failures in tag validation, `VERSION` validation, or main-history validation
+happen before the build starts. Build failures and binary-version mismatches
+happen before packaging or uploading release assets.

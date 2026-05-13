@@ -32,6 +32,7 @@ The local development stack is toolchain-only:
 - gofumpt
 - jj
 - beads
+- Orc CLI
 
 The Nix flake provides these tools for normal development.
 
@@ -39,7 +40,10 @@ The Nix flake provides these tools for normal development.
 
 The repository currently builds one binary:
 
-- `bin/orc`, produced by `task build`
+- `bin/orc`, produced by `task build` with the `dev` version
+
+The development shell also puts the flake-built `orc` CLI on `PATH` for project
+orchestration. The CLI version comes from the repository `VERSION` file.
 
 ## Local Stack
 

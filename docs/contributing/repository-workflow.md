@@ -28,7 +28,7 @@ Contributors preparing, validating, and packaging repository changes.
 - `task fix`: run `go fix ./...`.
 - `task format`: run `goimports` and `gofumpt` on Go files.
 - `task lint`: run `golangci-lint` with `.golangci.yml`.
-- `task build`: build `cmd/orc` to `bin/orc`.
+- `task build`: build `cmd/orc` to `bin/orc` with the `dev` version.
 - `task check`: run fix, format, lint, tests, and build.
 
 Run these commands inside the Nix development shell when possible. For one-shot checks, prefer `nix develop -c task <name>` so the pinned toolchain is used.

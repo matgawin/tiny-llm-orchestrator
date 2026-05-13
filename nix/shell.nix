@@ -2,6 +2,7 @@
   pkgs,
   system,
   beads,
+  orcPackage,
 }: let
   codexWithBeads = pkgs.writeShellScriptBin "codex" ''
     export BEADS_DIR="''${BEADS_DIR:-$PWD/../.beads}"
@@ -28,7 +29,10 @@
       jq
       jujutsu
     ]
-    ++ [beads.packages.${system}.default];
+    ++ [
+      beads.packages.${system}.default
+      orcPackage
+    ];
 
   shellHook = ''
     export BEADS_DIR="$PWD/../.beads"
