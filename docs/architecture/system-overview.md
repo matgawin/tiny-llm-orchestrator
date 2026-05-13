@@ -30,11 +30,12 @@ The only runnable service today is the `orc` CLI:
 - `internal/config` loads and validates `.orc` project configuration,
   workflow files, agent descriptors, and runtime descriptors.
 
-The CLI currently exposes help, version, init, `run start`,
-`run add-followup`, read-only `run status` / `run next` behavior,
-`run advance` for conservatively advancing selected worker attempts,
-`worker launch-next` for launching one workflow-selected worker attempt, and
-`report` for worker report submission.
+The CLI currently exposes help, version, shell completion generation, init,
+live progress reporting, `run start`, `run add-followup`, read-only
+`run status` / `run next` behavior, `run advance` for conservatively advancing
+selected worker attempts, `worker launch-next` for launching one
+workflow-selected worker attempt, `sandbox run` for configured sandbox command
+execution, and `report` for worker report submission.
 
 Config loading and validation, deterministic workflow transitions,
 task-context resolution, inspection, prompt rendering, worker launch, report

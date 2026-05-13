@@ -58,32 +58,82 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	cmd.CompletionOptions.DisableDefaultCmd = true
 
 	cmd.AddCommand(
+		newCompletionCommand(stdout, stderr),
 		newInitCommand(stdin, stdout, stderr),
 		newProgressCommand(stdout, stderr),
 		newReportCommand(stdout, stderr),
 		newRunCommand(stdin, stdout, stderr),
 		newSandboxCommand(stdin, stdout, stderr),
 		newWorkerCommand(stdout, stderr),
-		legacyCommand("version", "Print version information", func(args []string) error {
-			_, err := fmt.Fprintf(stdout, "%s %s\n", appName, version)
-			return err
-		}),
+		newVersionCommand(stdout),
 	)
 
 	return cmd
 }
 
-func legacyCommand(use, short string, run func([]string) error) *cobra.Command {
+func newVersionCommand(stdout io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:                use,
-		Short:              short,
-		DisableFlagParsing: true,
-		SilenceUsage:       true,
-		SilenceErrors:      true,
+		Use:           "version",
+		Short:         "Print version information",
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(args)
+			_, err := fmt.Fprintf(stdout, "%s %s\n", appName, version)
+			return err
 		},
 	}
+}
+
+func newCompletionCommand(stdout, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "completion <shell>",
+		Short: "Generate shell completion scripts",
+		Long: appName + ` completion generates shell completion scripts.
+
+Supported shells are bash, zsh, fish, and powershell.`,
+		Args: completionShellArgs(stderr),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch args[0] {
+			case "bash":
+				return cmd.Root().GenBashCompletion(stdout)
+			case "zsh":
+				return cmd.Root().GenZshCompletion(stdout)
+			case "fish":
+				return cmd.Root().GenFishCompletion(stdout, true)
+			case "powershell":
+				return cmd.Root().GenPowerShellCompletion(stdout)
+			default:
+				return completionShellError(cmd, stderr, fmt.Errorf("unsupported shell %q", args[0]))
+			}
+		},
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	return cmd
+}
+
+func completionShellArgs(stderr io.Writer) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == 1 && args[0] != "" {
+			return nil
+		}
+		if len(args) == 0 || args[0] == "" {
+			return completionShellError(cmd, stderr, fmt.Errorf("requires <shell>"))
+		}
+		return completionShellError(cmd, stderr, fmt.Errorf("accepts exactly one <shell>"))
+	}
+}
+
+func completionShellError(cmd *cobra.Command, stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s completion: %v\n\n", appName, err); writeErr != nil {
+		return writeErr
+	}
+	cmd.SetOut(stderr)
+	if usageErr := cmd.Usage(); usageErr != nil {
+		return usageErr
+	}
+	return fmt.Errorf("%s completion: %w", appName, err)
 }
 
 func isRootRoutingError(err error) bool {
