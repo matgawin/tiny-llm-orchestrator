@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestLaunchNextRefusesFreshPIDLessStartingAttempt(t *testing.T) {
@@ -43,11 +46,13 @@ func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 	seedLauncherAttempt(t, store, runID, "stale-starting-attempt", 20*time.Millisecond, time.Now().Add(-time.Second).UTC())
 
 	var stdout bytes.Buffer
+	core, recorded := observer.New(zap.DebugLevel)
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
 		Command: []string{"sh", "-c", "cat"},
 		Stdout:  &stdout,
+		Logger:  zap.New(core),
 	})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
@@ -58,6 +63,19 @@ func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 	if !strings.Contains(stdout.String(), "recovered attempt "+result.Attempt.AttemptID) {
 		t.Fatalf("stdout = %q, want recovered attempt output", stdout.String())
 	}
+	if strings.Contains(stdout.String(), "recovered active attempt") {
+		t.Fatalf("stdout = %q, want no diagnostic log message", stdout.String())
+	}
+	entry := singleObservedLog(t, recorded, "recovered active attempt")
+	assertObservedFields(t, entry, map[string]string{
+		"run_id":           runID,
+		"step_id":          "plan",
+		"agent_id":         "planner",
+		"attempt_id":       result.Attempt.AttemptID,
+		"recovered_state":  runstore.AttemptStateProcessError,
+		"recovered_result": resultProcessError,
+		"exit_state":       exitStateUnknown,
+	})
 }
 
 func TestLaunchNextRecoveryPreservesExistingLogRef(t *testing.T) {
@@ -209,5 +227,28 @@ func TestLaunchNextRecoversUnverifiableActiveAttempt(t *testing.T) {
 	loaded := loadLauncherRun(t, root, runID)
 	if loaded.Status.ActiveAttempt != nil {
 		t.Fatalf("active attempt = %+v, want recovered terminal attempt", loaded.Status.ActiveAttempt)
+	}
+}
+
+func singleObservedLog(t *testing.T, recorded *observer.ObservedLogs, message string) observer.LoggedEntry {
+	t.Helper()
+	entries := recorded.FilterMessage(message).All()
+	if len(entries) != 1 {
+		t.Fatalf("observed logs for %q = %d, want 1: %+v", message, len(entries), entries)
+	}
+	return entries[0]
+}
+
+func assertObservedFields(t *testing.T, entry observer.LoggedEntry, want map[string]string) {
+	t.Helper()
+	fields := entry.ContextMap()
+	for key, value := range want {
+		got, ok := fields[key]
+		if !ok {
+			t.Fatalf("observed log missing field %q in %+v", key, fields)
+		}
+		if got != value {
+			t.Fatalf("observed log field %q = %#v, want %q", key, got, value)
+		}
 	}
 }

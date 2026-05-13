@@ -14,6 +14,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -49,6 +51,7 @@ type Options struct {
 	Time     time.Time
 	Stdout   io.Writer
 	Progress io.Writer
+	Logger   *zap.Logger
 }
 
 // Result describes the persisted launch outcome.
@@ -94,7 +97,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("evaluate run %q: %w", opts.RunID, err)
 	}
 	if decision.Kind == workflow.DecisionWaitActiveAttempt {
-		result, err := recoverOrRefuseActiveAttempt(loaded.Store, loaded.Run)
+		result, err := recoverOrRefuseActiveAttempt(loaded.Store, loaded.Run, loggerOrNop(opts.Logger))
 		if err == nil {
 			printLaunchResult(opts.Stdout, result)
 		}

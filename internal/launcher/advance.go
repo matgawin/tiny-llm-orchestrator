@@ -12,6 +12,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
+
+	"go.uber.org/zap"
 )
 
 const DefaultAdvanceMaxSteps = 20
@@ -37,6 +39,7 @@ type AdvanceOptions struct {
 	Time     time.Time
 	Stdout   io.Writer
 	Progress io.Writer
+	Logger   *zap.Logger
 	MaxSteps int
 	Once     bool
 }
@@ -270,6 +273,7 @@ func launchOptions(opts AdvanceOptions) Options {
 		Time:     opts.Time,
 		Stdout:   opts.Stdout,
 		Progress: opts.Progress,
+		Logger:   opts.Logger,
 	}
 }
 

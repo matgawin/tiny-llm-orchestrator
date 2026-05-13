@@ -20,6 +20,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/sandbox"
 	"tiny-llm-orchestrator/orc/internal/workflow"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -647,7 +649,14 @@ func openStreamingLog(store *runstore.Store, run *runstore.Run, attempt runstore
 	return ref, file, nil
 }
 
-func recoverOrRefuseActiveAttempt(store *runstore.Store, run *runstore.Run) (Result, error) {
+func loggerOrNop(logger *zap.Logger) *zap.Logger {
+	if logger == nil {
+		return zap.NewNop()
+	}
+	return logger
+}
+
+func recoverOrRefuseActiveAttempt(store *runstore.Store, run *runstore.Run, logger *zap.Logger) (Result, error) {
 	active := *run.Status.ActiveAttempt
 	if attemptStillStarting(active, time.Now().UTC()) {
 		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has starting attempt %q", run.ID, active.AttemptID)
@@ -655,19 +664,19 @@ func recoverOrRefuseActiveAttempt(store *runstore.Store, run *runstore.Run) (Res
 	if active.PID > 0 && processIdentityMatches(active.PID, active.ProcessStartTime) {
 		if attemptTimedOut(active, time.Now().UTC()) {
 			terminateProcessGroup(active.PID)
-			recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateTimedOut, resultTimeout, exitStateTimeout)
+			recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateTimedOut, resultTimeout, exitStateTimeout, logger)
 			return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
 		}
 		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has active attempt %q", run.ID, active.AttemptID)
 	}
-	recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateProcessError, resultProcessError, exitStateUnknown)
+	recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateProcessError, resultProcessError, exitStateUnknown, logger)
 	if err != nil {
 		return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
 	}
 	return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, nil
 }
 
-func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runstore.Attempt, state, result, exitState string) (runstore.Attempt, error) {
+func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runstore.Attempt, state, result, exitState string, logger *zap.Logger) (runstore.Attempt, error) {
 	recovered, _, err := store.RecoverAttempt(run.ID, runstore.FinishAttemptRequest{
 		AttemptID: active.AttemptID,
 		State:     state,
@@ -677,6 +686,17 @@ func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runst
 		LogRef:    active.LogRef,
 		Time:      time.Now().UTC(),
 	})
+	if err == nil {
+		logger.Debug("recovered active attempt",
+			zap.String("run_id", run.ID),
+			zap.String("step_id", active.StepID),
+			zap.String("agent_id", active.AgentID),
+			zap.String("attempt_id", active.AttemptID),
+			zap.String("recovered_state", state),
+			zap.String("recovered_result", result),
+			zap.String("exit_state", exitState),
+		)
+	}
 	return recovered, err
 }
 
