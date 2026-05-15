@@ -52,79 +52,75 @@ func TestLoadValidRuntimeDescriptors(t *testing.T) {
 	}
 }
 
-func TestLoadRuntimeModelAllowlistValidation(t *testing.T) {
+func TestLoadRuntimeSelectionAllowlistValidation(t *testing.T) {
 	tests := []struct {
 		name       string
 		descriptor string
 		contains   []string
 	}{
 		{
-			name: "missing allowed means pass through",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: true
-  default: gpt-9
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
+			name: "model missing allowed means pass through",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection:   "model",
+				defaultName: "gpt-9",
+			}),
 		},
 		{
-			name: "empty allowed means pass through",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: true
-  default: gpt-9
-  allowed: []
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
+			name: "model empty allowed means pass through",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection:   "model",
+				defaultName: "gpt-9",
+				allowed:     []string{},
+			}),
 		},
 		{
-			name: "default constrained by allowlist",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: true
-  default: gpt-9
-  allowed: [gpt-5]
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
+			name: "model default constrained by allowlist",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection:   "model",
+				defaultName: "gpt-9",
+				allowed:     []string{"gpt-5"},
+			}),
 			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `model.default "gpt-9" is not allowed by model.allowed`},
 		},
 		{
-			name: "empty allowlist entry",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: true
-  allowed: [""]
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
+			name: "model empty allowlist entry",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection: "model",
+				allowed:   []string{`""`},
+			}),
 			contains: []string{`model.allowed[0] is empty`},
+		},
+		{
+			name: "reasoning missing allowed means pass through",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection:   "reasoning",
+				defaultName: "effort-9",
+			}),
+		},
+		{
+			name: "reasoning empty allowed means pass through",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection:   "reasoning",
+				defaultName: "effort-9",
+				allowed:     []string{},
+			}),
+		},
+		{
+			name: "reasoning default constrained by allowlist",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection:   "reasoning",
+				defaultName: "effort-9",
+				allowed:     []string{"medium"},
+			}),
+			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `reasoning.default "effort-9" is not allowed by reasoning.allowed`},
+		},
+		{
+			name: "reasoning empty allowlist entry",
+			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
+				selection: "reasoning",
+				allowed:   []string{`""`},
+			}),
+			contains: []string{`reasoning.allowed[0] is empty`},
 		},
 	}
 
@@ -145,108 +141,47 @@ sandbox:
 	}
 }
 
-func TestLoadRuntimeReasoningAllowlistValidation(t *testing.T) {
-	tests := []struct {
-		name       string
-		descriptor string
-		contains   []string
-	}{
-		{
-			name: "missing allowed means pass through",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: false
-reasoning:
-  supported: true
-  default: effort-9
-  args: [--reasoning, "{reasoning}"]
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
-		},
-		{
-			name: "empty allowed means pass through",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: false
-reasoning:
-  supported: true
-  default: effort-9
-  allowed: []
-  args: [--reasoning, "{reasoning}"]
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
-		},
-		{
-			name: "default constrained by allowlist",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: false
-reasoning:
-  supported: true
-  default: effort-9
-  allowed: [medium]
-  args: [--reasoning, "{reasoning}"]
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
-			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `reasoning.default "effort-9" is not allowed by reasoning.allowed`},
-		},
-		{
-			name: "empty allowlist entry",
-			descriptor: `id: codex
-command:
-  executable: codex
-prompt:
-  delivery: stdin
-model:
-  supported: false
-reasoning:
-  supported: true
-  allowed: [""]
-  args: [--reasoning, "{reasoning}"]
-directories:
-  supported: false
-sandbox:
-  supported: true
-`,
-			contains: []string{`reasoning.allowed[0] is empty`},
-		},
-	}
+type runtimeSelectionDescriptorOptions struct {
+	selection   string
+	defaultName string
+	allowed     []string
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			root := writeMinimalProject(t, projectFixture{
-				config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
-				runtimes: map[string]string{"codex": tt.descriptor},
-			})
-			if len(tt.contains) == 0 {
-				if _, err := Load(root); err != nil {
-					t.Fatalf("Load returned error: %v", err)
-				}
-				return
-			}
-			assertLoadErrorContains(t, root, tt.contains...)
-		})
+func runtimeSelectionDescriptor(options runtimeSelectionDescriptorOptions) string {
+	var builder strings.Builder
+	builder.WriteString(`id: codex
+command:
+  executable: codex
+prompt:
+  delivery: stdin
+model:
+`)
+	if options.selection == "model" {
+		writeRuntimeSelectionDescriptorFields(&builder, options)
+	} else {
+		builder.WriteString("  supported: false\n")
+	}
+	if options.selection == "reasoning" {
+		builder.WriteString("reasoning:\n")
+		writeRuntimeSelectionDescriptorFields(&builder, options)
+		builder.WriteString(`  args: [--reasoning, "{reasoning}"]
+`)
+	}
+	builder.WriteString(`directories:
+  supported: false
+sandbox:
+  supported: true
+`)
+	return builder.String()
+}
+
+func writeRuntimeSelectionDescriptorFields(builder *strings.Builder, options runtimeSelectionDescriptorOptions) {
+	builder.WriteString("  supported: true\n")
+	if options.defaultName != "" {
+		builder.WriteString("  default: " + options.defaultName + "\n")
+	}
+	if options.allowed != nil {
+		builder.WriteString("  allowed: [" + strings.Join(options.allowed, ", ") + "]\n")
 	}
 }
 

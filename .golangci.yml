@@ -31,6 +31,7 @@ linters:
     - nolintlint      # Check nolint directives are precise and justified
     - dupword         # Finds duplicate words
     - musttag         # Enforce tags on JSON marshaled structs
+    - dupl            # Detect duplicate code blocks
 
   settings:
     errcheck:

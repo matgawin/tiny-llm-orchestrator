@@ -118,49 +118,60 @@ func validateRuntimeExecutable(runtime Runtime) error {
 }
 
 func validateRuntimeModel(runtime Runtime) error {
-	if !runtime.Model.Supported {
-		switch {
-		case runtime.Model.Required:
-			return errors.New("model.required requires model.supported=true")
-		case runtime.Model.Default != "":
-			return errors.New("model.default requires model.supported=true")
-		case len(runtime.Model.Allowed) > 0:
-			return errors.New("model.allowed requires model.supported=true")
-		case len(runtime.Model.Args) > 0:
-			return errors.New("model.args requires model.supported=true")
-		}
-		return nil
-	}
-	if err := validateStringListNoEmpty("model.allowed", runtime.Model.Allowed); err != nil {
-		return err
-	}
-	if len(runtime.Model.Allowed) > 0 && runtime.Model.Default != "" && !slices.Contains(runtime.Model.Allowed, runtime.Model.Default) {
-		return fmt.Errorf("model.default %q is not allowed by model.allowed", runtime.Model.Default)
-	}
-	return validateRuntimeArgv("model.args", runtime.Model.Args, runtime, placeholderContextModel)
+	return validateRuntimeSelection(runtime, runtimeSelectionValidation{
+		name:        "model",
+		supported:   runtime.Model.Supported,
+		required:    runtime.Model.Required,
+		defaultName: runtime.Model.Default,
+		allowed:     runtime.Model.Allowed,
+		args:        runtime.Model.Args,
+		placeholder: placeholderContextModel,
+	})
 }
 
 func validateRuntimeReasoning(runtime Runtime) error {
-	if !runtime.Reasoning.Supported {
+	return validateRuntimeSelection(runtime, runtimeSelectionValidation{
+		name:        "reasoning",
+		supported:   runtime.Reasoning.Supported,
+		required:    runtime.Reasoning.Required,
+		defaultName: runtime.Reasoning.Default,
+		allowed:     runtime.Reasoning.Allowed,
+		args:        runtime.Reasoning.Args,
+		placeholder: placeholderContextReasoning,
+	})
+}
+
+type runtimeSelectionValidation struct {
+	name        string
+	supported   bool
+	required    bool
+	defaultName string
+	allowed     []string
+	args        []string
+	placeholder placeholderContext
+}
+
+func validateRuntimeSelection(runtime Runtime, selection runtimeSelectionValidation) error {
+	if !selection.supported {
 		switch {
-		case runtime.Reasoning.Required:
-			return errors.New("reasoning.required requires reasoning.supported=true")
-		case runtime.Reasoning.Default != "":
-			return errors.New("reasoning.default requires reasoning.supported=true")
-		case len(runtime.Reasoning.Allowed) > 0:
-			return errors.New("reasoning.allowed requires reasoning.supported=true")
-		case len(runtime.Reasoning.Args) > 0:
-			return errors.New("reasoning.args requires reasoning.supported=true")
+		case selection.required:
+			return fmt.Errorf("%s.required requires %s.supported=true", selection.name, selection.name)
+		case selection.defaultName != "":
+			return fmt.Errorf("%s.default requires %s.supported=true", selection.name, selection.name)
+		case len(selection.allowed) > 0:
+			return fmt.Errorf("%s.allowed requires %s.supported=true", selection.name, selection.name)
+		case len(selection.args) > 0:
+			return fmt.Errorf("%s.args requires %s.supported=true", selection.name, selection.name)
 		}
 		return nil
 	}
-	if err := validateStringListNoEmpty("reasoning.allowed", runtime.Reasoning.Allowed); err != nil {
+	if err := validateStringListNoEmpty(selection.name+".allowed", selection.allowed); err != nil {
 		return err
 	}
-	if len(runtime.Reasoning.Allowed) > 0 && runtime.Reasoning.Default != "" && !slices.Contains(runtime.Reasoning.Allowed, runtime.Reasoning.Default) {
-		return fmt.Errorf("reasoning.default %q is not allowed by reasoning.allowed", runtime.Reasoning.Default)
+	if len(selection.allowed) > 0 && selection.defaultName != "" && !slices.Contains(selection.allowed, selection.defaultName) {
+		return fmt.Errorf("%s.default %q is not allowed by %s.allowed", selection.name, selection.defaultName, selection.name)
 	}
-	return validateRuntimeArgv("reasoning.args", runtime.Reasoning.Args, runtime, placeholderContextReasoning)
+	return validateRuntimeArgv(selection.name+".args", selection.args, runtime, selection.placeholder)
 }
 
 func validateRuntimeDirectories(runtime Runtime) error {
