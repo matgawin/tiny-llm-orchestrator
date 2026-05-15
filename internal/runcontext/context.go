@@ -1,6 +1,7 @@
 package runcontext
 
 import (
+	"context"
 	"fmt"
 
 	"tiny-llm-orchestrator/orc/internal/config"
@@ -21,12 +22,26 @@ type Context struct {
 
 // Load loads run-store state and the run's pinned config snapshot.
 func Load(root, runID string) (Context, error) {
+	return LoadContext(context.Background(), root, runID)
+}
+
+// LoadContext loads run-store state and the run's pinned config snapshot unless ctx is canceled.
+func LoadContext(ctx context.Context, root, runID string) (Context, error) {
+	if ctx == nil {
+		return Context{}, fmt.Errorf("context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Context{}, err
+	}
 	store, err := runstore.Open(root)
 	if err != nil {
 		return Context{}, err
 	}
-	run, err := store.Load(runID)
+	run, err := store.LoadContext(ctx, runID)
 	if err != nil {
+		return Context{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return Context{}, err
 	}
 	snapshot, err := configsnapshot.LoadCurrent(run)

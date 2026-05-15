@@ -122,11 +122,16 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 
 // RecordAttemptPrompt links a prompt artifact to the current active attempt.
 func (s *Store) RecordAttemptPrompt(runID string, req AttemptPromptRequest) (Attempt, Event, error) {
+	return s.RecordAttemptPromptContext(context.Background(), runID, req)
+}
+
+// RecordAttemptPromptContext links a prompt artifact unless ctx is canceled before commit.
+func (s *Store) RecordAttemptPromptContext(ctx context.Context, runID string, req AttemptPromptRequest) (Attempt, Event, error) {
 	payload := attemptPromptedPayload{
 		AttemptID: req.AttemptID,
 		PromptRef: req.PromptRef,
 	}
-	return s.updateActiveAttempt(runID, req.AttemptID, req.Time, eventAttemptPrompted, func(status Status, attempt *Attempt) (any, error) {
+	return s.updateActiveAttemptContext(ctx, runID, req.AttemptID, req.Time, eventAttemptPrompted, func(status Status, attempt *Attempt) (any, error) {
 		if err := applyAttemptPromptRef(status, attempt, req.AttemptID, req.PromptRef); err != nil {
 			return nil, err
 		}
@@ -136,11 +141,16 @@ func (s *Store) RecordAttemptPrompt(runID string, req AttemptPromptRequest) (Att
 
 // RecordAttemptLog links a log artifact to the current active attempt.
 func (s *Store) RecordAttemptLog(runID string, req AttemptLogRequest) (Attempt, Event, error) {
+	return s.RecordAttemptLogContext(context.Background(), runID, req)
+}
+
+// RecordAttemptLogContext links a log artifact unless ctx is canceled before commit.
+func (s *Store) RecordAttemptLogContext(ctx context.Context, runID string, req AttemptLogRequest) (Attempt, Event, error) {
 	payload := attemptLoggedPayload{
 		AttemptID: req.AttemptID,
 		LogRef:    req.LogRef,
 	}
-	return s.updateActiveAttempt(runID, req.AttemptID, req.Time, eventAttemptLogged, func(status Status, attempt *Attempt) (any, error) {
+	return s.updateActiveAttemptContext(ctx, runID, req.AttemptID, req.Time, eventAttemptLogged, func(status Status, attempt *Attempt) (any, error) {
 		if err := applyAttemptLogRef(status, attempt, req.AttemptID, req.LogRef); err != nil {
 			return nil, err
 		}
@@ -186,11 +196,24 @@ func (s *Store) FinishAttemptContext(ctx context.Context, runID string, req Fini
 
 // RecoverAttempt terminalizes an unverifiable active attempt during launcher restart recovery.
 func (s *Store) RecoverAttempt(runID string, req FinishAttemptRequest) (Attempt, Event, error) {
-	return s.terminalizeAttempt(context.Background(), runID, req, eventAttemptRecovered, true)
+	return s.RecoverAttemptContext(context.Background(), runID, req)
+}
+
+// RecoverAttemptContext terminalizes an unverifiable active attempt unless ctx is canceled before commit.
+func (s *Store) RecoverAttemptContext(ctx context.Context, runID string, req FinishAttemptRequest) (Attempt, Event, error) {
+	return s.terminalizeAttempt(ctx, runID, req, eventAttemptRecovered, true)
 }
 
 // RecordAttemptWarning records a process warning without changing attempt outcome.
 func (s *Store) RecordAttemptWarning(runID string, warning AttemptWarning) (Status, Event, error) {
+	return s.RecordAttemptWarningContext(context.Background(), runID, warning)
+}
+
+// RecordAttemptWarningContext records a process warning unless ctx is canceled before commit.
+func (s *Store) RecordAttemptWarningContext(ctx context.Context, runID string, warning AttemptWarning) (Status, Event, error) {
+	if ctx == nil {
+		return Status{}, Event{}, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
@@ -201,7 +224,10 @@ func (s *Store) RecordAttemptWarning(runID string, warning AttemptWarning) (Stat
 	}
 	event := Event{Time: warning.Time, Type: eventAttemptWarning, Payload: payload}
 	var status Status
-	err = s.withRunLock(runID, func() error {
+	err = s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -420,10 +446,6 @@ func applyAttemptReport(status Status, attempt *Attempt, state string, report Re
 	report.AttemptID = attempt.AttemptID
 	attempt.Report = &report
 	return nil
-}
-
-func (s *Store) updateActiveAttempt(runID, attemptID string, at time.Time, eventType string, apply func(Status, *Attempt) (any, error)) (Attempt, Event, error) {
-	return s.updateActiveAttemptContext(context.Background(), runID, attemptID, at, eventType, apply)
 }
 
 func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID string, at time.Time, eventType string, apply func(Status, *Attempt) (any, error)) (Attempt, Event, error) {

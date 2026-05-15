@@ -3,6 +3,7 @@
 package progress
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -76,6 +77,10 @@ type Listener struct {
 }
 
 func NewListener() (*Listener, error) {
+	return NewListenerContext(context.Background())
+}
+
+func NewListenerContext(ctx context.Context) (*Listener, error) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return nil, fmt.Errorf("progress sockets are unsupported on %s", runtime.GOOS)
 	}
@@ -90,7 +95,7 @@ func NewListener() (*Listener, error) {
 		return nil, err
 	}
 	path := filepath.Join(dir, socketName)
-	ln, err := net.Listen("unix", path)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", path)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
@@ -125,7 +130,8 @@ func Send(socketPath string, req Request) (Response, error) {
 	if socketPath == "" {
 		return Response{}, ErrUnavailable
 	}
-	conn, err := net.DialTimeout("unix", socketPath, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "unix", socketPath)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}

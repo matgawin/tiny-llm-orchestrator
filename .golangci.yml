@@ -33,6 +33,8 @@ linters:
     - musttag         # Enforce tags on JSON marshaled structs
     - dupl            # Detect duplicate code blocks
     - exhaustive      # Check enum-like switch statements cover all values
+    - contextcheck    # Check function whether use a non-inherited context
+    - noctx           # Check for contextless blocking calls
 
   settings:
     errcheck:

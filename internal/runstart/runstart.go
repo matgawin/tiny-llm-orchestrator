@@ -123,15 +123,15 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return createRun(opts, project, store, workflow.Start, task, vcsSnapshot)
+	return createRun(ctx, opts, project, store, workflow.Start, task, vcsSnapshot)
 }
 
-func createRun(opts Options, project *config.Project, store *runstore.Store, initialState string, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
+func createRun(ctx context.Context, opts Options, project *config.Project, store *runstore.Store, initialState string, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
 	configSnapshot, err := configsnapshot.BuildInitial(project, opts.Workflow, opts.Time)
 	if err != nil {
 		return Result{}, err
 	}
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(ctx, runstore.CreateRunRequest{
 		RunID:        opts.RunID,
 		Workflow:     opts.Workflow,
 		TaskSlug:     task.taskSlug,
@@ -141,10 +141,10 @@ func createRun(opts Options, project *config.Project, store *runstore.Store, ini
 	if err != nil {
 		return Result{}, err
 	}
-	if err := store.WriteInitialConfigSnapshot(run.ID, configSnapshot); err != nil {
+	if err := store.WriteInitialConfigSnapshotContext(ctx, run.ID, configSnapshot); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
-	if err := writeTaskArtifact(store, run.ID, runstore.KindTaskContext, task.context, opts.Time); err != nil {
+	if err := writeTaskArtifact(ctx, store, run.ID, runstore.KindTaskContext, task.context, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
 	snapshot, err := json.MarshalIndent(task.snapshot, "", "  ")
@@ -152,10 +152,10 @@ func createRun(opts Options, project *config.Project, store *runstore.Store, ini
 		return Result{}, cleanupStartedRun(run.Path, fmt.Errorf("marshal task snapshot: %w", err))
 	}
 	snapshot = append(snapshot, '\n')
-	if err := writeTaskArtifact(store, run.ID, runstore.KindTaskSnapshot, snapshot, opts.Time); err != nil {
+	if err := writeTaskArtifact(ctx, store, run.ID, runstore.KindTaskSnapshot, snapshot, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
-	if _, err := vcs.WriteSnapshot(store, run.ID, "vcs-pre-run", vcsSnapshot, opts.Time); err != nil {
+	if _, err := vcs.WriteSnapshot(ctx, store, run.ID, "vcs-pre-run", vcsSnapshot, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
 	return Result{RunID: run.ID, Path: run.Path}, nil
@@ -179,8 +179,8 @@ func inspectPreRunVCS(ctx context.Context, workflow config.Workflow, opts Option
 	return snapshot, nil
 }
 
-func writeTaskArtifact(store *runstore.Store, runID string, kind runstore.ArtifactKind, content []byte, at time.Time) error {
-	_, err := store.WriteArtifact(runID, runstore.Artifact{
+func writeTaskArtifact(ctx context.Context, store *runstore.Store, runID string, kind runstore.ArtifactKind, content []byte, at time.Time) error {
+	_, err := store.WriteArtifactContext(ctx, runID, runstore.Artifact{
 		Kind:    kind,
 		Name:    "task",
 		Content: content,

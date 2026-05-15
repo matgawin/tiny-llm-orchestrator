@@ -2,6 +2,7 @@ package runstore
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,14 @@ import (
 
 // RecordAttemptReport terminalizes the current active attempt with a structured worker report.
 func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Attempt, Event, error) {
+	return s.RecordAttemptReportContext(context.Background(), runID, req)
+}
+
+// RecordAttemptReportContext terminalizes the current active attempt with a structured worker report unless ctx is canceled before commit.
+func (s *Store) RecordAttemptReportContext(ctx context.Context, runID string, req RecordReportRequest) (Attempt, Event, error) {
+	if ctx == nil {
+		return Attempt{}, Event{}, errors.New("context is required")
+	}
 	report := req.Report
 	state := req.State
 	if state == "" {
@@ -22,7 +31,10 @@ func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Atte
 
 	var out Attempt
 	var event Event
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -224,6 +236,14 @@ func (s *Store) stageReportArtifactForEvent(run *Run, name string, content []byt
 
 // RecordIgnoredReport records a report that did not target the active attempt.
 func (s *Store) RecordIgnoredReport(runID string, req IgnoreReportRequest) (Event, error) {
+	return s.RecordIgnoredReportContext(context.Background(), runID, req)
+}
+
+// RecordIgnoredReportContext records a report that did not target the active attempt unless ctx is canceled before commit.
+func (s *Store) RecordIgnoredReportContext(ctx context.Context, runID string, req IgnoreReportRequest) (Event, error) {
+	if ctx == nil {
+		return Event{}, errors.New("context is required")
+	}
 	if req.Reason == "" {
 		return Event{}, errors.New("reason is required")
 	}
@@ -243,7 +263,10 @@ func (s *Store) RecordIgnoredReport(runID string, req IgnoreReportRequest) (Even
 	}
 	event := Event{Time: req.Time, Type: eventReportIgnored, Payload: payload}
 	var committed Event
-	err = s.withRunLock(runID, func() error {
+	err = s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err

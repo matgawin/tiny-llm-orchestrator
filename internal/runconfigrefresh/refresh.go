@@ -71,7 +71,7 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	run, err := store.Load(opts.RunID)
+	run, err := store.LoadContext(ctx, opts.RunID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -88,7 +88,7 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	manifestHash := configsnapshot.ManifestHash(snapshot.Manifest)
-	refresh, err := store.RefreshConfigSnapshot(opts.RunID, runstore.RefreshConfigSnapshotRequest{
+	refresh, err := store.RefreshConfigSnapshotContext(ctx, opts.RunID, runstore.RefreshConfigSnapshotRequest{
 		Snapshot:              snapshot,
 		Source:                source,
 		ManifestHashAlgorithm: hashAlgorithm,

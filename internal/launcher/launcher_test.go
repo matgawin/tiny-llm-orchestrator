@@ -513,7 +513,7 @@ func recordLauncherPromptNamed(t *testing.T, store *runstore.Store, runID, attem
 
 func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runcontext.Context, runstore.Attempt) {
 	t.Helper()
-	loaded, err := loadLaunchContext(root, runID)
+	loaded, err := loadLaunchContext(context.Background(), root, runID)
 	if err != nil {
 		t.Fatalf("loadLaunchContext returned error: %v", err)
 	}

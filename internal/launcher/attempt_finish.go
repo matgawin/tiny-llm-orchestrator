@@ -16,15 +16,22 @@ import (
 
 const launchCleanupTimeout = 2 * time.Second
 
-func finishAttemptWithCleanupContext(store *runstore.Store, runID string, req runstore.FinishAttemptRequest) (runstore.Attempt, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), launchCleanupTimeout)
+func finishAttemptWithCleanupContext(parent context.Context, store *runstore.Store, runID string, req runstore.FinishAttemptRequest) (runstore.Attempt, error) {
+	ctx, cancel := context.WithTimeout(cleanupContext(parent), launchCleanupTimeout)
 	defer cancel()
 	finished, _, err := store.FinishAttemptContext(ctx, runID, req)
 	return finished, err
 }
 
-func finishProcessErrorAttempt(store *runstore.Store, runID, attemptID, exitState string, logRef runstore.ArtifactRef, at time.Time, causes ...error) (runstore.Attempt, error) {
-	finished, finishErr := finishAttemptWithCleanupContext(store, runID, runstore.FinishAttemptRequest{
+func cleanupContext(parent context.Context) context.Context {
+	if parent == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(parent)
+}
+
+func finishProcessErrorAttempt(ctx context.Context, store *runstore.Store, runID, attemptID, exitState string, logRef runstore.ArtifactRef, at time.Time, causes ...error) (runstore.Attempt, error) {
+	finished, finishErr := finishAttemptWithCleanupContext(ctx, store, runID, runstore.FinishAttemptRequest{
 		AttemptID: attemptID,
 		State:     runstore.AttemptStateProcessError,
 		Status:    workflow.ReportStatusFailed,
@@ -52,8 +59,8 @@ func isContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-func loadLaunchContext(root, runID string) (runcontext.Context, error) {
-	return runcontext.Load(root, runID)
+func loadLaunchContext(ctx context.Context, root, runID string) (runcontext.Context, error) {
+	return runcontext.LoadContext(ctx, root, runID)
 }
 
 func newAttemptID(now time.Time, step string) (string, error) {

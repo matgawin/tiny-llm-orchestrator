@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,17 +46,30 @@ type configSnapshotRefreshedPayload struct {
 
 // WriteInitialConfigSnapshot persists config snapshot version 000001 for runID.
 func (s *Store) WriteInitialConfigSnapshot(runID string, snapshot ConfigSnapshot) error {
+	return s.WriteInitialConfigSnapshotContext(context.Background(), runID, snapshot)
+}
+
+// WriteInitialConfigSnapshotContext persists config snapshot version 000001 for runID unless ctx is canceled.
+func (s *Store) WriteInitialConfigSnapshotContext(ctx context.Context, runID string, snapshot ConfigSnapshot) error {
 	if snapshot.Version == 0 {
 		snapshot.Version = 1
 	}
 	if snapshot.Version != 1 {
 		return fmt.Errorf("initial config snapshot version = %d, want 1", snapshot.Version)
 	}
-	return s.writeConfigSnapshot(runID, snapshot, true)
+	return s.writeConfigSnapshot(ctx, runID, snapshot, true)
 }
 
 // RefreshConfigSnapshot publishes the next config snapshot and records the refresh event under the run lock.
 func (s *Store) RefreshConfigSnapshot(runID string, req RefreshConfigSnapshotRequest, validate ConfigSnapshotRefreshValidator) (ConfigSnapshotRefresh, error) {
+	return s.RefreshConfigSnapshotContext(context.Background(), runID, req, validate)
+}
+
+// RefreshConfigSnapshotContext publishes the next config snapshot unless ctx is canceled before commit.
+func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, req RefreshConfigSnapshotRequest, validate ConfigSnapshotRefreshValidator) (ConfigSnapshotRefresh, error) {
+	if ctx == nil {
+		return ConfigSnapshotRefresh{}, errors.New("context is required")
+	}
 	if req.Source == "" {
 		return ConfigSnapshotRefresh{}, errors.New("config snapshot refresh source is required")
 	}
@@ -79,7 +93,10 @@ func (s *Store) RefreshConfigSnapshot(runID string, req RefreshConfigSnapshotReq
 	}
 
 	var refresh ConfigSnapshotRefresh
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -142,7 +159,10 @@ func (s *Store) RefreshConfigSnapshot(runID string, req RefreshConfigSnapshotReq
 	return refresh, nil
 }
 
-func (s *Store) writeConfigSnapshot(runID string, snapshot ConfigSnapshot, initial bool) error {
+func (s *Store) writeConfigSnapshot(ctx context.Context, runID string, snapshot ConfigSnapshot, initial bool) error {
+	if ctx == nil {
+		return errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return err
 	}
@@ -152,7 +172,10 @@ func (s *Store) writeConfigSnapshot(runID string, snapshot ConfigSnapshot, initi
 	if len(snapshot.Manifest) == 0 {
 		return errors.New("config snapshot manifest.json content is required")
 	}
-	return s.withRunLock(runID, func() error {
+	return s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err

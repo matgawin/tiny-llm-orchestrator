@@ -133,7 +133,7 @@ func TestResolveWorkerExecutableDoesNotFallbackWhenEnvOmitsPATH(t *testing.T) {
 }
 
 func TestNewWorkerCommandUsesAbsoluteHelperPath(t *testing.T) {
-	cmd, releaseExec, err := newWorkerCommand([]string{"sh", "-c", "true"}, os.Environ(), t.TempDir())
+	cmd, releaseExec, err := newWorkerCommand(context.Background(), []string{"sh", "-c", "true"}, os.Environ(), t.TempDir())
 	if err != nil {
 		t.Fatalf("newWorkerCommand returned error: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestExecHelperClosesHandshakeFDBeforeWorkerExec(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("fd inheritance assertion uses linux procfs")
 	}
-	cmd, releaseExec, err := newWorkerCommand([]string{"sh", "-c", "test ! -e /proc/$$/fd/3"}, os.Environ(), t.TempDir())
+	cmd, releaseExec, err := newWorkerCommand(context.Background(), []string{"sh", "-c", "test ! -e /proc/$$/fd/3"}, os.Environ(), t.TempDir())
 	if err != nil {
 		t.Fatalf("newWorkerCommand returned error: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestAmbientExecHelperEnvDoesNotBypassNormalInvocation(t *testing.T) {
 	if os.Getenv("ORC_LAUNCHER_AMBIENT_HELPER_TEST") == "1" {
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=TestAmbientExecHelperEnvDoesNotBypassNormalInvocation")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=TestAmbientExecHelperEnvDoesNotBypassNormalInvocation")
 	cmd.Env = append(os.Environ(),
 		execHelperEnv+"=ambient-user-value",
 		"ORC_LAUNCHER_AMBIENT_HELPER_TEST=1",

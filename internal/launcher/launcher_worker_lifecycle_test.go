@@ -37,7 +37,7 @@ func TestWorkerRunnerUsesTerminalReportInsteadOfSynthesizedFinish(t *testing.T) 
 	}
 
 	runner := workerRunner{loaded: loaded, attempt: attempt}
-	got, ok, err := runner.reportTerminalAttemptAfterWait()
+	got, ok, err := runner.reportTerminalAttemptAfterWait(context.Background())
 	if err != nil {
 		t.Fatalf("reportTerminalAttemptAfterWait returned error: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestLaunchNextCancellationBeforeStartAttemptDoesNotCreateAttempt(t *testing
 func TestLaunchNextCancellationWhileStartAttemptBlockedDoesNotCreateAttempt(t *testing.T) {
 	root, runID := createLauncherRun(t, "5s")
 	store := openLauncherStore(t, root)
-	loaded, err := loadLaunchContext(root, runID)
+	loaded, err := loadLaunchContext(context.Background(), root, runID)
 	if err != nil {
 		t.Fatalf("loadLaunchContext returned error: %v", err)
 	}

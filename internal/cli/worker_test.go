@@ -443,7 +443,7 @@ func TestWorkerLaunchNextSignalCancelsWorkerProcessGroup(t *testing.T) {
 	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 	shim := installCLICodexShim(t, root)
 	childPIDPath := filepath.Join(root, "signal-child.pid")
-	cmd := exec.Command(os.Args[0], "worker", "launch-next", result.runID)
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "worker", "launch-next", result.runID)
 	cmd.Dir = root
 	cmd.Env = shim.processEnv("child-pid", "ORC_CLI_CODEX_CHILD_PID="+childPIDPath)
 	var stdout, stderr bytes.Buffer

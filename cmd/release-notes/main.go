@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -44,7 +45,7 @@ func gitLog(revisionRange string) ([]releasenotes.Commit, error) {
 		return nil, err
 	}
 	// #nosec G204 -- revisionRange is validated and passed as one non-option git revision argument.
-	cmd := exec.Command("git", "log", "--first-parent", "--reverse", "--format=%H%x00%s%x00%B%x00%x1e", revisionRange, "--")
+	cmd := exec.CommandContext(context.Background(), "git", "log", "--first-parent", "--reverse", "--format=%H%x00%s%x00%B%x00%x1e", revisionRange, "--")
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError

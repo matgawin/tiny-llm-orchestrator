@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,25 +13,40 @@ import (
 
 // WriteArtifact persists an artifact under the run directory and records it in the event log.
 func (s *Store) WriteArtifact(runID string, artifact Artifact) (ArtifactRef, error) {
-	return s.writeArtifactWithStage(runID, artifact, nil, stageArtifact)
+	return s.WriteArtifactContext(context.Background(), runID, artifact)
+}
+
+// WriteArtifactContext persists an artifact unless ctx is canceled before the artifact commits.
+func (s *Store) WriteArtifactContext(ctx context.Context, runID string, artifact Artifact) (ArtifactRef, error) {
+	return s.writeArtifactWithStage(ctx, runID, artifact, nil, stageArtifact)
 }
 
 // WriteArtifactFromFile persists an artifact by streaming content from sourcePath.
 func (s *Store) WriteArtifactFromFile(runID string, artifact Artifact, sourcePath string) (ArtifactRef, error) {
+	return s.WriteArtifactFromFileContext(context.Background(), runID, artifact, sourcePath)
+}
+
+// WriteArtifactFromFileContext persists an artifact by streaming content from sourcePath unless ctx is canceled before commit.
+func (s *Store) WriteArtifactFromFileContext(ctx context.Context, runID string, artifact Artifact, sourcePath string) (ArtifactRef, error) {
 	if sourcePath == "" {
 		return ArtifactRef{}, errors.New("artifact source path is required")
 	}
-	return s.writeArtifactWithStage(runID, artifact, nil, func(path string, artifact Artifact) (stagedArtifact, error) {
+	return s.writeArtifactWithStage(ctx, runID, artifact, nil, func(path string, artifact Artifact) (stagedArtifact, error) {
 		return stageArtifactFromFile(path, artifact, sourcePath)
 	})
 }
 
 // WriteArtifactIfState persists an artifact only while the run is in the expected state.
 func (s *Store) WriteArtifactIfState(runID, expectedState string, artifact Artifact) (ArtifactRef, error) {
+	return s.WriteArtifactIfStateContext(context.Background(), runID, expectedState, artifact)
+}
+
+// WriteArtifactIfStateContext persists an artifact only while the run is in the expected state unless ctx is canceled before commit.
+func (s *Store) WriteArtifactIfStateContext(ctx context.Context, runID, expectedState string, artifact Artifact) (ArtifactRef, error) {
 	if expectedState == "" {
 		return ArtifactRef{}, errors.New("expected state is required")
 	}
-	return s.writeArtifact(runID, artifact, func(run *Run) error {
+	return s.writeArtifact(ctx, runID, artifact, func(run *Run) error {
 		if run.Status.State != expectedState {
 			return &StateMismatchError{RunID: run.ID, Got: run.Status.State, Want: expectedState}
 		}
@@ -38,16 +54,22 @@ func (s *Store) WriteArtifactIfState(runID, expectedState string, artifact Artif
 	})
 }
 
-func (s *Store) writeArtifact(runID string, artifact Artifact, validate func(*Run) error) (ArtifactRef, error) {
-	return s.writeArtifactWithStage(runID, artifact, validate, stageArtifact)
+func (s *Store) writeArtifact(ctx context.Context, runID string, artifact Artifact, validate func(*Run) error) (ArtifactRef, error) {
+	return s.writeArtifactWithStage(ctx, runID, artifact, validate, stageArtifact)
 }
 
-func (s *Store) writeArtifactWithStage(runID string, artifact Artifact, validate func(*Run) error, stage func(string, Artifact) (stagedArtifact, error)) (ArtifactRef, error) {
+func (s *Store) writeArtifactWithStage(ctx context.Context, runID string, artifact Artifact, validate func(*Run) error, stage func(string, Artifact) (stagedArtifact, error)) (ArtifactRef, error) {
+	if ctx == nil {
+		return ArtifactRef{}, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return ArtifactRef{}, err
 	}
 	var ref ArtifactRef
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -138,11 +160,22 @@ func rollbackStagedArtifacts(staged []stagedArtifact) error {
 
 // ReadArtifact reads a persisted artifact through a validated run-store path.
 func (s *Store) ReadArtifact(runID string, ref ArtifactRef) ([]byte, error) {
+	return s.ReadArtifactContext(context.Background(), runID, ref)
+}
+
+// ReadArtifactContext reads a persisted artifact unless ctx is canceled before the run lock is acquired.
+func (s *Store) ReadArtifactContext(ctx context.Context, runID string, ref ArtifactRef) ([]byte, error) {
+	if ctx == nil {
+		return nil, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return nil, err
 	}
 	var content []byte
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -162,6 +195,14 @@ func (s *Store) ReadArtifact(runID string, ref ArtifactRef) ([]byte, error) {
 
 // OpenArtifactAppend opens a recorded artifact for append through a validated run-store path.
 func (s *Store) OpenArtifactAppend(runID string, ref ArtifactRef) (*os.File, error) {
+	return s.OpenArtifactAppendContext(context.Background(), runID, ref)
+}
+
+// OpenArtifactAppendContext opens a recorded artifact for append unless ctx is canceled before the run lock is acquired.
+func (s *Store) OpenArtifactAppendContext(ctx context.Context, runID string, ref ArtifactRef) (*os.File, error) {
+	if ctx == nil {
+		return nil, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return nil, err
 	}
@@ -169,7 +210,10 @@ func (s *Store) OpenArtifactAppend(runID string, ref ArtifactRef) (*os.File, err
 		return nil, fmt.Errorf("artifact %s kind %q, want %q", ref.Path, ref.Kind, KindLog)
 	}
 	var file *os.File
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err

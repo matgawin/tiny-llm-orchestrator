@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -10,6 +11,14 @@ import (
 
 // RecordWorkflowLoopSoftCap records the first advisory soft-cap hit for a workflow state.
 func (s *Store) RecordWorkflowLoopSoftCap(runID string, loopCap WorkflowLoopSoftCap, at time.Time) (Status, Event, error) {
+	return s.RecordWorkflowLoopSoftCapContext(context.Background(), runID, loopCap, at)
+}
+
+// RecordWorkflowLoopSoftCapContext records the first advisory soft-cap hit unless ctx is canceled before commit.
+func (s *Store) RecordWorkflowLoopSoftCapContext(ctx context.Context, runID string, loopCap WorkflowLoopSoftCap, at time.Time) (Status, Event, error) {
+	if ctx == nil {
+		return Status{}, Event{}, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
@@ -19,7 +28,10 @@ func (s *Store) RecordWorkflowLoopSoftCap(runID string, loopCap WorkflowLoopSoft
 	at = normalizeTime(at)
 	var status Status
 	var event Event
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -51,6 +63,14 @@ func (s *Store) RecordWorkflowLoopSoftCap(runID string, loopCap WorkflowLoopSoft
 
 // BlockWorkflowLoopHardCap records a hard-cap stop and sends the run to human decision.
 func (s *Store) BlockWorkflowLoopHardCap(runID string, loopCap WorkflowLoopHardCap, at time.Time) (Status, Event, error) {
+	return s.BlockWorkflowLoopHardCapContext(context.Background(), runID, loopCap, at)
+}
+
+// BlockWorkflowLoopHardCapContext records a hard-cap stop unless ctx is canceled before commit.
+func (s *Store) BlockWorkflowLoopHardCapContext(ctx context.Context, runID string, loopCap WorkflowLoopHardCap, at time.Time) (Status, Event, error) {
+	if ctx == nil {
+		return Status{}, Event{}, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
@@ -60,7 +80,10 @@ func (s *Store) BlockWorkflowLoopHardCap(runID string, loopCap WorkflowLoopHardC
 	at = normalizeTime(at)
 	var status Status
 	var event Event
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err
@@ -158,6 +181,14 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 
 // RecordStepSkip persists an audited system-owned done/skipped transition.
 func (s *Store) RecordStepSkip(runID string, req RecordStepSkipRequest, validate StepSkipValidator) (Status, Event, error) {
+	return s.RecordStepSkipContext(context.Background(), runID, req, validate)
+}
+
+// RecordStepSkipContext persists an audited system-owned done/skipped transition unless ctx is canceled before commit.
+func (s *Store) RecordStepSkipContext(ctx context.Context, runID string, req RecordStepSkipRequest, validate StepSkipValidator) (Status, Event, error) {
+	if ctx == nil {
+		return Status{}, Event{}, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
@@ -176,7 +207,10 @@ func (s *Store) RecordStepSkip(runID string, req RecordStepSkipRequest, validate
 	req.Time = normalizeTime(req.Time)
 	var status Status
 	var event Event
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err

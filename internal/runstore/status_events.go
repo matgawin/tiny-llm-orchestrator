@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,14 @@ func (s *Store) AppendEvent(runID string, event Event) (Event, error) {
 
 // UpdateStatus appends a status event and materializes latest run status.
 func (s *Store) UpdateStatus(runID string, update StatusUpdate) (Status, Event, error) {
+	return s.UpdateStatusContext(context.Background(), runID, update)
+}
+
+// UpdateStatusContext appends a status event unless ctx is canceled before commit.
+func (s *Store) UpdateStatusContext(ctx context.Context, runID string, update StatusUpdate) (Status, Event, error) {
+	if ctx == nil {
+		return Status{}, Event{}, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
@@ -57,7 +66,10 @@ func (s *Store) UpdateStatus(runID string, update StatusUpdate) (Status, Event, 
 		Type: eventStatusUpdated,
 	}
 	var status Status
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		run, err := s.load(runID)
 		if err != nil {
 			return err

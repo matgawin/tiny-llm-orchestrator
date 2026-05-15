@@ -41,8 +41,8 @@ type Options struct {
 }
 
 // Status prints persisted run state and currently inspectable artifacts.
-func Status(_ context.Context, opts Options) error {
-	inspection, err := inspect(opts)
+func Status(ctx context.Context, opts Options) error {
+	inspection, err := inspect(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -51,8 +51,8 @@ func Status(_ context.Context, opts Options) error {
 }
 
 // Next prints the workflow-selected next action without launching a worker.
-func Next(_ context.Context, opts Options) error {
-	inspection, err := inspect(opts)
+func Next(ctx context.Context, opts Options) error {
+	inspection, err := inspect(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func Next(_ context.Context, opts Options) error {
 
 // SummaryContext prints compact review context from persisted run state.
 func SummaryContext(ctx context.Context, opts Options) error {
-	inspection, err := inspect(opts)
+	inspection, err := inspect(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -71,8 +71,8 @@ func SummaryContext(ctx context.Context, opts Options) error {
 
 // Config prints the current run config snapshot and refresh history. It reads
 // only run-store snapshot metadata and events, never live .orc files.
-func Config(_ context.Context, opts Options) error {
-	_, run, out, err := loadRun(opts)
+func Config(ctx context.Context, opts Options) error {
+	_, run, out, err := loadRun(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -128,8 +128,8 @@ const (
 	headingNested     headingLevel = "####"
 )
 
-func inspect(opts Options) (inspection, error) {
-	workflowConfig, store, run, err := loadProjectRun(opts)
+func inspect(ctx context.Context, opts Options) (inspection, error) {
+	workflowConfig, store, run, err := loadProjectRun(ctx, opts)
 	if err != nil {
 		return inspection{}, err
 	}
@@ -150,14 +150,14 @@ func inspect(opts Options) (inspection, error) {
 	}, nil
 }
 
-func loadProjectRun(opts Options) (config.Workflow, *runstore.Store, *runstore.Run, error) {
+func loadProjectRun(ctx context.Context, opts Options) (config.Workflow, *runstore.Store, *runstore.Run, error) {
 	if opts.Root == "" {
 		return config.Workflow{}, nil, nil, errors.New("project root is required")
 	}
 	if opts.RunID == "" {
 		return config.Workflow{}, nil, nil, errors.New("run id is required")
 	}
-	loaded, err := runcontext.Load(opts.Root, opts.RunID)
+	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return config.Workflow{}, nil, nil, fmt.Errorf("run %q not found", opts.RunID)
@@ -167,7 +167,7 @@ func loadProjectRun(opts Options) (config.Workflow, *runstore.Store, *runstore.R
 	return loaded.Workflow, loaded.Store, loaded.Run, nil
 }
 
-func loadRun(opts Options) (*runstore.Store, *runstore.Run, io.Writer, error) {
+func loadRun(ctx context.Context, opts Options) (*runstore.Store, *runstore.Run, io.Writer, error) {
 	if opts.Root == "" {
 		return nil, nil, nil, errors.New("project root is required")
 	}
@@ -178,7 +178,7 @@ func loadRun(opts Options) (*runstore.Store, *runstore.Run, io.Writer, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	run, err := store.Load(opts.RunID)
+	run, err := store.LoadContext(ctx, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, nil, fmt.Errorf("run %q not found", opts.RunID)
@@ -430,7 +430,7 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 	_, _ = fmt.Fprintf(w, "- last_sequence: %d\n", run.Status.LastSequence)
 	_, _ = fmt.Fprintln(w)
 
-	taskContext, err := readRequiredArtifactText(inspection.store, run, runstore.KindTaskContext)
+	taskContext, err := readRequiredArtifactText(ctx, inspection.store, run, runstore.KindTaskContext)
 	if err != nil {
 		return err
 	}
@@ -465,7 +465,7 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 	}
 	_, _ = fmt.Fprintln(w)
 
-	inputs, err := buildSummaryInputs(inspection.store, run, stepOrder)
+	inputs, err := buildSummaryInputs(ctx, inspection.store, run, stepOrder)
 	if err != nil {
 		return err
 	}
@@ -836,15 +836,15 @@ func reportedAttemptsByWorkflowOrder(attempts []runstore.Attempt, stepOrder []st
 	return ordered
 }
 
-func buildSummaryInputs(store *runstore.Store, run *runstore.Run, stepOrder []string) (summaryInputs, error) {
+func buildSummaryInputs(ctx context.Context, store *runstore.Store, run *runstore.Run, stepOrder []string) (summaryInputs, error) {
 	reported := reportedAttemptsByWorkflowOrder(run.Status.Attempts, stepOrder)
-	vcsSnapshots, err := readVCSSnapshots(store, run)
+	vcsSnapshots, err := readVCSSnapshots(ctx, store, run)
 	if err != nil {
 		return summaryInputs{}, err
 	}
 	latestPreRunVCS := latestVCSSnapshot(vcsSnapshots, vcs.PhasePreRun)
 	latestPostRunVCS := latestVCSSnapshot(vcsSnapshots, vcs.PhasePostRun)
-	recordedFollowups, err := readOptionalArtifactText(store, run, runstore.KindFollowup)
+	recordedFollowups, err := readOptionalArtifactText(ctx, store, run, runstore.KindFollowup)
 	if err != nil {
 		return summaryInputs{}, err
 	}
@@ -878,8 +878,8 @@ func collectReportFields(attempts []runstore.Attempt) reportFields {
 	return fields
 }
 
-func readRequiredArtifactText(store *runstore.Store, run *runstore.Run, kind runstore.ArtifactKind) (string, error) {
-	content, found, err := readArtifactText(store, run, kind)
+func readRequiredArtifactText(ctx context.Context, store *runstore.Store, run *runstore.Run, kind runstore.ArtifactKind) (string, error) {
+	content, found, err := readArtifactText(ctx, store, run, kind)
 	if err != nil {
 		return "", err
 	}
@@ -889,17 +889,17 @@ func readRequiredArtifactText(store *runstore.Store, run *runstore.Run, kind run
 	return content, nil
 }
 
-func readOptionalArtifactText(store *runstore.Store, run *runstore.Run, kind runstore.ArtifactKind) (string, error) {
-	content, _, err := readArtifactText(store, run, kind)
+func readOptionalArtifactText(ctx context.Context, store *runstore.Store, run *runstore.Run, kind runstore.ArtifactKind) (string, error) {
+	content, _, err := readArtifactText(ctx, store, run, kind)
 	return content, err
 }
 
-func readArtifactText(store *runstore.Store, run *runstore.Run, kind runstore.ArtifactKind) (string, bool, error) {
+func readArtifactText(ctx context.Context, store *runstore.Store, run *runstore.Run, kind runstore.ArtifactKind) (string, bool, error) {
 	for _, ref := range run.Status.Artifacts {
 		if ref.Kind != kind {
 			continue
 		}
-		content, err := store.ReadArtifact(run.ID, ref)
+		content, err := store.ReadArtifactContext(ctx, run.ID, ref)
 		if err != nil {
 			return "", false, fmt.Errorf("read %s artifact %s: %w", kind, ref.Path, err)
 		}
@@ -908,13 +908,13 @@ func readArtifactText(store *runstore.Store, run *runstore.Run, kind runstore.Ar
 	return "", false, nil
 }
 
-func readVCSSnapshots(store *runstore.Store, run *runstore.Run) ([]vcsSnapshotRef, error) {
+func readVCSSnapshots(ctx context.Context, store *runstore.Store, run *runstore.Run) ([]vcsSnapshotRef, error) {
 	var snapshots []vcsSnapshotRef
 	for _, ref := range run.Status.Artifacts {
 		if !isVCSSnapshotRef(ref) {
 			continue
 		}
-		content, err := store.ReadArtifact(run.ID, ref)
+		content, err := store.ReadArtifactContext(ctx, run.ID, ref)
 		if err != nil {
 			return nil, fmt.Errorf("read VCS snapshot %s: %w", ref.Path, err)
 		}

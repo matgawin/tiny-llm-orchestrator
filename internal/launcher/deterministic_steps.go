@@ -26,59 +26,59 @@ const (
 
 func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, step config.Step, at time.Time, progressEnv map[string]string) (runstore.Attempt, runstore.ArtifactRef, runstore.ArtifactRef, bool, error) {
 	if err := ctx.Err(); err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
-	promptRef, err := loaded.Store.WriteArtifact(opts.RunID, runstore.Artifact{
+	promptRef, err := loaded.Store.WriteArtifactContext(ctx, opts.RunID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    attempt.StepID + "-system",
 		Content: deterministicPromptContent(loaded.Workflow.Name, attempt, step),
 		Time:    at,
 	})
 	if err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
-	attempt, _, err = loaded.Store.RecordAttemptPrompt(opts.RunID, runstore.AttemptPromptRequest{
+	attempt, _, err = loaded.Store.RecordAttemptPromptContext(ctx, opts.RunID, runstore.AttemptPromptRequest{
 		AttemptID: attempt.AttemptID,
 		PromptRef: promptRef,
 		Time:      at,
 	})
 	if err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
-	processLogRef, err := loaded.Store.WriteArtifact(opts.RunID, runstore.Artifact{
+	processLogRef, err := loaded.Store.WriteArtifactContext(ctx, opts.RunID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    attempt.StepID + "-" + attempt.AttemptID + "-process",
 		Content: nil,
 		Time:    at,
 	})
 	if err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateLogStartFailed, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateLogStartFailed, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
-	attempt, _, err = loaded.Store.RecordAttemptLog(opts.RunID, runstore.AttemptLogRequest{
+	attempt, _, err = loaded.Store.RecordAttemptLogContext(ctx, opts.RunID, runstore.AttemptLogRequest{
 		AttemptID: attempt.AttemptID,
 		LogRef:    processLogRef,
 		Time:      at,
 	})
 	if err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateLogStartFailed, processLogRef, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateLogStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
 	command, cwd, env, err := deterministicExecSpec(loaded.Project.Root, step)
 	if err != nil {
-		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, nil, exitStateStartFailed, processLogRef, at, err)
+		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, nil, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
 	env = mergeEnv(env, progressEnv)
 	execPath, err := deterministicCommandPath(command, env, cwd)
 	if err != nil {
-		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
-	cmd := exec.Command(execPath, command[1:]...) // #nosec G204 -- workflow command argv is the configured v1 command-step contract.
+	cmd := exec.CommandContext(ctx, execPath, command[1:]...) // #nosec G204 -- workflow command argv is the configured v1 command-step contract.
 	cmd.Args = append([]string(nil), command...)
 	cmd.Dir = cwd
 	cmd.Env = env
@@ -86,27 +86,27 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdoutFile, stdoutPath, err := openDeterministicOutputFile(attempt, "stdout")
 	if err != nil {
-		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
 	defer removeDeterministicOutput(stdoutFile, stdoutPath)
 	stderrFile, stderrPath, err := openDeterministicOutputFile(attempt, "stderr")
 	if err != nil {
-		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
 	defer removeDeterministicOutput(stderrFile, stderrPath)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	if err := cmd.Start(); err != nil {
-		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
 	processStartTime, err := processStartIdentity(cmd.Process.Pid)
 	if err != nil {
 		terminateProcessGroup(cmd.Process.Pid)
 		_, _ = cmd.Process.Wait()
-		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, true, finishErr
 	}
 	attempt, _, err = loaded.Store.RecordAttemptProcessContext(ctx, opts.RunID, runstore.AttemptProcessRequest{
@@ -118,7 +118,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 	if err != nil {
 		terminateProcessGroup(cmd.Process.Pid)
 		_, _ = cmd.Process.Wait()
-		finished, finishErr := recordDeterministicProcessError(loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, true, finishErr
 	}
 	waitResult := waitForDeterministicProcess(ctx, loaded.Workflow.Defaults.Timeout.Duration, cmd)
@@ -126,12 +126,14 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 	stderrCloseErr := stderrFile.Close()
 	stdoutTail, stdoutTailErr := boundedLogTailFromFile(stdoutPath)
 	stderrTail, stderrTailErr := boundedLogTailFromFile(stderrPath)
-	stdoutRef, stdoutErr := loaded.Store.WriteArtifactFromFile(opts.RunID, runstore.Artifact{
+	persistCtx, persistCancel := context.WithTimeout(cleanupContext(ctx), launchCleanupTimeout)
+	defer persistCancel()
+	stdoutRef, stdoutErr := loaded.Store.WriteArtifactFromFileContext(persistCtx, opts.RunID, runstore.Artifact{
 		Kind: runstore.KindLog,
 		Name: attempt.StepID + "-" + attempt.AttemptID + "-stdout",
 		Time: at,
 	}, stdoutPath)
-	stderrRef, stderrErr := loaded.Store.WriteArtifactFromFile(opts.RunID, runstore.Artifact{
+	stderrRef, stderrErr := loaded.Store.WriteArtifactFromFileContext(persistCtx, opts.RunID, runstore.Artifact{
 		Kind: runstore.KindLog,
 		Name: attempt.StepID + "-" + attempt.AttemptID + "-stderr",
 		Time: at,
@@ -150,7 +152,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		Tests:     []string{summary},
 	}
 	outcomeErr := validateGeneratedOutcome(step, status, result)
-	finished, _, reportErr := loaded.Store.RecordAttemptReport(opts.RunID, runstore.RecordReportRequest{
+	finished, _, reportErr := loaded.Store.RecordAttemptReportContext(persistCtx, opts.RunID, runstore.RecordReportRequest{
 		State:     runstore.AttemptStateReported,
 		Report:    report,
 		ExitCode:  exitCode,
@@ -171,7 +173,7 @@ func deterministicPromptContent(workflowName string, attempt runstore.Attempt, s
 	return []byte(out.String())
 }
 
-func recordDeterministicProcessError(store *runstore.Store, runID string, attempt runstore.Attempt, step config.Step, command []string, exitState string, logRef runstore.ArtifactRef, at time.Time, causes ...error) (runstore.Attempt, error) {
+func recordDeterministicProcessError(ctx context.Context, store *runstore.Store, runID string, attempt runstore.Attempt, step config.Step, command []string, exitState string, logRef runstore.ArtifactRef, at time.Time, causes ...error) (runstore.Attempt, error) {
 	status, result := workflow.ReportStatusFailed, resultProcessError
 	if err := validateGeneratedOutcome(step, status, result); err != nil {
 		causes = append(causes, err)
@@ -180,7 +182,7 @@ func recordDeterministicProcessError(store *runstore.Store, runID string, attemp
 		command = []string{step.EffectiveKind()}
 	}
 	summary := deterministicReportSummary(step.EffectiveKind(), command, status, result, "", "")
-	finished, _, reportErr := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	finished, _, reportErr := store.RecordAttemptReportContext(ctx, runID, runstore.RecordReportRequest{
 		State:                runstore.AttemptStateReported,
 		Report:               deterministicReport(runID, attempt, status, result, summary, command),
 		ExitState:            exitState,
@@ -191,7 +193,7 @@ func recordDeterministicProcessError(store *runstore.Store, runID string, attemp
 	if reportErr == nil {
 		return finished, errors.Join(causes...)
 	}
-	finished, finishErr := finishProcessErrorAttempt(store, runID, attempt.AttemptID, exitState, logRef, at, causes...)
+	finished, finishErr := finishProcessErrorAttempt(ctx, store, runID, attempt.AttemptID, exitState, logRef, at, causes...)
 	return finished, errors.Join(reportErr, finishErr)
 }
 

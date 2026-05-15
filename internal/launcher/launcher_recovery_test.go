@@ -171,7 +171,7 @@ func TestLaunchNextRecoversExpiredLiveAttemptAsTimeout(t *testing.T) {
 	store := openLauncherStore(t, root)
 	attempt := seedLauncherAttempt(t, store, runID, "expired-live-attempt", 20*time.Millisecond, time.Now().Add(-time.Second).UTC())
 	linkLauncherPromptAndLog(t, store, runID, attempt.AttemptID)
-	cmd := exec.Command("sh", "-c", "trap '' TERM; sleep 30")
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", "trap '' TERM; sleep 30")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start worker process: %v", err)

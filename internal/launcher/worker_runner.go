@@ -44,7 +44,7 @@ func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, at
 		at:          at,
 		progressEnv: progressEnv,
 	}
-	return runner.run()
+	return runner.run(ctx)
 }
 
 type workerRunner struct {
@@ -65,17 +65,17 @@ type workerRunner struct {
 	stdin       io.WriteCloser
 }
 
-func (r *workerRunner) run() (runstore.Attempt, runstore.ArtifactRef, bool, error) {
-	if finished, err := r.selectCommand(); err != nil {
+func (r *workerRunner) run(ctx context.Context) (runstore.Attempt, runstore.ArtifactRef, bool, error) {
+	if finished, err := r.selectCommand(ctx); err != nil {
 		return finished, runstore.ArtifactRef{}, false, err
 	}
-	if finished, err := r.openLog(); err != nil {
+	if finished, err := r.openLog(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
 	defer func() {
 		_ = r.logFile.Close()
 	}()
-	if finished, err := r.prepareWorkerCommand(); err != nil {
+	if finished, err := r.prepareWorkerCommand(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
 	defer func() {
@@ -83,22 +83,29 @@ func (r *workerRunner) run() (runstore.Attempt, runstore.ArtifactRef, bool, erro
 			_ = r.releaseExec(false)
 		}
 	}()
-	if finished, err := r.startWorker(); err != nil {
+	if finished, err := r.startWorker(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
-	if finished, err := r.recordProcessAndRelease(); err != nil {
+	if finished, err := r.recordProcessAndRelease(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
-	finished, err := r.feedPromptWaitAndFinish()
+	finished, err := r.feedPromptWaitAndFinish(ctx)
 	return finished, r.logRef, true, err
 }
 
-func (r *workerRunner) selectCommand() (runstore.Attempt, error) {
+func (r *workerRunner) context() context.Context {
+	if r.ctx != nil {
+		return r.ctx
+	}
+	return context.Background()
+}
+
+func (r *workerRunner) selectCommand(ctx context.Context) (runstore.Attempt, error) {
 	r.command = r.opts.Command
 	if len(r.command) == 0 {
 		command, promptMode, err := r.runtimeCommand()
 		if err != nil {
-			return r.finishPreStart(exitStateInvalidCommand, runstore.ArtifactRef{}, err)
+			return r.finishPreStartContext(ctx, exitStateInvalidCommand, runstore.ArtifactRef{}, err)
 		}
 		r.command = command
 		r.promptMode = promptMode
@@ -107,10 +114,10 @@ func (r *workerRunner) selectCommand() (runstore.Attempt, error) {
 	}
 	if r.command[0] == "" {
 		err := errors.New("worker command is required")
-		return r.finishPreStart(exitStateInvalidCommand, runstore.ArtifactRef{}, err)
+		return r.finishPreStartContext(ctx, exitStateInvalidCommand, runstore.ArtifactRef{}, err)
 	}
-	if err := r.ctx.Err(); err != nil {
-		return r.finishPreStart(exitStateCanceled, runstore.ArtifactRef{}, err)
+	if err := ctx.Err(); err != nil {
+		return r.finishPreStartContext(ctx, exitStateCanceled, runstore.ArtifactRef{}, err)
 	}
 	return runstore.Attempt{}, nil
 }
@@ -346,28 +353,28 @@ func runtimePlaceholderValue(placeholder string, values runtimePlaceholderValues
 	}
 }
 
-func (r *workerRunner) openLog() (runstore.Attempt, error) {
-	logRef, logFile, err := openStreamingLog(r.loaded.Store, r.loaded.Run, r.attempt, r.at)
+func (r *workerRunner) openLog(ctx context.Context) (runstore.Attempt, error) {
+	logRef, logFile, err := openStreamingLog(cleanupContext(ctx), r.loaded.Store, r.loaded.Run, r.attempt, r.at)
 	if err != nil {
-		return r.finishPreStart(exitStateLogStartFailed, runstore.ArtifactRef{}, err)
+		return r.finishPreStartContext(ctx, exitStateLogStartFailed, runstore.ArtifactRef{}, err)
 	}
 	r.logRef = logRef
 	r.logFile = logFile
 	return runstore.Attempt{}, nil
 }
 
-func (r *workerRunner) prepareWorkerCommand() (runstore.Attempt, error) {
-	if err := r.ctx.Err(); err != nil {
-		return r.finishPreStart(exitStateCanceled, r.logRef, err)
+func (r *workerRunner) prepareWorkerCommand(ctx context.Context) (runstore.Attempt, error) {
+	if err := ctx.Err(); err != nil {
+		return r.finishPreStartContext(ctx, exitStateCanceled, r.logRef, err)
 	}
 	r.workerEnv = os.Environ()
 	if r.opts.Env != nil {
 		r.workerEnv = r.opts.Env
 	}
 	r.workerEnv = mergeEnv(r.workerEnv, r.progressEnv)
-	cmd, releaseExec, err := newWorkerCommand(r.command, r.workerEnv, r.loaded.Project.Root)
+	cmd, releaseExec, err := newWorkerCommand(ctx, r.command, r.workerEnv, r.loaded.Project.Root)
 	if err != nil {
-		return r.finishLoggedStartFailure(exitStateStartFailed, err)
+		return r.finishLoggedStartFailure(ctx, exitStateStartFailed, err)
 	}
 	r.cmd = cmd
 	r.releaseExec = releaseExec
@@ -379,45 +386,45 @@ func (r *workerRunner) prepareWorkerCommand() (runstore.Attempt, error) {
 	return runstore.Attempt{}, nil
 }
 
-func (r *workerRunner) startWorker() (runstore.Attempt, error) {
+func (r *workerRunner) startWorker(ctx context.Context) (runstore.Attempt, error) {
 	if r.promptMode == runtimePromptDeliveryStdin {
 		stdin, err := r.cmd.StdinPipe()
 		if err != nil {
-			return r.finishLoggedStartFailure(exitStateStartFailed, err)
+			return r.finishLoggedStartFailure(ctx, exitStateStartFailed, err)
 		}
 		r.stdin = stdin
 	}
 	if err := r.cmd.Start(); err != nil {
-		return r.finishLoggedStartFailure(exitStateStartFailed, err)
+		return r.finishLoggedStartFailure(ctx, exitStateStartFailed, err)
 	}
 	return runstore.Attempt{}, nil
 }
 
-func (r *workerRunner) recordProcessAndRelease() (runstore.Attempt, error) {
+func (r *workerRunner) recordProcessAndRelease(ctx context.Context) (runstore.Attempt, error) {
 	processStartTime, err := processStartIdentity(r.cmd.Process.Pid)
 	if err != nil {
-		return r.finishStartedProcessErrorWithLog(err)
+		return r.finishStartedProcessErrorWithLog(ctx, err)
 	}
-	started, _, err := r.loaded.Store.RecordAttemptProcessContext(r.ctx, r.loaded.Run.ID, runstore.AttemptProcessRequest{
+	started, _, err := r.loaded.Store.RecordAttemptProcessContext(ctx, r.loaded.Run.ID, runstore.AttemptProcessRequest{
 		AttemptID:        r.attempt.AttemptID,
 		PID:              r.cmd.Process.Pid,
 		ProcessStartTime: processStartTime,
 		Time:             r.at,
 	})
 	if err != nil {
-		return r.finishStartedProcessErrorWithLog(err)
+		return r.finishStartedProcessErrorWithLog(ctx, err)
 	}
-	if err := r.ctx.Err(); err != nil {
-		return r.finishStartedProcessErrorSilent(err)
+	if err := ctx.Err(); err != nil {
+		return r.finishStartedProcessErrorSilent(ctx, err)
 	}
 	if err := r.releaseExec(true); err != nil {
-		return r.finishStartedProcessErrorWithLog(err)
+		return r.finishStartedProcessErrorWithLog(ctx, err)
 	}
 	r.attempt = started
 	return runstore.Attempt{}, nil
 }
 
-func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
+func (r *workerRunner) feedPromptWaitAndFinish(ctx context.Context) (runstore.Attempt, error) {
 	promptWriteDone := make(chan error, 1)
 	if r.promptMode == runtimePromptDeliveryStdin {
 		go func() {
@@ -428,18 +435,18 @@ func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
 	} else {
 		promptWriteDone <- nil
 	}
-	waitResult := r.waitWithTimeoutAndReport()
+	waitResult := r.waitWithTimeoutAndReport(ctx)
 	promptWriteErr := <-promptWriteDone
 	if promptWriteErr != nil && waitResult.err != nil {
 		_, _ = r.logFile.WriteString(promptWriteErr.Error() + "\n")
 	}
 	logErr := r.logFile.Sync()
-	if terminal, ok, err := r.reportTerminalAttemptAfterWait(); err != nil {
+	if terminal, ok, err := r.reportTerminalAttemptAfterWait(ctx); err != nil {
 		return terminal, errors.Join(logErr, err)
 	} else if ok {
-		return terminal, errors.Join(logErr, r.recordPostReportWarning(terminal, waitResult))
+		return terminal, errors.Join(logErr, r.recordPostReportWarning(ctx, terminal, waitResult))
 	}
-	finished, finishErr := r.finishWaitOutcome(waitResult)
+	finished, finishErr := r.finishWaitOutcome(ctx, waitResult)
 	var ctxErr error
 	if waitResult.ctxErr != nil && !waitResult.workflowTimeout {
 		ctxErr = waitResult.ctxErr
@@ -447,25 +454,25 @@ func (r *workerRunner) feedPromptWaitAndFinish() (runstore.Attempt, error) {
 	return finished, errors.Join(logErr, finishErr, ctxErr)
 }
 
-func (r *workerRunner) recordPostReportWarning(attempt runstore.Attempt, waitResult waitResult) error {
+func (r *workerRunner) recordPostReportWarning(ctx context.Context, attempt runstore.Attempt, waitResult waitResult) error {
 	warningTime := normalizeTime(waitResult.warningTime)
 	switch {
 	case waitResult.postReportGraceExceeded:
-		return r.recordAttemptWarning(attempt, warningKindPostReportGraceTerminated, nil, "report_exit_grace_exceeded", "worker was terminated after valid report and report-exit grace", warningTime)
+		return r.recordAttemptWarning(ctx, attempt, warningKindPostReportGraceTerminated, nil, "report_exit_grace_exceeded", "worker was terminated after valid report and report-exit grace", warningTime)
 	case waitResult.err != nil && waitResult.ctxErr == nil && !waitResult.workflowTimeout:
 		var exitErr *exec.ExitError
 		if !errors.As(waitResult.err, &exitErr) {
 			return nil
 		}
 		code := exitErr.ExitCode()
-		return r.recordAttemptWarning(attempt, warningKindPostReportProcessExit, &code, exitStateExited, "worker exited nonzero after valid report; report remains authoritative", warningTime)
+		return r.recordAttemptWarning(ctx, attempt, warningKindPostReportProcessExit, &code, exitStateExited, "worker exited nonzero after valid report; report remains authoritative", warningTime)
 	default:
 		return nil
 	}
 }
 
-func (r *workerRunner) recordAttemptWarning(attempt runstore.Attempt, kind string, exitCode *int, exitState, message string, at time.Time) error {
-	_, _, err := r.loaded.Store.RecordAttemptWarning(r.loaded.Run.ID, runstore.AttemptWarning{
+func (r *workerRunner) recordAttemptWarning(ctx context.Context, attempt runstore.Attempt, kind string, exitCode *int, exitState, message string, at time.Time) error {
+	_, _, err := r.loaded.Store.RecordAttemptWarningContext(cleanupContext(ctx), r.loaded.Run.ID, runstore.AttemptWarning{
 		AttemptID: attempt.AttemptID,
 		Kind:      kind,
 		ExitCode:  exitCode,
@@ -476,24 +483,24 @@ func (r *workerRunner) recordAttemptWarning(attempt runstore.Attempt, kind strin
 	return err
 }
 
-func (r *workerRunner) waitWithTimeoutAndReport() waitResult {
-	return waitForWorkerProcessWithReport(r.ctx, r.loaded.Workflow.Defaults.Timeout.Duration, r.loaded.Workflow.Defaults.ReportExitGrace.Duration, r.cmd, r.pollReportedAttemptIgnoringLoadError)
+func (r *workerRunner) waitWithTimeoutAndReport(ctx context.Context) waitResult {
+	return waitForWorkerProcessWithReport(ctx, r.loaded.Workflow.Defaults.Timeout.Duration, r.loaded.Workflow.Defaults.ReportExitGrace.Duration, r.cmd, r.pollReportedAttemptIgnoringLoadError)
 }
 
 func (r *workerRunner) pollReportedAttemptIgnoringLoadError() bool {
-	_, ok, err := loadAttemptByID(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, func(attempt runstore.Attempt) bool {
+	_, ok, err := loadAttemptByID(r.context(), r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, func(attempt runstore.Attempt) bool {
 		return attempt.State == runstore.AttemptStateReported
 	})
 	return ok && err == nil
 }
 
-func (r *workerRunner) reportTerminalAttemptAfterWait() (runstore.Attempt, bool, error) {
-	return loadAttemptByID(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, func(attempt runstore.Attempt) bool {
+func (r *workerRunner) reportTerminalAttemptAfterWait(ctx context.Context) (runstore.Attempt, bool, error) {
+	return loadAttemptByID(cleanupContext(ctx), r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, func(attempt runstore.Attempt) bool {
 		return attempt.State == runstore.AttemptStateReported || attempt.State == runstore.AttemptStateInvalidReport
 	})
 }
 
-func (r *workerRunner) finishWaitOutcome(waitResult waitResult) (runstore.Attempt, error) {
+func (r *workerRunner) finishWaitOutcome(ctx context.Context, waitResult waitResult) (runstore.Attempt, error) {
 	state, result, exitCode, exitState := outcomeFromWait(waitResult)
 	finishReq := runstore.FinishAttemptRequest{
 		AttemptID: r.attempt.AttemptID,
@@ -506,38 +513,38 @@ func (r *workerRunner) finishWaitOutcome(waitResult waitResult) (runstore.Attemp
 		Time:      r.at,
 	}
 	if waitResult.ctxErr != nil && !waitResult.workflowTimeout {
-		return finishAttemptWithCleanupContext(r.loaded.Store, r.loaded.Run.ID, finishReq)
+		return finishAttemptWithCleanupContext(ctx, r.loaded.Store, r.loaded.Run.ID, finishReq)
 	}
-	finished, _, err := r.loaded.Store.FinishAttempt(r.loaded.Run.ID, finishReq)
+	finished, _, err := r.loaded.Store.FinishAttemptContext(ctx, r.loaded.Run.ID, finishReq)
 	return finished, err
 }
 
-func (r *workerRunner) finishPreStart(exitState string, logRef runstore.ArtifactRef, causes ...error) (runstore.Attempt, error) {
-	return finishProcessErrorAttempt(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, exitState, logRef, r.at, causes...)
+func (r *workerRunner) finishPreStartContext(ctx context.Context, exitState string, logRef runstore.ArtifactRef, causes ...error) (runstore.Attempt, error) {
+	return finishProcessErrorAttempt(ctx, r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, exitState, logRef, r.at, causes...)
 }
 
-func (r *workerRunner) finishLoggedStartFailure(exitState string, err error) (runstore.Attempt, error) {
+func (r *workerRunner) finishLoggedStartFailure(ctx context.Context, exitState string, err error) (runstore.Attempt, error) {
 	_, logErr := r.logFile.WriteString(err.Error() + "\n")
-	return r.finishPreStart(exitState, r.logRef, err, logErr)
+	return r.finishPreStartContext(ctx, exitState, r.logRef, err, logErr)
 }
 
-func (r *workerRunner) finishStartedProcessErrorWithLog(err error) (runstore.Attempt, error) {
+func (r *workerRunner) finishStartedProcessErrorWithLog(ctx context.Context, err error) (runstore.Attempt, error) {
 	_, logErr := r.logFile.WriteString(err.Error() + "\n")
-	return r.finishStartedProcessError(err, logErr)
+	return r.finishStartedProcessError(ctx, err, logErr)
 }
 
-func (r *workerRunner) finishStartedProcessErrorSilent(err error) (runstore.Attempt, error) {
-	return r.finishStartedProcessError(err, nil)
+func (r *workerRunner) finishStartedProcessErrorSilent(ctx context.Context, err error) (runstore.Attempt, error) {
+	return r.finishStartedProcessError(ctx, err, nil)
 }
 
-func (r *workerRunner) finishStartedProcessError(err, logErr error) (runstore.Attempt, error) {
+func (r *workerRunner) finishStartedProcessError(ctx context.Context, err, logErr error) (runstore.Attempt, error) {
 	terminateProcessGroup(r.cmd.Process.Pid)
 	_, _ = r.cmd.Process.Wait()
 	exitState := exitStateStartFailed
 	if isContextError(err) {
 		exitState = exitStateCanceled
 	}
-	return finishProcessErrorAttempt(r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, exitState, r.logRef, r.at, err, logErr)
+	return finishProcessErrorAttempt(ctx, r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, exitState, r.logRef, r.at, err, logErr)
 }
 
 type waitResult struct {
@@ -624,8 +631,8 @@ func terminateAndCollectWaitResult(pid int, done <-chan error, result waitResult
 	return result
 }
 
-func openStreamingLog(store *runstore.Store, run *runstore.Run, attempt runstore.Attempt, at time.Time) (runstore.ArtifactRef, *os.File, error) {
-	ref, err := store.WriteArtifact(run.ID, runstore.Artifact{
+func openStreamingLog(ctx context.Context, store *runstore.Store, run *runstore.Run, attempt runstore.Attempt, at time.Time) (runstore.ArtifactRef, *os.File, error) {
+	ref, err := store.WriteArtifactContext(ctx, run.ID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    attempt.StepID + "-" + attempt.AttemptID,
 		Content: nil,
@@ -634,7 +641,7 @@ func openStreamingLog(store *runstore.Store, run *runstore.Run, attempt runstore
 	if err != nil {
 		return runstore.ArtifactRef{}, nil, err
 	}
-	_, _, err = store.RecordAttemptLog(run.ID, runstore.AttemptLogRequest{
+	_, _, err = store.RecordAttemptLogContext(ctx, run.ID, runstore.AttemptLogRequest{
 		AttemptID: attempt.AttemptID,
 		LogRef:    ref,
 		Time:      at,
@@ -642,7 +649,7 @@ func openStreamingLog(store *runstore.Store, run *runstore.Run, attempt runstore
 	if err != nil {
 		return ref, nil, err
 	}
-	file, err := store.OpenArtifactAppend(run.ID, ref)
+	file, err := store.OpenArtifactAppendContext(ctx, run.ID, ref)
 	if err != nil {
 		return ref, nil, err
 	}
@@ -656,7 +663,7 @@ func loggerOrNop(logger *zap.Logger) *zap.Logger {
 	return logger
 }
 
-func recoverOrRefuseActiveAttempt(store *runstore.Store, run *runstore.Run, logger *zap.Logger) (Result, error) {
+func recoverOrRefuseActiveAttempt(ctx context.Context, store *runstore.Store, run *runstore.Run, logger *zap.Logger) (Result, error) {
 	active := *run.Status.ActiveAttempt
 	if attemptStillStarting(active, time.Now().UTC()) {
 		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has starting attempt %q", run.ID, active.AttemptID)
@@ -664,20 +671,20 @@ func recoverOrRefuseActiveAttempt(store *runstore.Store, run *runstore.Run, logg
 	if active.PID > 0 && processIdentityMatches(active.PID, active.ProcessStartTime) {
 		if attemptTimedOut(active, time.Now().UTC()) {
 			terminateProcessGroup(active.PID)
-			recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateTimedOut, resultTimeout, exitStateTimeout, logger)
+			recovered, err := recoverActiveAttempt(ctx, store, run, active, runstore.AttemptStateTimedOut, resultTimeout, exitStateTimeout, logger)
 			return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
 		}
 		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has active attempt %q", run.ID, active.AttemptID)
 	}
-	recovered, err := recoverActiveAttempt(store, run, active, runstore.AttemptStateProcessError, resultProcessError, exitStateUnknown, logger)
+	recovered, err := recoverActiveAttempt(ctx, store, run, active, runstore.AttemptStateProcessError, resultProcessError, exitStateUnknown, logger)
 	if err != nil {
 		return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
 	}
 	return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, nil
 }
 
-func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runstore.Attempt, state, result, exitState string, logger *zap.Logger) (runstore.Attempt, error) {
-	recovered, _, err := store.RecoverAttempt(run.ID, runstore.FinishAttemptRequest{
+func recoverActiveAttempt(ctx context.Context, store *runstore.Store, run *runstore.Run, active runstore.Attempt, state, result, exitState string, logger *zap.Logger) (runstore.Attempt, error) {
+	recovered, _, err := store.RecoverAttemptContext(ctx, run.ID, runstore.FinishAttemptRequest{
 		AttemptID: active.AttemptID,
 		State:     state,
 		Status:    workflow.ReportStatusFailed,
@@ -700,8 +707,8 @@ func recoverActiveAttempt(store *runstore.Store, run *runstore.Run, active runst
 	return recovered, err
 }
 
-func loadAttemptByID(store *runstore.Store, runID, attemptID string, match func(runstore.Attempt) bool) (runstore.Attempt, bool, error) {
-	run, err := store.Load(runID)
+func loadAttemptByID(ctx context.Context, store *runstore.Store, runID, attemptID string, match func(runstore.Attempt) bool) (runstore.Attempt, bool, error) {
+	run, err := store.LoadContext(ctx, runID)
 	if err != nil {
 		return runstore.Attempt{}, false, err
 	}

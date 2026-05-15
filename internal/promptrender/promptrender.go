@@ -67,7 +67,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	if err := validateOptions(opts); err != nil {
 		return Result{}, err
 	}
-	renderCtx, err := loadRenderContext(opts)
+	renderCtx, err := loadRenderContext(ctx, opts)
 	if err != nil {
 		return Result{}, err
 	}
@@ -81,7 +81,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	ref, err := renderCtx.store.WriteArtifact(opts.RunID, runstore.Artifact{
+	ref, err := renderCtx.store.WriteArtifactContext(ctx, opts.RunID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    opts.StepID,
 		Content: content,
@@ -122,8 +122,8 @@ func validateOptions(opts Options) error {
 	}
 }
 
-func loadRenderContext(opts Options) (renderContext, error) {
-	loaded, err := runcontext.Load(opts.Root, opts.RunID)
+func loadRenderContext(ctx context.Context, opts Options) (renderContext, error) {
+	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
 		return renderContext{}, err
 	}
@@ -306,7 +306,7 @@ func taskContextContent(ctx context.Context, renderCtx renderContext) (string, e
 		if ref.Kind != runstore.KindTaskContext {
 			continue
 		}
-		content, err := renderCtx.store.ReadArtifact(renderCtx.run.ID, ref)
+		content, err := renderCtx.store.ReadArtifactContext(ctx, renderCtx.run.ID, ref)
 		if err != nil {
 			return "", fmt.Errorf("read task context %s: %w", ref.Path, err)
 		}
@@ -337,7 +337,7 @@ func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]report
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		content, err := renderCtx.store.ReadArtifact(renderCtx.run.ID, ref)
+		content, err := renderCtx.store.ReadArtifactContext(ctx, renderCtx.run.ID, ref)
 		if err != nil {
 			return nil, fmt.Errorf("read prior report %s: %w", ref.Path, err)
 		}

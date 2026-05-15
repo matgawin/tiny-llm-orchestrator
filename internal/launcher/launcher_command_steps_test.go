@@ -2,9 +2,12 @@ package launcher
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
@@ -219,4 +222,60 @@ func TestLaunchNextMapsCommandTimeout(t *testing.T) {
 	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != workflow.ReportStatusFailed || result.Attempt.Result != resultTimeout {
 		t.Fatalf("attempt = %+v, want reported failed/timeout", result.Attempt)
 	}
+}
+
+func TestLaunchNextCanceledCommandPersistsTerminalReport(t *testing.T) {
+	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
+		Timeout: "5s",
+		Argv: []string{
+			"sh",
+			"-c",
+			"printf cancel-before-sleep; touch command-ready; sleep 5",
+		},
+	})
+	readyPath := filepath.Join(root, "command-ready")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan launchOutcome, 1)
+	go func() {
+		result, err := LaunchNext(ctx, Options{
+			Root:  root,
+			RunID: runID,
+			Time:  fixedLauncherTime(),
+		})
+		done <- launchOutcome{result: result, err: err}
+	}()
+	eventually(t, time.Second, func() bool {
+		_, err := os.Stat(readyPath)
+		return err == nil
+	})
+	cancel()
+
+	var outcome launchOutcome
+	select {
+	case outcome = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("LaunchNext did not return after command cancellation")
+	}
+	if !errors.Is(outcome.err, context.Canceled) {
+		t.Fatalf("LaunchNext error = %v, want context.Canceled", outcome.err)
+	}
+	if outcome.result.Attempt.State != runstore.AttemptStateReported ||
+		outcome.result.Attempt.Status != workflow.ReportStatusFailed ||
+		outcome.result.Attempt.Result != resultProcessError ||
+		outcome.result.Attempt.ExitState != exitStateCanceled {
+		t.Fatalf("attempt = %+v, want reported canceled process_error", outcome.result.Attempt)
+	}
+	if outcome.result.Attempt.Report == nil || !strings.Contains(outcome.result.Attempt.Report.Summary, "command step finished with failed/process_error") {
+		t.Fatalf("report = %+v, want persisted process_error report", outcome.result.Attempt.Report)
+	}
+	loaded := loadLauncherRun(t, root, runID)
+	if loaded.Status.ActiveAttempt != nil {
+		t.Fatalf("active attempt = %+v, want cleared", loaded.Status.ActiveAttempt)
+	}
+	got := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if got.Report == nil || got.ExitState != exitStateCanceled {
+		t.Fatalf("persisted attempt = %+v, want canceled report", got)
+	}
+	assertLogArtifactContains(t, root, loaded, outcome.result.Attempt.AttemptID, "stdout", "cancel-before-sleep")
 }

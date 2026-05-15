@@ -80,7 +80,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	loaded, err := loadLaunchContext(opts.Root, opts.RunID)
+	loaded, err := loadLaunchContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -97,14 +97,14 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("evaluate run %q: %w", opts.RunID, err)
 	}
 	if decision.Kind == workflow.DecisionWaitActiveAttempt {
-		result, err := recoverOrRefuseActiveAttempt(loaded.Store, loaded.Run, loggerOrNop(opts.Logger))
+		result, err := recoverOrRefuseActiveAttempt(ctx, loaded.Store, loaded.Run, loggerOrNop(opts.Logger))
 		if err == nil {
 			printLaunchResult(opts.Stdout, result)
 		}
 		return result, err
 	}
 	if decision.Kind == workflow.DecisionTerminal && hasOutcome && loaded.Run.Status.State == workflow.RunStatusRunning {
-		if _, _, err := loaded.Store.UpdateStatus(opts.RunID, runstore.StatusUpdate{
+		if _, _, err := loaded.Store.UpdateStatusContext(ctx, opts.RunID, runstore.StatusUpdate{
 			State: decision.RunStatus,
 			Time:  normalizeTime(opts.Time),
 			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
@@ -139,7 +139,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		if override := loaded.Run.Status.WorkflowLoop.PendingHardCapOverride; workflowLoopHardCapOverrideMatches(override, capDecision) {
 			consumeLoopCapOverride = override
 		} else {
-			status, _, err := loaded.Store.BlockWorkflowLoopHardCap(opts.RunID, capDecision.HardCap(), at)
+			status, _, err := loaded.Store.BlockWorkflowLoopHardCapContext(ctx, opts.RunID, capDecision.HardCap(), at)
 			if err != nil {
 				return Result{}, err
 			}
@@ -166,21 +166,21 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	var softCap *runstore.WorkflowLoopSoftCap
 	if capDecision.Kind == loopcap.DecisionSoft {
 		loopCap := capDecision.SoftCap()
-		if _, _, err := loaded.Store.RecordWorkflowLoopSoftCap(opts.RunID, loopCap, at); err != nil {
+		if _, _, err := loaded.Store.RecordWorkflowLoopSoftCapContext(ctx, opts.RunID, loopCap, at); err != nil {
 			return Result{}, err
 		}
 		softCap = &loopCap
 	}
-	progressDisplay, err := startLiveProgress(opts, attempt)
+	progressDisplay, err := startLiveProgress(ctx, opts, attempt)
 	if err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateStartFailed, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateStartFailed, runstore.ArtifactRef{}, at, err)
 		return terminalLaunchResult(opts.Stdout, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
 	defer func() {
 		_ = progressDisplay.Close()
 	}()
 	if err := ctx.Err(); err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
 		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
 	if step.EffectiveKind() == config.StepKindCommand || step.EffectiveKind() == config.StepKindScript {
@@ -213,16 +213,16 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		if isContextError(err) {
 			exitState = exitStateCanceled
 		}
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitState, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitState, runstore.ArtifactRef{}, at, err)
 		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
-	attempt, _, err = loaded.Store.RecordAttemptPrompt(opts.RunID, runstore.AttemptPromptRequest{
+	attempt, _, err = loaded.Store.RecordAttemptPromptContext(ctx, opts.RunID, runstore.AttemptPromptRequest{
 		AttemptID: attempt.AttemptID,
 		PromptRef: prompt.Ref,
 		Time:      at,
 	})
 	if err != nil {
-		finished, finishErr := finishProcessErrorAttempt(loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
+		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
 		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, Prompt: prompt.Ref, SoftCap: softCap}, finishErr)
 	}
 

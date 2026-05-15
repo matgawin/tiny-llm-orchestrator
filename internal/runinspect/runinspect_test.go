@@ -749,7 +749,7 @@ func recordSummaryContextReport(t *testing.T, store *runstore.Store, runID strin
 
 func writeSummaryContextVCSSnapshot(t *testing.T, store *runstore.Store, runID, name string, snapshot vcs.Snapshot, at time.Time) {
 	t.Helper()
-	if _, err := vcs.WriteSnapshot(store, runID, name, snapshot, at); err != nil {
+	if _, err := vcs.WriteSnapshot(context.Background(), store, runID, name, snapshot, at); err != nil {
 		t.Fatalf("WriteSnapshot %s returned error: %v", name, err)
 	}
 }

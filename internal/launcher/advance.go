@@ -89,7 +89,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 
 	result := AdvanceResult{RunID: opts.RunID, ExitCode: 0}
 	for {
-		eval, err := evaluateAdvance(opts.Root, opts.RunID)
+		eval, err := evaluateAdvance(ctx, opts.Root, opts.RunID)
 		if err != nil {
 			return result.withError(StopReasonError, 1, err), err
 		}
@@ -100,7 +100,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 		case workflow.DecisionTerminal:
 			if eval.decision.RunStatus == workflow.RunStatusReadyForHuman {
 				if eval.hasOutcome && eval.status.State == workflow.RunStatusRunning {
-					status, err := terminalizeAdvanceOutcome(eval, normalizeTime(opts.Time))
+					status, err := terminalizeAdvanceOutcome(ctx, eval, normalizeTime(opts.Time))
 					if err != nil {
 						return result.withError(StopReasonError, 1, err), err
 					}
@@ -112,7 +112,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 			}
 			if eval.decision.RunStatus == workflow.RunStatusBlockedForHuman {
 				if eval.hasOutcome && eval.status.State == workflow.RunStatusRunning {
-					status, err := terminalizeAdvanceOutcome(eval, normalizeTime(opts.Time))
+					status, err := terminalizeAdvanceOutcome(ctx, eval, normalizeTime(opts.Time))
 					if err != nil {
 						return result.withError(StopReasonError, 1, err), err
 					}
@@ -158,7 +158,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 			return result, nil
 		case loopcap.DecisionSoft:
 			loopCap := capDecision.SoftCap()
-			if _, _, err := eval.store.RecordWorkflowLoopSoftCap(opts.RunID, loopCap, normalizeTime(opts.Time)); err != nil {
+			if _, _, err := eval.store.RecordWorkflowLoopSoftCapContext(ctx, opts.RunID, loopCap, normalizeTime(opts.Time)); err != nil {
 				return result.withError(StopReasonError, 1, err), err
 			}
 			result.StopReason = StopReasonLoopSoftCap
@@ -177,7 +177,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 			return result.withError(StopReasonError, 1, err), err
 		}
 		if launchResult.Attempt.Status == workflow.ReportStatusBlocked {
-			eval, err := evaluateAdvance(opts.Root, opts.RunID)
+			eval, err := evaluateAdvance(ctx, opts.Root, opts.RunID)
 			if err != nil {
 				return result.withError(StopReasonError, 1, err), err
 			}
@@ -188,7 +188,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 			return result, nil
 		}
 		if launchResult.Attempt.Status == workflow.ReportStatusFailed {
-			eval, err := evaluateAdvance(opts.Root, opts.RunID)
+			eval, err := evaluateAdvance(ctx, opts.Root, opts.RunID)
 			if err != nil {
 				return result.withError(StopReasonError, 1, err), err
 			}
@@ -198,7 +198,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 			return result.withError(StopReasonWorkerFailed, 1, stopErr), stopErr
 		}
 		if opts.Once {
-			eval, err := evaluateAdvance(opts.Root, opts.RunID)
+			eval, err := evaluateAdvance(ctx, opts.Root, opts.RunID)
 			if err != nil {
 				return result.withError(StopReasonError, 1, err), err
 			}
@@ -223,8 +223,8 @@ type advanceEvaluation struct {
 	hasWorkflowOutcome bool
 }
 
-func evaluateAdvance(root, runID string) (advanceEvaluation, error) {
-	loaded, err := loadLaunchContext(root, runID)
+func evaluateAdvance(ctx context.Context, root, runID string) (advanceEvaluation, error) {
+	loaded, err := loadLaunchContext(ctx, root, runID)
 	if err != nil {
 		return advanceEvaluation{}, err
 	}
@@ -251,8 +251,8 @@ func evaluateAdvance(root, runID string) (advanceEvaluation, error) {
 	}, nil
 }
 
-func terminalizeAdvanceOutcome(eval advanceEvaluation, at time.Time) (runstore.Status, error) {
-	status, _, err := eval.store.UpdateStatus(eval.status.RunID, runstore.StatusUpdate{
+func terminalizeAdvanceOutcome(ctx context.Context, eval advanceEvaluation, at time.Time) (runstore.Status, error) {
+	status, _, err := eval.store.UpdateStatusContext(ctx, eval.status.RunID, runstore.StatusUpdate{
 		State: eval.decision.RunStatus,
 		Time:  at,
 		WorkflowStateEntry: runstore.WorkflowStateEntryRequest{

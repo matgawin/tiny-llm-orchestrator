@@ -11,8 +11,19 @@ import (
 
 // Create creates a new run directory with an initial event and status file.
 func (s *Store) Create(req CreateRunRequest) (*Run, error) {
+	return s.CreateContext(context.Background(), req)
+}
+
+// CreateContext creates a new run directory unless ctx is canceled before publication.
+func (s *Store) CreateContext(ctx context.Context, req CreateRunRequest) (*Run, error) {
+	if ctx == nil {
+		return nil, errors.New("context is required")
+	}
 	if req.Workflow == "" {
 		return nil, errors.New("workflow is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	now := normalizeTime(req.Time)
 	runID := req.RunID
@@ -106,7 +117,7 @@ func (s *Store) Create(req CreateRunRequest) (*Run, error) {
 	if err := writeStatus(filepath.Join(tempDir, statusName), status); err != nil {
 		return nil, fmt.Errorf("run %q status: %w", runID, err)
 	}
-	unlockRuns, err := s.lockRunsDir(context.Background())
+	unlockRuns, err := s.lockRunsDir(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("lock runs directory: %w", err)
 	}
@@ -121,7 +132,7 @@ func (s *Store) Create(req CreateRunRequest) (*Run, error) {
 			if generated {
 				unlockRuns()
 				unlockRuns = nil
-				return s.Create(req)
+				return s.CreateContext(ctx, req)
 			}
 			return nil, fmt.Errorf("run %q already exists", runID)
 		}
@@ -198,11 +209,22 @@ func (r *runDirReservation) cleanup() {
 
 // Load recovers structured run state from an existing run directory.
 func (s *Store) Load(runID string) (*Run, error) {
+	return s.LoadContext(context.Background(), runID)
+}
+
+// LoadContext recovers structured run state unless ctx is canceled before the run lock is acquired.
+func (s *Store) LoadContext(ctx context.Context, runID string) (*Run, error) {
+	if ctx == nil {
+		return nil, errors.New("context is required")
+	}
 	if err := validateRunID(runID); err != nil {
 		return nil, err
 	}
 	var run *Run
-	err := s.withRunLock(runID, func() error {
+	err := s.withRunLockContext(ctx, runID, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		loaded, err := s.load(runID)
 		if err != nil {
 			return err

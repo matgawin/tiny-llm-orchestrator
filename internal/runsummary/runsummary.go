@@ -50,7 +50,7 @@ func Record(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("read summary file %q: %w", opts.File, err)
 	}
-	ref, err := store.WriteArtifactIfState(opts.RunID, workflow.RunStatusReadyForHuman, runstore.Artifact{
+	ref, err := store.WriteArtifactIfStateContext(ctx, opts.RunID, workflow.RunStatusReadyForHuman, runstore.Artifact{
 		Kind:    runstore.KindSummary,
 		Name:    filepath.Base(opts.File),
 		Content: content,

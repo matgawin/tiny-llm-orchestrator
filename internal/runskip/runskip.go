@@ -57,14 +57,14 @@ func Skip(ctx context.Context, opts Options) (Result, error) {
 	if opts.Reason == "" {
 		return Result{}, errors.New("skip reason is required")
 	}
-	loaded, err := runcontext.Load(opts.Root, opts.RunID)
+	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
 		return Result{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	status, event, err := loaded.Store.RecordStepSkip(opts.RunID, runstore.RecordStepSkipRequest{
+	status, event, err := loaded.Store.RecordStepSkipContext(ctx, opts.RunID, runstore.RecordStepSkipRequest{
 		StepID: opts.StepID,
 		Reason: opts.Reason,
 		Source: opts.Source,

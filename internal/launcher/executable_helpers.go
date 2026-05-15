@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -100,7 +101,8 @@ func mergeEnv(base []string, overrides map[string]string) []string {
 	return out
 }
 
-func newWorkerCommand(command, env []string, dir string) (*exec.Cmd, func(bool) error, error) {
+//nolint:contextcheck // The helper process must stay alive until explicit release even if the launch context is canceled first.
+func newWorkerCommand(ctx context.Context, command, env []string, dir string) (*exec.Cmd, func(bool) error, error) {
 	execPath, err := resolveWorkerExecutable(command[0], env, dir)
 	if err != nil {
 		return nil, nil, err
@@ -136,7 +138,10 @@ func newWorkerCommand(command, env []string, dir string) (*exec.Cmd, func(bool) 
 		}
 		return nil
 	}
-	cmd := exec.Command(helperPath, helperArgs...) // #nosec G204,G702 -- re-execing the current launcher binary is intentional; helper execs the configured worker only after durable PID recording.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), helperPath, helperArgs...) // #nosec G204,G702 -- re-execing the current launcher binary is intentional; helper execs the configured worker only after durable PID recording.
 	cmd.ExtraFiles = []*os.File{readFile}
 	cmd.Env = []string{execHelperEnv + "=" + helperToken}
 	return cmd, release, nil

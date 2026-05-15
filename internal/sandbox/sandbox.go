@@ -928,7 +928,7 @@ func hostPathExists(path string) bool {
 }
 
 func runSpec(ctx context.Context, spec BwrapSpec, opts Options) error {
-	cmd := exec.Command(spec.Path, spec.Args...) // #nosec G204 -- bwrap path is resolved from PATH and argv is validated config.
+	cmd := exec.CommandContext(ctx, spec.Path, spec.Args...) // #nosec G204 -- bwrap path is resolved from PATH and argv is validated config.
 	cmd.Dir = spec.CWD
 	cmd.Env = spec.Env
 	cmd.Stdin = opts.Stdin

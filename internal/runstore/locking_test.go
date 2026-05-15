@@ -164,6 +164,19 @@ func TestRecordAttemptProcessContextCancellationWhileLocalRunLockHeld(t *testing
 	}
 }
 
+func TestLoadContextCancellationWhileLocalRunLockHeld(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "local-lock-cancel-load-run")
+
+	err := runCanceledWhileLocalRunLockHeld(t, store, run.ID, "LoadContext", func(ctx context.Context) error {
+		_, err := store.LoadContext(ctx, run.ID)
+		return err
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("LoadContext error = %v, want context.Canceled", err)
+	}
+}
+
 func runCanceledWhileLocalRunLockHeld(t *testing.T, store *Store, runID, name string, operation func(context.Context) error) error {
 	t.Helper()
 	locked, release, holderDone := holdRunLock(t, store, runID)
@@ -519,7 +532,7 @@ func runstoreHoldFileLock(store *Store, runID, readyPath, releasePath string) in
 
 func startRunstoreHelper(t *testing.T, mode, root, runID string, ref ArtifactRef, readyPath, releasePath string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(os.Args[0])
+	cmd := exec.CommandContext(context.Background(), os.Args[0])
 	refContent, err := json.Marshal(ref)
 	if err != nil {
 		t.Fatalf("marshal ref: %v", err)

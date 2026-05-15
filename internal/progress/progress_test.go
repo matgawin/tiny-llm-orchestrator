@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -324,7 +325,7 @@ func TestListenerCleanupRemovesSocketDirectory(t *testing.T) {
 
 func TestListenerCloseUnblocksIdleConnection(t *testing.T) {
 	l := newRegisteredListener(t, validRegistration)
-	conn, err := net.DialTimeout("unix", l.SocketPath(), time.Second)
+	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", l.SocketPath())
 	if err != nil {
 		t.Fatalf("DialTimeout returned error: %v", err)
 	}
@@ -371,7 +372,7 @@ func TestSocketDirectoryUsesPrivatePermissions(t *testing.T) {
 }
 
 func TestPackageHasNoRunStoreWorkflowOrReportDependencies(t *testing.T) {
-	cmd := exec.Command("go", "list", "-f", "{{join .Deps \"\\n\"}}", ".")
+	cmd := exec.CommandContext(context.Background(), "go", "list", "-f", "{{join .Deps \"\\n\"}}", ".")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list returned error: %v\n%s", err, out)
@@ -421,7 +422,7 @@ func requestWithMessage(message string) Request {
 
 func sendProgress(t *testing.T, socketPath string, req Request) Response {
 	t.Helper()
-	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", socketPath)
 	if err != nil {
 		t.Fatalf("DialTimeout returned error: %v", err)
 	}

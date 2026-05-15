@@ -63,7 +63,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
-	run, err := store.Load(payload.RunID)
+	run, err := store.LoadContext(ctx, payload.RunID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -72,7 +72,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 	}
 	targetErr := validateCurrentTarget(run.Status.ActiveAttempt, payload)
 	if targetErr != nil {
-		event, recordErr := store.RecordIgnoredReport(payload.RunID, runstore.IgnoreReportRequest{
+		event, recordErr := store.RecordIgnoredReportContext(ctx, payload.RunID, runstore.IgnoreReportRequest{
 			RunID:     payload.RunID,
 			StepID:    payload.StepID,
 			AgentID:   payload.AgentID,
@@ -100,7 +100,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 		}
 	}
 	if len(validationErrs) > 0 {
-		return recordInvalidReport(store, payload, validationErrs, opts.Time, beforeRecord)
+		return recordInvalidReport(ctx, store, payload, validationErrs, opts.Time, beforeRecord)
 	}
 
 	workflowConfig, err := loadWorkflowConfig(run)
@@ -109,23 +109,23 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 	}
 	validationErrs = validatePayloadWorkflow(workflowConfig, payload)
 	if len(validationErrs) > 0 {
-		return recordInvalidReport(store, payload, validationErrs, opts.Time, beforeRecord)
+		return recordInvalidReport(ctx, store, payload, validationErrs, opts.Time, beforeRecord)
 	}
 
-	return recordValidReport(store, payload, reportContent, reportContentSet, opts.Time, beforeRecord)
+	return recordValidReport(ctx, store, payload, reportContent, reportContentSet, opts.Time, beforeRecord)
 }
 
-func recordInvalidReport(store *runstore.Store, report runstore.Report, validationErrs []string, at time.Time, beforeRecord func()) (Result, error) {
+func recordInvalidReport(ctx context.Context, store *runstore.Store, report runstore.Report, validationErrs []string, at time.Time, beforeRecord func()) (Result, error) {
 	invalid := invalidReport(report, validationErrs)
 	callBeforeRecord(beforeRecord)
-	attempt, event, recordErr := store.RecordAttemptReport(report.RunID, runstore.RecordReportRequest{
+	attempt, event, recordErr := store.RecordAttemptReportContext(ctx, report.RunID, runstore.RecordReportRequest{
 		Report: invalid,
 		State:  runstore.AttemptStateInvalidReport,
 		Time:   at,
 	})
 	err := errors.New(strings.Join(validationErrs, "; "))
 	if recordErr != nil {
-		if result, ignoreErr, ignored := recordTargetRaceResult(store, report, at, recordErr); ignored {
+		if result, ignoreErr, ignored := recordTargetRaceResult(ctx, store, report, at, recordErr); ignored {
 			return result, errors.Join(err, ignoreErr)
 		}
 		return Result{}, errors.Join(err, recordErr)
@@ -133,7 +133,7 @@ func recordInvalidReport(store *runstore.Store, report runstore.Report, validati
 	return Result{RunID: report.RunID, Attempt: attempt, Event: event}, err
 }
 
-func recordValidReport(store *runstore.Store, report runstore.Report, reportContent []byte, reportContentSet bool, at time.Time, beforeRecord func()) (Result, error) {
+func recordValidReport(ctx context.Context, store *runstore.Store, report runstore.Report, reportContent []byte, reportContentSet bool, at time.Time, beforeRecord func()) (Result, error) {
 	req := runstore.RecordReportRequest{
 		Report: report,
 		State:  runstore.AttemptStateReported,
@@ -147,9 +147,9 @@ func recordValidReport(store *runstore.Store, report runstore.Report, reportCont
 		req.ReportName = report.StepID
 	}
 	callBeforeRecord(beforeRecord)
-	attempt, event, err := store.RecordAttemptReport(report.RunID, req)
+	attempt, event, err := store.RecordAttemptReportContext(ctx, report.RunID, req)
 	if err != nil {
-		if result, ignoreErr, ignored := recordTargetRaceResult(store, report, at, err); ignored {
+		if result, ignoreErr, ignored := recordTargetRaceResult(ctx, store, report, at, err); ignored {
 			return result, ignoreErr
 		}
 		return Result{}, err
@@ -163,8 +163,8 @@ func callBeforeRecord(beforeRecord func()) {
 	}
 }
 
-func recordTargetRaceResult(store *runstore.Store, report runstore.Report, at time.Time, err error) (Result, error, bool) {
-	ignored, ignoreErr := recordTargetRaceAsIgnored(store, report, at, err)
+func recordTargetRaceResult(ctx context.Context, store *runstore.Store, report runstore.Report, at time.Time, err error) (Result, error, bool) {
+	ignored, ignoreErr := recordTargetRaceAsIgnored(ctx, store, report, at, err)
 	if !ignored {
 		return Result{}, nil, false
 	}
@@ -188,7 +188,7 @@ type ignoredRaceResult struct {
 	Err   error
 }
 
-func recordTargetRaceAsIgnored(store *runstore.Store, report runstore.Report, at time.Time, err error) (bool, ignoredRaceResult) {
+func recordTargetRaceAsIgnored(ctx context.Context, store *runstore.Store, report runstore.Report, at time.Time, err error) (bool, ignoredRaceResult) {
 	var targetErr *runstore.ReportTargetError
 	if !errors.As(err, &targetErr) {
 		return false, ignoredRaceResult{}
@@ -197,7 +197,7 @@ func recordTargetRaceAsIgnored(store *runstore.Store, report runstore.Report, at
 	if reason == "" {
 		reason = "report does not target current active attempt"
 	}
-	event, recordErr := store.RecordIgnoredReport(report.RunID, runstore.IgnoreReportRequest{
+	event, recordErr := store.RecordIgnoredReportContext(ctx, report.RunID, runstore.IgnoreReportRequest{
 		RunID:     report.RunID,
 		StepID:    report.StepID,
 		AgentID:   report.AgentID,

@@ -159,7 +159,7 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 		Reason: "report does not target current active attempt",
 		Err:    errors.New("run active attempt changed"),
 	}
-	ignored, result := recordTargetRaceAsIgnored(store, report, time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC), err)
+	ignored, result := recordTargetRaceAsIgnored(context.Background(), store, report, time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC), err)
 	if !ignored {
 		t.Fatal("ignored = false, want true")
 	}

@@ -79,18 +79,18 @@ func RecordPostRun(ctx context.Context, store *runstore.Store, runID string, opt
 	if err != nil {
 		return runstore.ArtifactRef{}, snapshot, err
 	}
-	ref, err := WriteSnapshot(store, runID, "vcs-post-run", snapshot, opts.Time)
+	ref, err := WriteSnapshot(ctx, store, runID, "vcs-post-run", snapshot, opts.Time)
 	return ref, snapshot, err
 }
 
 // WriteSnapshot persists a VCS snapshot as a run-store JSON snapshot artifact.
-func WriteSnapshot(store *runstore.Store, runID, name string, snapshot Snapshot, at time.Time) (runstore.ArtifactRef, error) {
+func WriteSnapshot(ctx context.Context, store *runstore.Store, runID, name string, snapshot Snapshot, at time.Time) (runstore.ArtifactRef, error) {
 	content, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return runstore.ArtifactRef{}, fmt.Errorf("marshal VCS snapshot: %w", err)
 	}
 	content = append(content, '\n')
-	return store.WriteArtifact(runID, runstore.Artifact{
+	return store.WriteArtifactContext(ctx, runID, runstore.Artifact{
 		Kind:    runstore.KindSnapshot,
 		Name:    name,
 		Content: content,

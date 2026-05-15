@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,7 +61,7 @@ func cliCodexShimChildPID(childPIDPath string) {
 		os.Exit(2)
 	}
 	_, _ = io.Copy(io.Discard, os.Stdin)
-	cmd := exec.Command("sh", "-c", "echo $$ > "+shellQuoteCLI(childPIDPath)+"; trap \"\" TERM; sleep 30")
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", "echo $$ > "+shellQuoteCLI(childPIDPath)+"; trap \"\" TERM; sleep 30")
 	if err := cmd.Run(); err != nil {
 		os.Exit(6)
 	}
@@ -872,7 +873,7 @@ type cliProcessResult struct {
 
 func startCLIProcess(t *testing.T, root string, env []string, args ...string) *cliProcessResult {
 	t.Helper()
-	result := &cliProcessResult{cmd: exec.Command(os.Args[0], args...)}
+	result := &cliProcessResult{cmd: exec.CommandContext(context.Background(), os.Args[0], args...)}
 	result.cmd.Dir = root
 	result.cmd.Env = env
 	result.cmd.Stdout = &result.stdout

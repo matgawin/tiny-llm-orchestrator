@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sync"
@@ -20,12 +21,12 @@ type liveProgressDisplay struct {
 	err       error
 }
 
-func startLiveProgress(opts Options, attempt runstore.Attempt) (*liveProgressDisplay, error) {
+func startLiveProgress(ctx context.Context, opts Options, attempt runstore.Attempt) (*liveProgressDisplay, error) {
 	token, err := progress.GenerateToken()
 	if err != nil {
 		return nil, fmt.Errorf("generate progress token: %w", err)
 	}
-	listener, err := progress.NewListener()
+	listener, err := progress.NewListenerContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("start progress listener: %w", err)
 	}
