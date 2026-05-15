@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
@@ -141,13 +142,6 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 		return nil, "", stableerr.Errorf("runtime %q prompt.delivery %q is unsupported by launcher", runtimeID, promptMode)
 	}
 	sandboxMode := r.loaded.Project.Config.Sandbox != nil && verifyWorkerRepoSandbox(r.loaded.Project.Root) == nil
-	if sandboxMode && !runtime.Sandbox.Supported {
-		return nil, "", stableerr.Errorf("runtime %q does not support sandbox worker launches", runtimeID)
-	}
-	if !sandboxMode && runtime.Sandbox.Required {
-		return nil, "", stableerr.Errorf("runtime %q requires sandbox worker launch but Orc sandbox markers are not verified", runtimeID)
-	}
-
 	values := runtimePlaceholderValues{
 		model:      r.loaded.Workflow.EffectiveModel(step, runtime),
 		reasoning:  r.loaded.Workflow.EffectiveReasoning(step, runtime),
@@ -157,24 +151,9 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 		attemptID:  r.attempt.AttemptID,
 		runID:      r.loaded.Run.ID,
 	}
-	if runtime.Model.Required && values.model == "" {
-		return nil, "", stableerr.Errorf("runtime %q requires a model but no effective model resolved", runtimeID)
-	}
-	if values.model != "" && !runtime.Model.Supported {
-		return nil, "", stableerr.Errorf("runtime %q does not support model arguments", runtimeID)
-	}
-	if runtime.Reasoning.Required && values.reasoning == "" {
-		return nil, "", stableerr.Errorf("runtime %q requires reasoning but no effective reasoning resolved", runtimeID)
-	}
-	if values.reasoning != "" && !runtime.Reasoning.Supported {
-		return nil, "", stableerr.Errorf("runtime %q does not support reasoning arguments", runtimeID)
-	}
 	runtimeDirs := r.loaded.Workflow.EffectiveRuntimeDirs(step)
-	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
-		return nil, "", stableerr.Errorf("runtime %q does not support runtime_dirs", runtimeID)
-	}
-	if len(runtimeDirs) > 0 && len(runtime.Directories.Args) == 0 {
-		return nil, "", stableerr.Errorf("runtime %q directories.args are required for runtime_dirs", runtimeID)
+	if err := validateRuntimeCommandRequest(runtimeID, runtime, values, runtimeDirs, sandboxMode); err != nil {
+		return nil, "", err
 	}
 	if sandboxMode {
 		if err := r.verifySandboxRuntimeDirs(runtimeID, runtimeDirs); err != nil {
@@ -185,6 +164,42 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 		return nil, "", stableerr.Errorf("runtime %q prompt.delivery=file requires a persisted prompt artifact path", runtimeID)
 	}
 
+	command, err := buildRuntimeCommand(r.loaded.Project.Root, runtimeID, runtime, values, runtimeDirs, sandboxMode)
+	if err != nil {
+		return nil, "", err
+	}
+	return command, promptMode, nil
+}
+
+func validateRuntimeCommandRequest(runtimeID string, runtime config.Runtime, values runtimePlaceholderValues, runtimeDirs []string, sandboxMode bool) error {
+	if sandboxMode && !runtime.Sandbox.Supported {
+		return stableerr.Errorf("runtime %q does not support sandbox worker launches", runtimeID)
+	}
+	if !sandboxMode && runtime.Sandbox.Required {
+		return stableerr.Errorf("runtime %q requires sandbox worker launch but Orc sandbox markers are not verified", runtimeID)
+	}
+	if runtime.Model.Required && values.model == "" {
+		return stableerr.Errorf("runtime %q requires a model but no effective model resolved", runtimeID)
+	}
+	if values.model != "" && !runtime.Model.Supported {
+		return stableerr.Errorf("runtime %q does not support model arguments", runtimeID)
+	}
+	if runtime.Reasoning.Required && values.reasoning == "" {
+		return stableerr.Errorf("runtime %q requires reasoning but no effective reasoning resolved", runtimeID)
+	}
+	if values.reasoning != "" && !runtime.Reasoning.Supported {
+		return stableerr.Errorf("runtime %q does not support reasoning arguments", runtimeID)
+	}
+	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
+		return stableerr.Errorf("runtime %q does not support runtime_dirs", runtimeID)
+	}
+	if len(runtimeDirs) > 0 && len(runtime.Directories.Args) == 0 {
+		return stableerr.Errorf("runtime %q directories.args are required for runtime_dirs", runtimeID)
+	}
+	return nil
+}
+
+func buildRuntimeCommand(root, runtimeID string, runtime config.Runtime, values runtimePlaceholderValues, runtimeDirs []string, sandboxMode bool) ([]string, error) {
 	command := []string{runtime.Command.Executable}
 	if sandboxMode {
 		command = append(command, runtime.Command.SandboxArgs...)
@@ -201,18 +216,18 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 	var err error
 	command, err = substituteRuntimePlaceholders(command, values)
 	if err != nil {
-		return nil, "", fmt.Errorf("runtime %q command args: %w", runtimeID, err)
+		return nil, fmt.Errorf("runtime %q command args: %w", runtimeID, err)
 	}
 	for _, dir := range runtimeDirs {
 		dirValues := values
-		dirValues.dir = effectiveRuntimeDir(r.loaded.Project.Root, dir)
+		dirValues.dir = effectiveRuntimeDir(root, dir)
 		dirArgs, err := substituteRuntimePlaceholders(runtime.Directories.Args, dirValues)
 		if err != nil {
-			return nil, "", fmt.Errorf("runtime %q directories args: %w", runtimeID, err)
+			return nil, fmt.Errorf("runtime %q directories args: %w", runtimeID, err)
 		}
 		command = append(command, dirArgs...)
 	}
-	return command, promptMode, nil
+	return command, nil
 }
 
 func (r *workerRunner) verifySandboxRuntimeDirs(runtimeID string, runtimeDirs []string) error {

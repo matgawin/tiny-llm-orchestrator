@@ -34,99 +34,12 @@ func (s *Store) RecordAttemptReportContext(ctx context.Context, runID string, re
 	var out Attempt
 	var event Event
 	err := s.withRunLockContext(ctx, runID, func() error {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("record attempt report context: %w", err)
-		}
-		run, err := s.load(runID)
-		if err != nil {
-			return err
-		}
-		if run.Status.ActiveAttempt == nil {
-			return &ReportTargetError{
-				RunID:  runID,
-				Reason: "report does not target current active attempt",
-				Err:    stableerr.Errorf("run %q has no active attempt", runID),
-			}
-		}
-		if run.Status.ActiveAttempt.AttemptID != report.AttemptID {
-			return &ReportTargetError{
-				RunID:  runID,
-				Reason: "report does not target current active attempt",
-				Err:    stableerr.Errorf("run %q active attempt is %q, not %q", runID, run.Status.ActiveAttempt.AttemptID, report.AttemptID),
-			}
-		}
-		attempt := *run.Status.ActiveAttempt
-		if !req.ReportContentSet && report.ReportRef != nil {
-			return stableerr.New("report_ref cannot be supplied by callers; provide report content for the run store to stage")
-		}
-		eventTime := normalizeTime(req.Time)
-		eventSequence := nextEventSequence(run)
-		var staged []stagedArtifact
-		if req.ReportContentSet {
-			ref, stagedReport, err := s.stageReportArtifactForEvent(run, req.ReportName, req.ReportContent, eventSequence)
-			if err != nil {
-				return err
-			}
-			staged = append(staged, stagedReport)
-			report.ReportRef = &ref
-		}
-		followupRefs, stagedFollowup, err := s.stageReportFollowupsForEvent(run, report, state, eventTime, eventSequence)
-		if err != nil {
-			cleanupStagedArtifacts(staged)
-			return err
-		}
-		if stagedFollowup != nil {
-			staged = append(staged, *stagedFollowup)
-		}
-		defer cleanupStagedArtifacts(staged)
-		if err := applyAttemptReport(run.Status, &attempt, state, report, req); err != nil {
-			return err
-		}
-		payload, err := marshalPayload(attemptReportedPayload{
-			AttemptID:    report.AttemptID,
-			State:        state,
-			Report:       *attempt.Report,
-			ExitCode:     attempt.ExitCode,
-			ExitState:    attempt.ExitState,
-			LogRef:       attempt.LogRef,
-			FollowupRefs: followupRefs,
-		})
-		if err != nil {
-			return err
-		}
-		event = Event{Time: eventTime, Type: eventAttemptReported, Payload: payload}
-		var committed []stagedArtifact
-		for _, artifact := range staged {
-			if err := artifact.commit(); err != nil {
-				return errors.Join(err, rollbackStagedArtifacts(committed))
-			}
-			committed = append(committed, artifact)
-		}
-		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
-			finishedAt := event.Time
-			attempt.FinishedAt = &finishedAt
-			for i := len(status.Attempts) - 1; i >= 0; i-- {
-				if status.Attempts[i].AttemptID == report.AttemptID {
-					status.Attempts[i] = attempt
-					break
-				}
-			}
-			status.ActiveAttempt = nil
-			status.UpdatedAt = event.Time
-			status.LastSequence = event.Sequence
-			if attempt.ReportRef != nil {
-				status.Artifacts = append(status.Artifacts, *attempt.ReportRef)
-			}
-			status.Artifacts = append(status.Artifacts, followupRefs...)
-		})
+		status, committedEvent, err := s.commitAttemptReport(ctx, runID, req, state, report)
 		event = committedEvent
 		if err != nil {
 			if statusBackedEventPossiblyCommitted(err) {
 				out = currentOrLatestAttempt(status, report.AttemptID)
 				return err
-			}
-			if rollbackErr := rollbackStagedArtifacts(committed); rollbackErr != nil {
-				return errors.Join(err, rollbackErr)
 			}
 			return err
 		}
@@ -140,6 +53,153 @@ func (s *Store) RecordAttemptReportContext(ctx context.Context, runID string, re
 		return Attempt{}, Event{}, err
 	}
 	return out, event, nil
+}
+
+func (s *Store) commitAttemptReport(ctx context.Context, runID string, req RecordReportRequest, state string, report Report) (Status, Event, error) {
+	if err := ctx.Err(); err != nil {
+		return Status{}, Event{}, fmt.Errorf("record attempt report context: %w", err)
+	}
+	run, err := s.load(runID)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	if err := validateReportTarget(run.Status, runID, report.AttemptID); err != nil {
+		return Status{}, Event{}, err
+	}
+	if !req.ReportContentSet && report.ReportRef != nil {
+		return Status{}, Event{}, stableerr.New("report_ref cannot be supplied by callers; provide report content for the run store to stage")
+	}
+	prepared, err := s.prepareAttemptReportEvent(run, req, state, report)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	defer cleanupStagedArtifacts(prepared.staged)
+	committed, err := commitStagedArtifacts(prepared.staged)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	status, committedEvent, err := commitStatusBackedEvent(runID, run, prepared.event, func(status *Status, event Event) {
+		applyAttemptReportStatus(status, event, prepared.attempt, report.AttemptID, prepared.followupRefs)
+	})
+	if err != nil && !statusBackedEventPossiblyCommitted(err) {
+		if rollbackErr := rollbackStagedArtifacts(committed); rollbackErr != nil {
+			err = errors.Join(err, rollbackErr)
+		}
+	}
+	return status, committedEvent, err
+}
+
+type preparedAttemptReportEvent struct {
+	attempt      Attempt
+	event        Event
+	followupRefs []ArtifactRef
+	staged       []stagedArtifact
+}
+
+func (s *Store) prepareAttemptReportEvent(run *Run, req RecordReportRequest, state string, report Report) (preparedAttemptReportEvent, error) {
+	attempt := *run.Status.ActiveAttempt
+	eventTime := normalizeTime(req.Time)
+	eventSequence := nextEventSequence(run)
+	staged, report, err := s.stageReportArtifacts(run, req, state, report, eventTime, eventSequence)
+	if err != nil {
+		return preparedAttemptReportEvent{}, err
+	}
+	if err := applyAttemptReport(run.Status, &attempt, state, report, req); err != nil {
+		cleanupStagedArtifacts(staged.staged)
+		return preparedAttemptReportEvent{}, err
+	}
+	payload, err := marshalPayload(attemptReportedPayload{
+		AttemptID:    report.AttemptID,
+		State:        state,
+		Report:       *attempt.Report,
+		ExitCode:     attempt.ExitCode,
+		ExitState:    attempt.ExitState,
+		LogRef:       attempt.LogRef,
+		FollowupRefs: staged.followupRefs,
+	})
+	if err != nil {
+		cleanupStagedArtifacts(staged.staged)
+		return preparedAttemptReportEvent{}, err
+	}
+	return preparedAttemptReportEvent{
+		attempt:      attempt,
+		event:        Event{Time: eventTime, Type: eventAttemptReported, Payload: payload},
+		followupRefs: staged.followupRefs,
+		staged:       staged.staged,
+	}, nil
+}
+
+type stagedReportArtifacts struct {
+	followupRefs []ArtifactRef
+	staged       []stagedArtifact
+}
+
+func (s *Store) stageReportArtifacts(run *Run, req RecordReportRequest, state string, report Report, eventTime time.Time, eventSequence int) (stagedReportArtifacts, Report, error) {
+	var staged []stagedArtifact
+	if req.ReportContentSet {
+		ref, stagedReport, err := s.stageReportArtifactForEvent(run, req.ReportName, req.ReportContent, eventSequence)
+		if err != nil {
+			return stagedReportArtifacts{}, report, err
+		}
+		staged = append(staged, stagedReport)
+		report.ReportRef = &ref
+	}
+	followupRefs, stagedFollowup, err := s.stageReportFollowupsForEvent(run, report, state, eventTime, eventSequence)
+	if err != nil {
+		cleanupStagedArtifacts(staged)
+		return stagedReportArtifacts{}, report, err
+	}
+	if stagedFollowup != nil {
+		staged = append(staged, *stagedFollowup)
+	}
+	return stagedReportArtifacts{followupRefs: followupRefs, staged: staged}, report, nil
+}
+
+func validateReportTarget(status Status, runID, attemptID string) error {
+	if status.ActiveAttempt == nil {
+		return &ReportTargetError{
+			RunID:  runID,
+			Reason: "report does not target current active attempt",
+			Err:    stableerr.Errorf("run %q has no active attempt", runID),
+		}
+	}
+	if status.ActiveAttempt.AttemptID != attemptID {
+		return &ReportTargetError{
+			RunID:  runID,
+			Reason: "report does not target current active attempt",
+			Err:    stableerr.Errorf("run %q active attempt is %q, not %q", runID, status.ActiveAttempt.AttemptID, attemptID),
+		}
+	}
+	return nil
+}
+
+func commitStagedArtifacts(staged []stagedArtifact) ([]stagedArtifact, error) {
+	var committed []stagedArtifact
+	for _, artifact := range staged {
+		if err := artifact.commit(); err != nil {
+			return committed, errors.Join(err, rollbackStagedArtifacts(committed))
+		}
+		committed = append(committed, artifact)
+	}
+	return committed, nil
+}
+
+func applyAttemptReportStatus(status *Status, event Event, attempt Attempt, attemptID string, followupRefs []ArtifactRef) {
+	finishedAt := event.Time
+	attempt.FinishedAt = &finishedAt
+	for i := len(status.Attempts) - 1; i >= 0; i-- {
+		if status.Attempts[i].AttemptID == attemptID {
+			status.Attempts[i] = attempt
+			break
+		}
+	}
+	status.ActiveAttempt = nil
+	status.UpdatedAt = event.Time
+	status.LastSequence = event.Sequence
+	if attempt.ReportRef != nil {
+		status.Artifacts = append(status.Artifacts, *attempt.ReportRef)
+	}
+	status.Artifacts = append(status.Artifacts, followupRefs...)
 }
 
 func (s *Store) stageReportFollowupsForEvent(run *Run, report Report, state string, at time.Time, sequence int) ([]ArtifactRef, *stagedArtifact, error) {

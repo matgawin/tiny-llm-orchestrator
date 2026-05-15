@@ -148,55 +148,9 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 			want: "terminal",
 		},
 		{
-			name: "retry decision",
-			setup: func(t *testing.T, store *runstore.Store, runID string) {
-				t.Helper()
-				if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
-					StepID:          "plan",
-					AgentID:         "planner",
-					AttemptID:       "attempt-retry",
-					Timeout:         time.Minute,
-					ReportExitGrace: time.Second,
-				}); err != nil {
-					t.Fatalf("StartAttempt returned error: %v", err)
-				}
-				promptRef, err := store.WriteArtifact(runID, runstore.Artifact{Kind: runstore.KindPrompt, Name: "plan", Content: []byte("prompt\n")})
-				if err != nil {
-					t.Fatalf("WriteArtifact prompt returned error: %v", err)
-				}
-				if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{AttemptID: "attempt-retry", PromptRef: promptRef}); err != nil {
-					t.Fatalf("RecordAttemptPrompt returned error: %v", err)
-				}
-				logRef, err := store.WriteArtifact(runID, runstore.Artifact{Kind: runstore.KindLog, Name: "plan", Content: []byte("log\n")})
-				if err != nil {
-					t.Fatalf("WriteArtifact log returned error: %v", err)
-				}
-				if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{AttemptID: "attempt-retry", LogRef: logRef}); err != nil {
-					t.Fatalf("RecordAttemptLog returned error: %v", err)
-				}
-				if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
-					AttemptID:        "attempt-retry",
-					PID:              123,
-					ProcessStartTime: "123456789",
-				}); err != nil {
-					t.Fatalf("RecordAttemptProcess returned error: %v", err)
-				}
-				if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
-					Report: runstore.Report{
-						RunID:     runID,
-						StepID:    "plan",
-						AgentID:   "planner",
-						AttemptID: "attempt-retry",
-						Status:    "failed",
-						Result:    "error",
-						Summary:   "retry",
-					},
-					State: "reported",
-				}); err != nil {
-					t.Fatalf("RecordAttemptReport returned error: %v", err)
-				}
-			},
-			want: "only a selected step can be skipped",
+			name:  "retry decision",
+			setup: setupRetryDecisionForSkipRejection,
+			want:  "only a selected step can be skipped",
 		},
 	}
 	for _, tt := range tests {
@@ -226,6 +180,62 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 				t.Fatalf("state mutated after rejection: before seq=%d skips=%d after seq=%d skips=%d", before.Status.LastSequence, len(before.Status.SkippedSteps), after.Status.LastSequence, len(after.Status.SkippedSteps))
 			}
 		})
+	}
+}
+
+func setupRetryDecisionForSkipRejection(t *testing.T, store *runstore.Store, runID string) {
+	t.Helper()
+	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       "attempt-retry",
+		Timeout:         time.Minute,
+		ReportExitGrace: time.Second,
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
+	promptRef := writeSkipTestArtifact(t, store, runID, runstore.KindPrompt, "prompt\n")
+	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{AttemptID: "attempt-retry", PromptRef: promptRef}); err != nil {
+		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
+	}
+	logRef := writeSkipTestArtifact(t, store, runID, runstore.KindLog, "log\n")
+	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{AttemptID: "attempt-retry", LogRef: logRef}); err != nil {
+		t.Fatalf("RecordAttemptLog returned error: %v", err)
+	}
+	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+		AttemptID:        "attempt-retry",
+		PID:              123,
+		ProcessStartTime: "123456789",
+	}); err != nil {
+		t.Fatalf("RecordAttemptProcess returned error: %v", err)
+	}
+	recordRetryReport(t, store, runID)
+}
+
+func writeSkipTestArtifact(t *testing.T, store *runstore.Store, runID string, kind runstore.ArtifactKind, content string) runstore.ArtifactRef {
+	t.Helper()
+	ref, err := store.WriteArtifact(runID, runstore.Artifact{Kind: kind, Name: "plan", Content: []byte(content)})
+	if err != nil {
+		t.Fatalf("WriteArtifact %s returned error: %v", kind, err)
+	}
+	return ref
+}
+
+func recordRetryReport(t *testing.T, store *runstore.Store, runID string) {
+	t.Helper()
+	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+		Report: runstore.Report{
+			RunID:     runID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-retry",
+			Status:    "failed",
+			Result:    "error",
+			Summary:   "retry",
+		},
+		State: "reported",
+	}); err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 }
 

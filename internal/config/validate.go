@@ -524,66 +524,89 @@ func validateStepKind(stepName string, step Step, workflow Workflow, agents map[
 	}
 	switch kind {
 	case StepKindAgent:
-		if step.Agent == "" {
-			return stableerr.Errorf("step %q agent is required", stepName)
-		}
-		if len(step.Command.Argv) > 0 {
-			return stableerr.Errorf("step %q kind agent must not set command", stepName)
-		}
-		if step.Script.Path != "" || len(step.Script.Args) > 0 {
-			return stableerr.Errorf("step %q kind agent must not set script", stepName)
-		}
-		if _, ok := agents[step.Agent]; !ok {
-			return stableerr.Errorf("step %q references missing agent %q", stepName, step.Agent)
-		}
-		if err := validateAgentStepRuntime(stepName, step, workflow, runtimes); err != nil {
+		if err := validateAgentStepKind(stepName, step, workflow, agents, runtimes); err != nil {
 			return err
 		}
 	case StepKindCommand:
-		if step.Agent != "" {
-			return stableerr.Errorf("step %q kind command must not set agent", stepName)
-		}
-		if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindCommand); err != nil {
+		if err := validateCommandStepKind(stepName, step); err != nil {
 			return err
-		}
-		if len(step.Command.Argv) == 0 {
-			return stableerr.Errorf("step %q command.argv must declare at least one argument", stepName)
-		}
-		for i, arg := range step.Command.Argv {
-			if arg == "" {
-				return stableerr.Errorf("step %q command.argv[%d] is empty", stepName, i)
-			}
-		}
-		if step.Script.Path != "" || len(step.Script.Args) > 0 {
-			return stableerr.Errorf("step %q kind command must not set script", stepName)
 		}
 	case StepKindScript:
-		if step.Agent != "" {
-			return stableerr.Errorf("step %q kind script must not set agent", stepName)
-		}
-		if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindScript); err != nil {
+		if err := validateScriptStepKind(stepName, step); err != nil {
 			return err
-		}
-		if len(step.Command.Argv) > 0 {
-			return stableerr.Errorf("step %q kind script must not set command", stepName)
-		}
-		if step.Script.Path == "" {
-			return stableerr.Errorf("step %q script.path is required", stepName)
-		}
-		if err := validateRepoRelativePath("step "+stepName+" script.path", step.Script.Path); err != nil {
-			return err
-		}
-		for i, arg := range step.Script.Args {
-			if arg == "" {
-				return stableerr.Errorf("step %q script.args[%d] is empty", stepName, i)
-			}
 		}
 	default:
 		return stableerr.Errorf("step %q has unsupported kind %q; allowed: agent, command, script", stepName, step.Kind)
 	}
-	if step.CWD != "" {
-		if err := validateRepoRelativePath("step "+stepName+" cwd", step.CWD); err != nil {
-			return err
+	return validateStepCWD(stepName, step)
+}
+
+func validateStepCWD(stepName string, step Step) error {
+	if step.CWD == "" {
+		return nil
+	}
+	return validateRepoRelativePath("step "+stepName+" cwd", step.CWD)
+}
+
+func validateAgentStepKind(stepName string, step Step, workflow Workflow, agents map[string]Agent, runtimes map[string]Runtime) error {
+	if step.Agent == "" {
+		return stableerr.Errorf("step %q agent is required", stepName)
+	}
+	if len(step.Command.Argv) > 0 {
+		return stableerr.Errorf("step %q kind agent must not set command", stepName)
+	}
+	if step.Script.Path != "" || len(step.Script.Args) > 0 {
+		return stableerr.Errorf("step %q kind agent must not set script", stepName)
+	}
+	if _, ok := agents[step.Agent]; !ok {
+		return stableerr.Errorf("step %q references missing agent %q", stepName, step.Agent)
+	}
+	if err := validateAgentStepRuntime(stepName, step, workflow, runtimes); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateCommandStepKind(stepName string, step Step) error {
+	if step.Agent != "" {
+		return stableerr.Errorf("step %q kind command must not set agent", stepName)
+	}
+	if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindCommand); err != nil {
+		return err
+	}
+	if len(step.Command.Argv) == 0 {
+		return stableerr.Errorf("step %q command.argv must declare at least one argument", stepName)
+	}
+	for i, arg := range step.Command.Argv {
+		if arg == "" {
+			return stableerr.Errorf("step %q command.argv[%d] is empty", stepName, i)
+		}
+	}
+	if step.Script.Path != "" || len(step.Script.Args) > 0 {
+		return stableerr.Errorf("step %q kind command must not set script", stepName)
+	}
+	return nil
+}
+
+func validateScriptStepKind(stepName string, step Step) error {
+	if step.Agent != "" {
+		return stableerr.Errorf("step %q kind script must not set agent", stepName)
+	}
+	if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindScript); err != nil {
+		return err
+	}
+	if len(step.Command.Argv) > 0 {
+		return stableerr.Errorf("step %q kind script must not set command", stepName)
+	}
+	if step.Script.Path == "" {
+		return stableerr.Errorf("step %q script.path is required", stepName)
+	}
+	if err := validateRepoRelativePath("step "+stepName+" script.path", step.Script.Path); err != nil {
+		return err
+	}
+	for i, arg := range step.Script.Args {
+		if arg == "" {
+			return stableerr.Errorf("step %q script.args[%d] is empty", stepName, i)
 		}
 	}
 	return nil
@@ -598,50 +621,90 @@ func validateAgentStepRuntime(stepName string, step Step, workflow Workflow, run
 	if !ok {
 		return stableerr.Errorf("step %q references missing runtime %q", stepName, runtimeID)
 	}
-	if step.Model != "" && !runtime.Model.Supported {
-		return stableerr.Errorf("step %q model requires runtime %q model.supported=true", stepName, runtimeID)
+	if err := validateAgentStepModel(stepName, step, workflow, runtime, runtimeID); err != nil {
+		return err
 	}
-	if workflow.Defaults.Model != "" && !runtime.Model.Supported {
-		return stableerr.Errorf("step %q defaults.model requires runtime %q model.supported=true", stepName, runtimeID)
+	if err := validateAgentStepReasoning(stepName, step, workflow, runtime, runtimeID); err != nil {
+		return err
 	}
-	if step.Model != "" && !runtimeModelAllows(runtime, step.Model) {
-		return stableerr.Errorf("step %q model %q is not allowed by runtime %q model.allowed", stepName, step.Model, runtimeID)
+	return validateAgentStepRuntimeDirs(stepName, step, workflow, runtime, runtimeID)
+}
+
+func validateAgentStepModel(stepName string, step Step, workflow Workflow, runtime Runtime, runtimeID string) error {
+	return validateAgentStepSelection(stepSelectionValidation{
+		stepName:      stepName,
+		runtimeID:     runtimeID,
+		name:          "model",
+		supportedName: "model.supported",
+		allowedName:   "model.allowed",
+		stepValue:     step.Model,
+		defaultValue:  workflow.Defaults.Model,
+		resolvedValue: workflow.EffectiveModel(step, runtime),
+		supported:     runtime.Model.Supported,
+		required:      runtime.Model.Required,
+		requiredName:  "a model",
+		allowed:       runtime.Model.Allowed,
+	})
+}
+
+func validateAgentStepReasoning(stepName string, step Step, workflow Workflow, runtime Runtime, runtimeID string) error {
+	return validateAgentStepSelection(stepSelectionValidation{
+		stepName:      stepName,
+		runtimeID:     runtimeID,
+		name:          "reasoning",
+		supportedName: "reasoning.supported",
+		allowedName:   "reasoning.allowed",
+		stepValue:     step.Reasoning,
+		defaultValue:  workflow.Defaults.Reasoning,
+		resolvedValue: workflow.EffectiveReasoning(step, runtime),
+		supported:     runtime.Reasoning.Supported,
+		required:      runtime.Reasoning.Required,
+		requiredName:  "reasoning",
+		allowed:       runtime.Reasoning.Allowed,
+	})
+}
+
+type stepSelectionValidation struct {
+	stepName      string
+	runtimeID     string
+	name          string
+	supportedName string
+	allowedName   string
+	stepValue     string
+	defaultValue  string
+	resolvedValue string
+	supported     bool
+	required      bool
+	requiredName  string
+	allowed       []string
+}
+
+func validateAgentStepSelection(v stepSelectionValidation) error {
+	if v.stepValue != "" && !v.supported {
+		return stableerr.Errorf("step %q %s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
 	}
-	if workflow.Defaults.Model != "" && !runtimeModelAllows(runtime, workflow.Defaults.Model) {
-		return stableerr.Errorf("step %q defaults.model %q is not allowed by runtime %q model.allowed", stepName, workflow.Defaults.Model, runtimeID)
+	if v.defaultValue != "" && !v.supported {
+		return stableerr.Errorf("step %q defaults.%s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
 	}
-	model := workflow.EffectiveModel(step, runtime)
-	if model != "" && !runtime.Model.Supported {
-		return stableerr.Errorf("step %q resolved model requires runtime %q model.supported=true", stepName, runtimeID)
+	if v.stepValue != "" && !selectionAllows(v.allowed, v.stepValue) {
+		return stableerr.Errorf("step %q %s %q is not allowed by runtime %q %s", v.stepName, v.name, v.stepValue, v.runtimeID, v.allowedName)
 	}
-	if model != "" && !runtimeModelAllows(runtime, model) {
-		return stableerr.Errorf("step %q resolved model %q is not allowed by runtime %q model.allowed", stepName, model, runtimeID)
+	if v.defaultValue != "" && !selectionAllows(v.allowed, v.defaultValue) {
+		return stableerr.Errorf("step %q defaults.%s %q is not allowed by runtime %q %s", v.stepName, v.name, v.defaultValue, v.runtimeID, v.allowedName)
 	}
-	if model == "" && runtime.Model.Required {
-		return stableerr.Errorf("step %q runtime %q requires a model", stepName, runtimeID)
+	if v.resolvedValue != "" && !v.supported {
+		return stableerr.Errorf("step %q resolved %s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
 	}
-	if step.Reasoning != "" && !runtime.Reasoning.Supported {
-		return stableerr.Errorf("step %q reasoning requires runtime %q reasoning.supported=true", stepName, runtimeID)
+	if v.resolvedValue != "" && !selectionAllows(v.allowed, v.resolvedValue) {
+		return stableerr.Errorf("step %q resolved %s %q is not allowed by runtime %q %s", v.stepName, v.name, v.resolvedValue, v.runtimeID, v.allowedName)
 	}
-	if workflow.Defaults.Reasoning != "" && !runtime.Reasoning.Supported {
-		return stableerr.Errorf("step %q defaults.reasoning requires runtime %q reasoning.supported=true", stepName, runtimeID)
+	if v.resolvedValue == "" && v.required {
+		return stableerr.Errorf("step %q runtime %q requires %s", v.stepName, v.runtimeID, v.requiredName)
 	}
-	if step.Reasoning != "" && !runtimeReasoningAllows(runtime, step.Reasoning) {
-		return stableerr.Errorf("step %q reasoning %q is not allowed by runtime %q reasoning.allowed", stepName, step.Reasoning, runtimeID)
-	}
-	if workflow.Defaults.Reasoning != "" && !runtimeReasoningAllows(runtime, workflow.Defaults.Reasoning) {
-		return stableerr.Errorf("step %q defaults.reasoning %q is not allowed by runtime %q reasoning.allowed", stepName, workflow.Defaults.Reasoning, runtimeID)
-	}
-	reasoning := workflow.EffectiveReasoning(step, runtime)
-	if reasoning != "" && !runtime.Reasoning.Supported {
-		return stableerr.Errorf("step %q resolved reasoning requires runtime %q reasoning.supported=true", stepName, runtimeID)
-	}
-	if reasoning != "" && !runtimeReasoningAllows(runtime, reasoning) {
-		return stableerr.Errorf("step %q resolved reasoning %q is not allowed by runtime %q reasoning.allowed", stepName, reasoning, runtimeID)
-	}
-	if reasoning == "" && runtime.Reasoning.Required {
-		return stableerr.Errorf("step %q runtime %q requires reasoning", stepName, runtimeID)
-	}
+	return nil
+}
+
+func validateAgentStepRuntimeDirs(stepName string, step Step, workflow Workflow, runtime Runtime, runtimeID string) error {
 	runtimeDirs := workflow.EffectiveRuntimeDirs(step)
 	for i, dir := range step.RuntimeDirs {
 		if err := validateRuntimeDirPath(fmt.Sprintf("step %q runtime_dirs[%d]", stepName, i), dir); err != nil {
@@ -654,12 +717,8 @@ func validateAgentStepRuntime(stepName string, step Step, workflow Workflow, run
 	return nil
 }
 
-func runtimeModelAllows(runtime Runtime, model string) bool {
-	return len(runtime.Model.Allowed) == 0 || slices.Contains(runtime.Model.Allowed, model)
-}
-
-func runtimeReasoningAllows(runtime Runtime, reasoning string) bool {
-	return len(runtime.Reasoning.Allowed) == 0 || slices.Contains(runtime.Reasoning.Allowed, reasoning)
+func selectionAllows(allowed []string, value string) bool {
+	return len(allowed) == 0 || slices.Contains(allowed, value)
 }
 
 func validateDeterministicStepRuntimeFields(stepName string, step Step, kind string) error {

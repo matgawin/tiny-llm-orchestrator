@@ -10,6 +10,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/promptrender"
+	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/stableerr"
@@ -96,30 +97,8 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("evaluate run %q: %w", opts.RunID, err)
 	}
-	if decision.Kind == workflow.DecisionWaitActiveAttempt {
-		result, err := recoverOrRefuseActiveAttempt(ctx, loaded.Store, loaded.Run, loggerOrNop(opts.Logger))
-		if err == nil {
-			printLaunchResult(opts.Stdout, result)
-		}
+	if result, handled, err := handleNonLaunchableDecision(ctx, opts, loaded, decision, latestOutcome, hasOutcome); handled || err != nil {
 		return result, err
-	}
-	if decision.Kind == workflow.DecisionTerminal && hasOutcome && loaded.Run.Status.State == workflow.RunStatusRunning {
-		if _, _, err := loaded.Store.UpdateStatusContext(ctx, opts.RunID, runstore.StatusUpdate{
-			State: decision.RunStatus,
-			Time:  normalizeTime(opts.Time),
-			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
-				State:         decision.RunStatus,
-				PreviousState: latestOutcome.StepID,
-				TriggerStatus: latestOutcome.Status,
-				TriggerResult: latestOutcome.Result,
-			},
-		}); err != nil {
-			return Result{}, fmt.Errorf("launch next: %w", err)
-		}
-		return Result{RunID: opts.RunID, Attempt: latestOutcome}, stableerr.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
-	}
-	if decision.Kind != workflow.DecisionSelectStep && decision.Kind != workflow.DecisionRetryStep {
-		return Result{}, stableerr.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
 	}
 	step := loaded.Workflow.Steps[decision.Step]
 	at := normalizeTime(opts.Time)
@@ -133,18 +112,10 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
 	workflowOutcome, hasWorkflowOutcome := workflowEntryOutcome(loaded.Run.Status, latestOutcome, hasOutcome)
 	workflowEntry := workflowStateEntryForDecision(decision, workflowOutcome, hasWorkflowOutcome)
-	var consumeLoopCapOverride *runstore.WorkflowLoopHardCapOverride
 	capDecision := loopcap.Evaluate(loaded.Workflow.Name, loaded.Workflow.LoopCaps, loaded.Run.Status, decision, workflowOutcome, hasWorkflowOutcome)
-	if capDecision.Kind == loopcap.DecisionHard {
-		if override := loaded.Run.Status.WorkflowLoop.PendingHardCapOverride; workflowLoopHardCapOverrideMatches(override, capDecision) {
-			consumeLoopCapOverride = override
-		} else {
-			status, _, err := loaded.Store.BlockWorkflowLoopHardCapContext(ctx, opts.RunID, capDecision.HardCap(), at)
-			if err != nil {
-				return Result{}, fmt.Errorf("launch next: %w", err)
-			}
-			return Result{RunID: opts.RunID, Attempt: latestOutcome}, stableerr.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
-		}
+	consumeLoopCapOverride, result, handled, err := handleLaunchLoopHardCap(ctx, opts, loaded, capDecision, latestOutcome, at)
+	if handled || err != nil {
+		return result, err
 	}
 	attempt, _, err := loaded.Store.StartAttemptContext(ctx, opts.RunID, runstore.StartAttemptRequest{
 		StepID:                             decision.Step,
@@ -184,22 +155,75 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return terminalLaunchResultWithProgress(opts.Stdout, progressDisplay, Result{RunID: opts.RunID, Attempt: finished, SoftCap: softCap}, finishErr)
 	}
 	if step.EffectiveKind() == config.StepKindCommand || step.EffectiveKind() == config.StepKindScript {
-		attempt, stdoutRef, stderrRef, launched, err := runDeterministicStep(ctx, loaded, opts, attempt, step, at, progressDisplay.Env())
-		result := Result{RunID: opts.RunID, Attempt: attempt, Log: stderrRef, Launched: launched, SoftCap: softCap}
-		if stdoutRef.Path != "" {
-			result.Log = stdoutRef
-		}
-		_ = progressDisplay.Close()
-		if err != nil {
-			if result.Attempt.AttemptID != "" {
-				printLaunchResult(opts.Stdout, result)
-			}
-			return result, err
-		}
-		printLaunchResult(opts.Stdout, result)
-		return result, nil
+		return launchDeterministicStep(ctx, loaded, opts, attempt, step, at, softCap, progressDisplay)
 	}
 
+	return launchAgentStep(ctx, loaded, opts, attempt, at, softCap, progressDisplay)
+}
+
+func handleNonLaunchableDecision(ctx context.Context, opts Options, loaded runcontext.Context, decision workflow.Decision, latestOutcome runstore.Attempt, hasOutcome bool) (Result, bool, error) {
+	if decision.Kind == workflow.DecisionWaitActiveAttempt {
+		result, err := recoverOrRefuseActiveAttempt(ctx, loaded.Store, loaded.Run, loggerOrNop(opts.Logger))
+		if err == nil {
+			printLaunchResult(opts.Stdout, result)
+		}
+		return result, true, err
+	}
+	if decision.Kind == workflow.DecisionTerminal && hasOutcome && loaded.Run.Status.State == workflow.RunStatusRunning {
+		if _, _, err := loaded.Store.UpdateStatusContext(ctx, opts.RunID, runstore.StatusUpdate{
+			State: decision.RunStatus,
+			Time:  normalizeTime(opts.Time),
+			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+				State:         decision.RunStatus,
+				PreviousState: latestOutcome.StepID,
+				TriggerStatus: latestOutcome.Status,
+				TriggerResult: latestOutcome.Result,
+			},
+		}); err != nil {
+			return Result{}, true, fmt.Errorf("launch next: %w", err)
+		}
+		err := stableerr.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
+		return Result{RunID: opts.RunID, Attempt: latestOutcome}, true, err
+	}
+	if decision.Kind != workflow.DecisionSelectStep && decision.Kind != workflow.DecisionRetryStep {
+		return Result{}, true, stableerr.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
+	}
+	return Result{}, false, nil
+}
+
+func handleLaunchLoopHardCap(ctx context.Context, opts Options, loaded runcontext.Context, capDecision loopcap.Decision, latestOutcome runstore.Attempt, at time.Time) (*runstore.WorkflowLoopHardCapOverride, Result, bool, error) {
+	if capDecision.Kind != loopcap.DecisionHard {
+		return nil, Result{}, false, nil
+	}
+	if override := loaded.Run.Status.WorkflowLoop.PendingHardCapOverride; workflowLoopHardCapOverrideMatches(override, capDecision) {
+		return override, Result{}, false, nil
+	}
+	status, _, err := loaded.Store.BlockWorkflowLoopHardCapContext(ctx, opts.RunID, capDecision.HardCap(), at)
+	if err != nil {
+		return nil, Result{}, true, fmt.Errorf("launch next: %w", err)
+	}
+	err = stableerr.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
+	return nil, Result{RunID: opts.RunID, Attempt: latestOutcome}, true, err
+}
+
+func launchDeterministicStep(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, step config.Step, at time.Time, softCap *runstore.WorkflowLoopSoftCap, progressDisplay *liveProgressDisplay) (Result, error) {
+	attempt, stdoutRef, stderrRef, launched, err := runDeterministicStep(ctx, loaded, opts, attempt, step, at, progressDisplay.Env())
+	result := Result{RunID: opts.RunID, Attempt: attempt, Log: stderrRef, Launched: launched, SoftCap: softCap}
+	if stdoutRef.Path != "" {
+		result.Log = stdoutRef
+	}
+	_ = progressDisplay.Close()
+	if err != nil {
+		if result.Attempt.AttemptID != "" {
+			printLaunchResult(opts.Stdout, result)
+		}
+		return result, err
+	}
+	printLaunchResult(opts.Stdout, result)
+	return result, nil
+}
+
+func launchAgentStep(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, at time.Time, softCap *runstore.WorkflowLoopSoftCap, progressDisplay *liveProgressDisplay) (Result, error) {
 	prompt, err := promptrender.Render(ctx, promptrender.Options{
 		Root:      opts.Root,
 		RunID:     opts.RunID,

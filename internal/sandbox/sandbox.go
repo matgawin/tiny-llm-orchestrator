@@ -699,57 +699,86 @@ func resolvePathMounts(root, beadsPath, sandboxHome, hostHome, pathValue, mode s
 	seenTargets := make(map[string]struct{})
 	seenPairs := make(map[string]struct{})
 	for _, entry := range filepath.SplitList(pathValue) {
-		if entry == "" || !filepath.IsAbs(entry) {
-			continue
-		}
-		target := filepath.Clean(entry)
-		info, err := stat(target)
+		mount, ok, err := resolvePathMountEntry(root, beadsPath, sandboxHome, hostHome, entry, explicitMounts, protectedPaths, stderr, stat, evalSymlinks)
 		if err != nil {
-			continue
-		}
-		resolvedSource, err := evalSymlinks(target)
-		if err != nil {
-			continue
-		}
-		resolvedInfo, err := stat(resolvedSource)
-		if err != nil || !resolvedInfo.IsDir() || !info.IsDir() {
-			continue
-		}
-		if pathUnderExistingMount(target, root) || pathUnderExistingMount(target, beadsPath) || pathUnderMinimalExecutableMount(target, stat) {
-			continue
-		}
-		if err := validatePathMountTarget(root, beadsPath, sandboxHome, hostHome, target); err != nil {
 			return nil, err
 		}
-		if protected, ok := protectedPaths.conflict(target); ok {
-			warnProtectedPathMount(stderr, target, protected)
+		if !ok {
 			continue
 		}
-		if protected, ok := protectedPaths.conflict(resolvedSource); ok {
-			warnProtectedPathMount(stderr, target, protected)
+		pairKey := mount.host + "\x00" + mount.target
+		if markPathMountSeen(mount.target, pairKey, seenTargets, seenPairs) {
 			continue
 		}
-		for _, explicit := range explicitMounts {
-			if explicit.target == target {
-				return nil, stableerr.Errorf("sandbox.path.mode host_entries generated mount target %q conflicts with explicit sandbox mount target %q; explicit mounts cannot override automatic PATH mounts", target, explicit.target)
-			}
-		}
-		pairKey := filepath.Clean(resolvedSource) + "\x00" + target
-		if _, ok := seenTargets[target]; ok {
-			continue
-		}
-		if _, ok := seenPairs[pairKey]; ok {
-			continue
-		}
-		seenTargets[target] = struct{}{}
-		seenPairs[pairKey] = struct{}{}
-		pathMounts = append(pathMounts, resolvedMount{
-			host:   filepath.Clean(resolvedSource),
-			target: target,
-			mode:   "ro",
-		})
+		pathMounts = append(pathMounts, mount)
 	}
 	return pathMounts, nil
+}
+
+func resolvePathMountEntry(root, beadsPath, sandboxHome, hostHome, entry string, explicitMounts []resolvedMount, protectedPaths protectedHostPaths, stderr io.Writer, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+	if entry == "" || !filepath.IsAbs(entry) {
+		return resolvedMount{}, false, nil
+	}
+	target := filepath.Clean(entry)
+	resolvedSource, ok := resolveValidPathEntry(target, root, beadsPath, stat, evalSymlinks)
+	if !ok {
+		return resolvedMount{}, false, nil
+	}
+	if err := validatePathMountTarget(root, beadsPath, sandboxHome, hostHome, target); err != nil {
+		return resolvedMount{}, false, err
+	}
+	if protected, ok := protectedPaths.conflict(target); ok {
+		warnProtectedPathMount(stderr, target, protected)
+		return resolvedMount{}, false, nil
+	}
+	if protected, ok := protectedPaths.conflict(resolvedSource); ok {
+		warnProtectedPathMount(stderr, target, protected)
+		return resolvedMount{}, false, nil
+	}
+	if err := checkExplicitPathMountConflict(target, explicitMounts); err != nil {
+		return resolvedMount{}, false, err
+	}
+	return resolvedMount{host: filepath.Clean(resolvedSource), target: target, mode: "ro"}, true, nil
+}
+
+func resolveValidPathEntry(target, root, beadsPath string, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (string, bool) {
+	info, err := stat(target)
+	if err != nil {
+		return "", false
+	}
+	resolvedSource, err := evalSymlinks(target)
+	if err != nil {
+		return "", false
+	}
+	resolvedInfo, err := stat(resolvedSource)
+	if err != nil || !resolvedInfo.IsDir() || !info.IsDir() {
+		return "", false
+	}
+	if pathUnderExistingMount(target, root) || pathUnderExistingMount(target, beadsPath) || pathUnderMinimalExecutableMount(target, stat) {
+		return "", false
+	}
+	return resolvedSource, true
+}
+
+func checkExplicitPathMountConflict(target string, explicitMounts []resolvedMount) error {
+	for _, explicit := range explicitMounts {
+		if explicit.target == target {
+			return stableerr.Errorf("sandbox.path.mode host_entries generated mount target %q conflicts with explicit sandbox mount target %q; explicit mounts cannot override automatic PATH mounts", target, explicit.target)
+		}
+	}
+	return nil
+}
+
+func markPathMountSeen(target, pairKey string, seenTargets, seenPairs map[string]struct{}) bool {
+	if _, ok := seenTargets[target]; ok {
+		return true
+	}
+	if _, ok := seenPairs[pairKey]; ok {
+		return true
+	}
+	seenTargets[target] = struct{}{}
+	seenPairs[pairKey] = struct{}{}
+	return false
 }
 
 func warnProtectedPathMount(stderr io.Writer, target, protected string) {

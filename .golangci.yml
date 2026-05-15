@@ -37,6 +37,7 @@ linters:
     - noctx           # Check for contextless blocking calls
     - err113          # Enforce stable error values instead of dynamic construction
     - wrapcheck       # Require local context on returned boundary errors
+    - gocognit        # Flag functions with high cognitive complexity
 
   settings:
     errcheck:

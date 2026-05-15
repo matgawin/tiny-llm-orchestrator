@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
@@ -69,71 +70,9 @@ func (s *Store) writeArtifactWithStage(ctx context.Context, runID string, artifa
 	}
 	var ref ArtifactRef
 	err := s.withRunLockContext(ctx, runID, func() error {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("write artifact with stage: %w", err)
-		}
-		run, err := s.load(runID)
+		written, err := s.commitArtifactWrite(ctx, runID, artifact, validate, stage)
+		ref = written
 		if err != nil {
-			return err
-		}
-		if validate != nil {
-			if err := validate(run); err != nil {
-				return err
-			}
-		}
-		sequence := nextEventSequence(run)
-		relPath, err := artifactPath(artifact.Kind, artifact.Name, sequence)
-		if err != nil {
-			return err
-		}
-		if err := validateRelativeArtifactPath(relPath); err != nil {
-			return err
-		}
-		if err := validateArtifactWriteAllowed(run.Status.Artifacts, artifact.Kind, relPath); err != nil {
-			return err
-		}
-		ref = ArtifactRef{
-			Kind:          artifact.Kind,
-			Path:          relPath,
-			Name:          artifact.Name,
-			EventSequence: sequence,
-		}
-		path := filepath.Join(run.Path, filepath.FromSlash(relPath))
-		if err := ensureArtifactParentDir(run.Path, relPath); err != nil {
-			return fmt.Errorf("run %q artifact %s: %w", runID, relPath, err)
-		}
-		staged, err := stage(path, artifact)
-		if err != nil {
-			return fmt.Errorf("run %q artifact %s: %w", runID, relPath, err)
-		}
-		defer staged.cleanup()
-		payload, err := marshalPayload(artifactWrittenPayload{Artifact: ref})
-		if err != nil {
-			return err
-		}
-		event := prepareRunEvent(runID, run, Event{
-			Time:    artifact.Time,
-			Type:    eventArtifactWritten,
-			Payload: payload,
-		})
-		if err := staged.commit(); err != nil {
-			return fmt.Errorf("run %q artifact %s: %w", runID, relPath, err)
-		}
-		if err := appendEvent(filepath.Join(run.Path, eventsName), event); err != nil {
-			if eventAppendPossiblyCommitted(err) {
-				return fmt.Errorf("run %q events.jsonl: %w", runID, err)
-			}
-			if rollbackErr := staged.rollback(); rollbackErr != nil {
-				return fmt.Errorf("run %q events.jsonl: %w", runID, errors.Join(err, fmt.Errorf("rollback artifact %s: %w", relPath, rollbackErr)))
-			}
-			ref = ArtifactRef{}
-			return fmt.Errorf("run %q events.jsonl: %w", runID, err)
-		}
-		status := run.Status
-		status.Artifacts = append(status.Artifacts, ref)
-		status.UpdatedAt = event.Time
-		status.LastSequence = event.Sequence
-		if err := writeStatusForRun(runID, run.Path, status); err != nil {
 			return err
 		}
 		return nil
@@ -142,6 +81,98 @@ func (s *Store) writeArtifactWithStage(ctx context.Context, runID string, artifa
 		return ref, err
 	}
 	return ref, nil
+}
+
+func (s *Store) commitArtifactWrite(ctx context.Context, runID string, artifact Artifact, validate func(*Run) error, stage func(string, Artifact) (stagedArtifact, error)) (ArtifactRef, error) {
+	if err := ctx.Err(); err != nil {
+		return ArtifactRef{}, fmt.Errorf("write artifact with stage: %w", err)
+	}
+	run, err := s.load(runID)
+	if err != nil {
+		return ArtifactRef{}, err
+	}
+	if validate != nil {
+		if err := validate(run); err != nil {
+			return ArtifactRef{}, err
+		}
+	}
+	ref, staged, err := s.stageArtifactWrite(run, artifact, stage)
+	if err != nil {
+		return ArtifactRef{}, err
+	}
+	defer staged.cleanup()
+	event, err := artifactWrittenEvent(runID, run, artifact.Time, ref)
+	if err != nil {
+		return ArtifactRef{}, err
+	}
+	if err := commitArtifactAndEvent(runID, run, ref, staged, event); err != nil {
+		return ArtifactRef{}, err
+	}
+	status := run.Status
+	status.Artifacts = append(status.Artifacts, ref)
+	status.UpdatedAt = event.Time
+	status.LastSequence = event.Sequence
+	if err := writeStatusForRun(runID, run.Path, status); err != nil {
+		return ref, err
+	}
+	return ref, nil
+}
+
+func (s *Store) stageArtifactWrite(run *Run, artifact Artifact, stage func(string, Artifact) (stagedArtifact, error)) (ArtifactRef, stagedArtifact, error) {
+	sequence := nextEventSequence(run)
+	relPath, err := artifactPath(artifact.Kind, artifact.Name, sequence)
+	if err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	if err := validateRelativeArtifactPath(relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	if err := validateArtifactWriteAllowed(run.Status.Artifacts, artifact.Kind, relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, err
+	}
+	ref := ArtifactRef{
+		Kind:          artifact.Kind,
+		Path:          relPath,
+		Name:          artifact.Name,
+		EventSequence: sequence,
+	}
+	path := filepath.Join(run.Path, filepath.FromSlash(relPath))
+	if err := ensureArtifactParentDir(run.Path, relPath); err != nil {
+		return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s: %w", run.ID, relPath, err)
+	}
+	staged, err := stage(path, artifact)
+	if err != nil {
+		return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s: %w", run.ID, relPath, err)
+	}
+	return ref, staged, nil
+}
+
+func artifactWrittenEvent(runID string, run *Run, at time.Time, ref ArtifactRef) (Event, error) {
+	payload, err := marshalPayload(artifactWrittenPayload{Artifact: ref})
+	if err != nil {
+		return Event{}, err
+	}
+	return prepareRunEvent(runID, run, Event{
+		Time:    at,
+		Type:    eventArtifactWritten,
+		Payload: payload,
+	}), nil
+}
+
+func commitArtifactAndEvent(runID string, run *Run, ref ArtifactRef, staged stagedArtifact, event Event) error {
+	if err := staged.commit(); err != nil {
+		return fmt.Errorf("run %q artifact %s: %w", runID, ref.Path, err)
+	}
+	if err := appendEvent(filepath.Join(run.Path, eventsName), event); err != nil {
+		if eventAppendPossiblyCommitted(err) {
+			return fmt.Errorf("run %q events.jsonl: %w", runID, err)
+		}
+		if rollbackErr := staged.rollback(); rollbackErr != nil {
+			return fmt.Errorf("run %q events.jsonl: %w", runID, errors.Join(err, fmt.Errorf("rollback artifact %s: %w", ref.Path, rollbackErr)))
+		}
+		return fmt.Errorf("run %q events.jsonl: %w", runID, err)
+	}
+	return nil
 }
 
 func cleanupStagedArtifacts(staged []stagedArtifact) {

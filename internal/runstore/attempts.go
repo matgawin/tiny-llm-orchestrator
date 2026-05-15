@@ -34,73 +34,7 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 	var out Attempt
 	var event Event
 	err = s.withRunLockContext(ctx, runID, func() error {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("start attempt context: %w", err)
-		}
-		run, err := s.load(runID)
-		if err != nil {
-			return err
-		}
-		if run.Status.State != stateRunning {
-			return stableerr.Errorf("run %q state is %q, want %q to start attempt", runID, run.Status.State, stateRunning)
-		}
-		if run.Status.ActiveAttempt != nil {
-			return stableerr.Errorf("run %q already has active attempt %q", runID, run.Status.ActiveAttempt.AttemptID)
-		}
-		if slices.ContainsFunc(run.Status.Attempts, func(existing Attempt) bool {
-			return existing.AttemptID == attempt.AttemptID
-		}) {
-			return stableerr.Errorf("run %q already has attempt %q", runID, attempt.AttemptID)
-		}
-		routing := attemptStartRoutingFromFields(req.ConsumeAttemptID, req.RetryLineage, req.SupersedeReason)
-		if err := validateAttemptStartRouting(run.Status, routing); err != nil {
-			return fmt.Errorf("run %q %w", runID, err)
-		}
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("start attempt context: %w", err)
-		}
-		var workflowEntry *WorkflowStateEntry
-		if req.WorkflowStateEntry.State != "" {
-			entry, err := nextWorkflowStateEntry(run.Status, req.WorkflowStateEntry)
-			if err != nil {
-				return err
-			}
-			if req.ConsumeWorkflowLoopHardCapOverride != nil {
-				if err := validateWorkflowLoopHardCapOverrideConsumption(run.Status, entry, *req.ConsumeWorkflowLoopHardCapOverride); err != nil {
-					return err
-				}
-			}
-			workflowEntry = &entry
-		} else if req.ConsumeWorkflowLoopHardCapOverride != nil {
-			return stableerr.New("workflow loop hard-cap override consumption requires workflow state entry")
-		}
-		payload, err := marshalPayload(attemptStartedPayload{
-			Attempt:                             attempt,
-			ConsumeAttemptID:                    routing.ConsumeAttemptID,
-			RetryLineage:                        cloneRetryLineagePtr(routing.RetryLineage),
-			SupersedeReason:                     routing.SupersedeReason,
-			WorkflowStateEntry:                  workflowEntry,
-			ConsumedWorkflowLoopHardCapOverride: req.ConsumeWorkflowLoopHardCapOverride,
-		})
-		if err != nil {
-			return err
-		}
-		event = Event{Time: req.Time, Type: eventAttemptStarted, Payload: payload}
-		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
-			attempt.StartedAt = event.Time
-			if workflowEntry != nil {
-				applyWorkflowStateEntry(status, *workflowEntry)
-			}
-			if req.ConsumeWorkflowLoopHardCapOverride != nil {
-				status.WorkflowLoop.PendingHardCapOverride = nil
-			}
-			status.Continued = nil
-			applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
-			status.ActiveAttempt = &attempt
-			status.Attempts = append(status.Attempts, attempt)
-			status.UpdatedAt = event.Time
-			status.LastSequence = event.Sequence
-		})
+		status, committedEvent, err := s.commitStartAttempt(ctx, runID, req, attempt)
 		event = committedEvent
 		if err != nil {
 			if statusBackedEventPossiblyCommitted(err) {
@@ -119,6 +53,93 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 		return Attempt{}, Event{}, err
 	}
 	return out, event, nil
+}
+
+func (s *Store) commitStartAttempt(ctx context.Context, runID string, req StartAttemptRequest, attempt Attempt) (Status, Event, error) {
+	if err := ctx.Err(); err != nil {
+		return Status{}, Event{}, fmt.Errorf("start attempt context: %w", err)
+	}
+	run, err := s.load(runID)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	routing, workflowEntry, err := prepareStartAttempt(run.Status, runID, req, attempt)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Status{}, Event{}, fmt.Errorf("start attempt context: %w", err)
+	}
+	payload, err := marshalPayload(attemptStartedPayload{
+		Attempt:                             attempt,
+		ConsumeAttemptID:                    routing.ConsumeAttemptID,
+		RetryLineage:                        cloneRetryLineagePtr(routing.RetryLineage),
+		SupersedeReason:                     routing.SupersedeReason,
+		WorkflowStateEntry:                  workflowEntry,
+		ConsumedWorkflowLoopHardCapOverride: req.ConsumeWorkflowLoopHardCapOverride,
+	})
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	event := Event{Time: req.Time, Type: eventAttemptStarted, Payload: payload}
+	return commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+		applyStartAttemptStatus(status, event, req, attempt, routing, workflowEntry)
+	})
+}
+
+func prepareStartAttempt(status Status, runID string, req StartAttemptRequest, attempt Attempt) (attemptStartRouting, *WorkflowStateEntry, error) {
+	if status.State != stateRunning {
+		return attemptStartRouting{}, nil, stableerr.Errorf("run %q state is %q, want %q to start attempt", runID, status.State, stateRunning)
+	}
+	if status.ActiveAttempt != nil {
+		return attemptStartRouting{}, nil, stableerr.Errorf("run %q already has active attempt %q", runID, status.ActiveAttempt.AttemptID)
+	}
+	if slices.ContainsFunc(status.Attempts, func(existing Attempt) bool {
+		return existing.AttemptID == attempt.AttemptID
+	}) {
+		return attemptStartRouting{}, nil, stableerr.Errorf("run %q already has attempt %q", runID, attempt.AttemptID)
+	}
+	routing := attemptStartRoutingFromFields(req.ConsumeAttemptID, req.RetryLineage, req.SupersedeReason)
+	if err := validateAttemptStartRouting(status, routing); err != nil {
+		return attemptStartRouting{}, nil, fmt.Errorf("run %q %w", runID, err)
+	}
+	workflowEntry, err := prepareStartAttemptWorkflowEntry(status, req)
+	return routing, workflowEntry, err
+}
+
+func prepareStartAttemptWorkflowEntry(status Status, req StartAttemptRequest) (*WorkflowStateEntry, error) {
+	if req.WorkflowStateEntry.State == "" {
+		if req.ConsumeWorkflowLoopHardCapOverride != nil {
+			return nil, stableerr.New("workflow loop hard-cap override consumption requires workflow state entry")
+		}
+		return nil, nil //nolint:nilnil // Nil entry is the explicit no-workflow-entry result for this optional event field.
+	}
+	entry, err := nextWorkflowStateEntry(status, req.WorkflowStateEntry)
+	if err != nil {
+		return nil, err
+	}
+	if req.ConsumeWorkflowLoopHardCapOverride != nil {
+		if err := validateWorkflowLoopHardCapOverrideConsumption(status, entry, *req.ConsumeWorkflowLoopHardCapOverride); err != nil {
+			return nil, err
+		}
+	}
+	return &entry, nil
+}
+
+func applyStartAttemptStatus(status *Status, event Event, req StartAttemptRequest, attempt Attempt, routing attemptStartRouting, workflowEntry *WorkflowStateEntry) {
+	attempt.StartedAt = event.Time
+	if workflowEntry != nil {
+		applyWorkflowStateEntry(status, *workflowEntry)
+	}
+	if req.ConsumeWorkflowLoopHardCapOverride != nil {
+		status.WorkflowLoop.PendingHardCapOverride = nil
+	}
+	status.Continued = nil
+	applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
+	status.ActiveAttempt = &attempt
+	status.Attempts = append(status.Attempts, attempt)
+	status.UpdatedAt = event.Time
+	status.LastSequence = event.Sequence
 }
 
 // RecordAttemptPrompt links a prompt artifact to the current active attempt.
@@ -466,50 +487,7 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 	var out Attempt
 	var event Event
 	err := s.withRunLockContext(ctx, runID, func() error {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("update active attempt context: %w", err)
-		}
-		run, err := s.load(runID)
-		if err != nil {
-			return err
-		}
-		if run.Status.ActiveAttempt == nil {
-			return stableerr.Errorf("run %q has no active attempt", runID)
-		}
-		if run.Status.ActiveAttempt.AttemptID != attemptID {
-			return stableerr.Errorf("run %q active attempt is %q, not %q", runID, run.Status.ActiveAttempt.AttemptID, attemptID)
-		}
-		attempt := *run.Status.ActiveAttempt
-		payload, err := apply(run.Status, &attempt)
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("update active attempt context: %w", err)
-		}
-		content, err := marshalPayload(payload)
-		if err != nil {
-			return err
-		}
-		event = Event{Time: at, Type: eventType, Payload: content}
-		status, committedEvent, err := commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
-			if event.Type == eventAttemptFinished || event.Type == eventAttemptRecovered || event.Type == eventAttemptReported {
-				finishedAt := event.Time
-				attempt.FinishedAt = &finishedAt
-			}
-			status.ActiveAttempt = &attempt
-			for i := len(status.Attempts) - 1; i >= 0; i-- {
-				if status.Attempts[i].AttemptID == attemptID {
-					status.Attempts[i] = attempt
-					break
-				}
-			}
-			if attempt.State != AttemptStateActive && attempt.State != AttemptStateStarting {
-				status.ActiveAttempt = nil
-			}
-			status.UpdatedAt = event.Time
-			status.LastSequence = event.Sequence
-		})
+		status, committedEvent, err := s.commitActiveAttemptUpdate(ctx, runID, attemptID, at, eventType, apply)
 		event = committedEvent
 		if err != nil {
 			if statusBackedEventPossiblyCommitted(err) {
@@ -528,6 +506,62 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 		return Attempt{}, Event{}, err
 	}
 	return out, event, nil
+}
+
+func (s *Store) commitActiveAttemptUpdate(ctx context.Context, runID, attemptID string, at time.Time, eventType string, apply func(Status, *Attempt) (any, error)) (Status, Event, error) {
+	if err := ctx.Err(); err != nil {
+		return Status{}, Event{}, fmt.Errorf("update active attempt context: %w", err)
+	}
+	run, err := s.load(runID)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	attempt, payload, err := prepareActiveAttemptUpdate(run.Status, runID, attemptID, apply)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Status{}, Event{}, fmt.Errorf("update active attempt context: %w", err)
+	}
+	content, err := marshalPayload(payload)
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	event := Event{Time: at, Type: eventType, Payload: content}
+	return commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+		applyActiveAttemptUpdate(status, event, attemptID, attempt)
+	})
+}
+
+func prepareActiveAttemptUpdate(status Status, runID, attemptID string, apply func(Status, *Attempt) (any, error)) (Attempt, any, error) {
+	if status.ActiveAttempt == nil {
+		return Attempt{}, nil, stableerr.Errorf("run %q has no active attempt", runID)
+	}
+	if status.ActiveAttempt.AttemptID != attemptID {
+		return Attempt{}, nil, stableerr.Errorf("run %q active attempt is %q, not %q", runID, status.ActiveAttempt.AttemptID, attemptID)
+	}
+	attempt := *status.ActiveAttempt
+	payload, err := apply(status, &attempt)
+	return attempt, payload, err
+}
+
+func applyActiveAttemptUpdate(status *Status, event Event, attemptID string, attempt Attempt) {
+	if event.Type == eventAttemptFinished || event.Type == eventAttemptRecovered || event.Type == eventAttemptReported {
+		finishedAt := event.Time
+		attempt.FinishedAt = &finishedAt
+	}
+	status.ActiveAttempt = &attempt
+	for i := len(status.Attempts) - 1; i >= 0; i-- {
+		if status.Attempts[i].AttemptID == attemptID {
+			status.Attempts[i] = attempt
+			break
+		}
+	}
+	if attempt.State != AttemptStateActive && attempt.State != AttemptStateStarting {
+		status.ActiveAttempt = nil
+	}
+	status.UpdatedAt = event.Time
+	status.LastSequence = event.Sequence
 }
 
 func newStartedAttempt(runID string, req StartAttemptRequest) (Attempt, error) {

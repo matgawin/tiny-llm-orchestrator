@@ -88,229 +88,315 @@ func replayStatus(events []Event, status Status) (Status, error) {
 	}
 	for _, event := range events[1:] {
 		replayed.UpdatedAt = event.Time
-		switch event.Type {
-		case eventRunCreated:
-			return Status{}, stableerr.Errorf("event %d duplicate %s event", event.Sequence, eventRunCreated)
-		case eventStatusUpdated:
-			var payload statusUpdatedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d status payload: %w", event.Sequence, err)
-			}
-			if payload.State == "" {
-				return Status{}, stableerr.Errorf("event %d status state is required", event.Sequence)
-			}
-			if replayed.ActiveAttempt != nil && payload.State != stateRunning {
-				return Status{}, stableerr.Errorf("event %d updates run state to %q while attempt %q is active", event.Sequence, payload.State, replayed.ActiveAttempt.AttemptID)
-			}
-			if err := applyReplayedWorkflowStateEntry(&replayed, event, payload.WorkflowStateEntry); err != nil {
-				return Status{}, err
-			}
-			replayed.State = payload.State
-		case eventArtifactWritten:
-			var payload artifactWrittenPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d artifact payload: %w", event.Sequence, err)
-			}
-			if err := validateArtifactEventRef(event, payload.Artifact); err != nil {
-				return Status{}, err
-			}
-			replayed.Artifacts = append(replayed.Artifacts, payload.Artifact)
-		case eventAttemptStarted:
-			var payload attemptStartedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d attempt.started payload: %w", event.Sequence, err)
-			}
-			if replayed.State != stateRunning {
-				return Status{}, stableerr.Errorf("event %d starts attempt while run state is %q, want %q", event.Sequence, replayed.State, stateRunning)
-			}
-			if replayed.ActiveAttempt != nil {
-				return Status{}, stableerr.Errorf("event %d starts attempt %q while attempt %q is active", event.Sequence, payload.Attempt.AttemptID, replayed.ActiveAttempt.AttemptID)
-			}
-			routing := attemptStartRoutingFromFields(payload.ConsumeAttemptID, payload.RetryLineage, payload.SupersedeReason)
-			if err := validateAttemptStartRouting(replayed, routing); err != nil {
-				return Status{}, fmt.Errorf("event %d attempt routing: %w", event.Sequence, err)
-			}
-			if payload.ConsumedWorkflowLoopHardCapOverride != nil {
-				if payload.WorkflowStateEntry == nil {
-					return Status{}, stableerr.Errorf("event %d consumes workflow loop hard cap override without workflow state entry", event.Sequence)
-				}
-				if err := validateWorkflowLoopHardCapOverrideConsumption(replayed, *payload.WorkflowStateEntry, *payload.ConsumedWorkflowLoopHardCapOverride); err != nil {
-					return Status{}, fmt.Errorf("event %d workflow loop hard cap override consumption: %w", event.Sequence, err)
-				}
-			}
-			if err := applyReplayedWorkflowStateEntry(&replayed, event, payload.WorkflowStateEntry); err != nil {
-				return Status{}, err
-			}
-			if payload.ConsumedWorkflowLoopHardCapOverride != nil {
-				replayed.WorkflowLoop.PendingHardCapOverride = nil
-			}
-			replayed.Continued = nil
-			attempt := payload.Attempt
-			if err := validateStartedAttemptEvent(event, attempt, replayed.RunID); err != nil {
-				return Status{}, err
-			}
-			if slices.ContainsFunc(replayed.Attempts, func(existing Attempt) bool {
-				return existing.AttemptID == attempt.AttemptID
-			}) {
-				return Status{}, stableerr.Errorf("event %d duplicate attempt %q", event.Sequence, attempt.AttemptID)
-			}
-			applyAttemptStartRouting(&replayed, event.Time, attempt.AttemptID, routing)
-			replayed.ActiveAttempt = &attempt
-			replayed.Attempts = append(replayed.Attempts, attempt)
-		case eventAttemptPrompted:
-			var payload attemptPromptedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d attempt.prompted payload: %w", event.Sequence, err)
-			}
-			if err := updateReplayedActiveAttempt(&replayed, event, payload.AttemptID, func(attempt *Attempt) error {
-				return applyAttemptPromptRef(replayed, attempt, payload.AttemptID, payload.PromptRef)
-			}); err != nil {
-				return Status{}, err
-			}
-		case eventAttemptLogged:
-			var payload attemptLoggedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d attempt.logged payload: %w", event.Sequence, err)
-			}
-			if err := updateReplayedActiveAttempt(&replayed, event, payload.AttemptID, func(attempt *Attempt) error {
-				return applyAttemptLogRef(replayed, attempt, payload.AttemptID, payload.LogRef)
-			}); err != nil {
-				return Status{}, err
-			}
-		case eventAttemptProcess:
-			var payload attemptProcessPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d attempt.process_started payload: %w", event.Sequence, err)
-			}
-			if err := updateReplayedActiveAttempt(&replayed, event, payload.AttemptID, func(attempt *Attempt) error {
-				return applyAttemptProcessMetadata(attempt, payload.AttemptID, payload.PID, payload.ProcessStartTime)
-			}); err != nil {
-				return Status{}, err
-			}
-		case eventAttemptFinished, eventAttemptRecovered:
-			var payload attemptFinishedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d %s payload: %w", event.Sequence, event.Type, err)
-			}
-			if err := finishReplayedActiveAttempt(&replayed, event, payload, event.Type == eventAttemptRecovered); err != nil {
-				return Status{}, err
-			}
-		case eventAttemptReported:
-			var payload attemptReportedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d attempt.reported payload: %w", event.Sequence, err)
-			}
-			if err := reportReplayedActiveAttempt(&replayed, event, payload); err != nil {
-				return Status{}, err
-			}
-		case eventAttemptWarning:
-			var payload attemptWarningPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d attempt.warning payload: %w", event.Sequence, err)
-			}
-			if err := applyReplayedAttemptWarning(&replayed, event, payload.Warning); err != nil {
-				return Status{}, err
-			}
-		case eventReportIgnored:
-			var payload reportIgnoredPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d report.ignored payload: %w", event.Sequence, err)
-			}
-			if payload.Reason == "" {
-				return Status{}, stableerr.Errorf("event %d report ignored reason is required", event.Sequence)
-			}
-			if payload.RunID != "" && payload.RunID != event.RunID {
-				return Status{}, stableerr.Errorf("event %d report ignored run_id %q does not match event run_id %q", event.Sequence, payload.RunID, event.RunID)
-			}
-		case eventRunContinued:
-			var payload runContinuedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d run.continued payload: %w", event.Sequence, err)
-			}
-			if err := validateRunContinuedPayload(replayed, payload); err != nil {
-				return Status{}, fmt.Errorf("event %d run.continued payload: %w", event.Sequence, err)
-			}
-			applyRunContinued(&replayed, payload)
-		case eventWorkflowStepSkipped:
-			var payload workflowStepSkippedPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d workflow.step_skipped payload: %w", event.Sequence, err)
-			}
-			skipped, err := validateWorkflowStepSkippedPayload(replayed, event, payload)
-			if err != nil {
-				return Status{}, err
-			}
-			if err := applyReplayedWorkflowStateEntry(&replayed, event, payload.WorkflowStateEntry); err != nil {
-				return Status{}, err
-			}
-			applyAttemptOutcomeConsumption(&replayed, event, payload.ConsumeAttemptID)
-			applyStepSkipped(&replayed, skipped)
-			replayed.State = payload.State
-			replayed.RetryLineage = nil
-			replayed.Continued = nil
-		case eventWorkflowSoftCap:
-			var payload workflowLoopSoftCapPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d workflow.loop_soft_cap payload: %w", event.Sequence, err)
-			}
-			if err := validateWorkflowLoopSoftCap(payload.Cap); err != nil {
-				return Status{}, fmt.Errorf("event %d workflow.loop_soft_cap payload: %w", event.Sequence, err)
-			}
-			if payload.Cap.Workflow != replayed.Workflow {
-				return Status{}, stableerr.Errorf("event %d workflow loop soft cap workflow %q does not match status workflow %q", event.Sequence, payload.Cap.Workflow, replayed.Workflow)
-			}
-			applyWorkflowLoopSoftCap(&replayed, payload.Cap)
-		case eventWorkflowHardCap:
-			var payload workflowLoopHardCapPayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap payload: %w", event.Sequence, err)
-			}
-			if err := validateWorkflowLoopHardCap(payload.Cap); err != nil {
-				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap payload: %w", event.Sequence, err)
-			}
-			if payload.Cap.Workflow != replayed.Workflow {
-				return Status{}, stableerr.Errorf("event %d workflow loop hard cap workflow %q does not match status workflow %q", event.Sequence, payload.Cap.Workflow, replayed.Workflow)
-			}
-			if payload.State != stateBlockedHuman {
-				return Status{}, stableerr.Errorf("event %d workflow loop hard cap state = %q, want %q", event.Sequence, payload.State, stateBlockedHuman)
-			}
-			if replayed.ActiveAttempt != nil {
-				return Status{}, stableerr.Errorf("event %d blocks workflow loop while attempt %q is active", event.Sequence, replayed.ActiveAttempt.AttemptID)
-			}
-			applyWorkflowLoopHardCap(&replayed, payload.Cap)
-			replayed.State = stateBlockedHuman
-		case eventWorkflowHardCapOverride:
-			var payload workflowLoopHardCapOverridePayload
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap_override payload: %w", event.Sequence, err)
-			}
-			if err := validateWorkflowLoopHardCapOverride(payload.Override); err != nil {
-				return Status{}, fmt.Errorf("event %d workflow.loop_hard_cap_override payload: %w", event.Sequence, err)
-			}
-			if payload.Override.Workflow != replayed.Workflow {
-				return Status{}, stableerr.Errorf("event %d workflow loop hard cap override workflow %q does not match status workflow %q", event.Sequence, payload.Override.Workflow, replayed.Workflow)
-			}
-			if payload.State != stateRunning {
-				return Status{}, stableerr.Errorf("event %d workflow loop hard cap override state = %q, want %q", event.Sequence, payload.State, stateRunning)
-			}
-			block := replayed.WorkflowLoop.HardCapBlock
-			if replayed.State != stateBlockedHuman || block == nil {
-				return Status{}, stableerr.Errorf("event %d workflow loop hard cap override requires active hard-cap block", event.Sequence)
-			}
-			if block.Workflow != payload.Override.Workflow ||
-				block.BlockedState != payload.Override.TargetState ||
-				block.CurrentCount != payload.Override.CountBeforeOverride ||
-				block.ProspectiveCount != payload.Override.CountAfterOverride ||
-				block.Soft != payload.Override.Soft ||
-				block.Hard != payload.Override.Hard ||
-				block.Reason != payload.Override.Reason {
-				return Status{}, stableerr.Errorf("event %d workflow loop hard cap override does not match active hard-cap block", event.Sequence)
-			}
-			applyWorkflowLoopHardCapOverride(&replayed, payload.Override)
-			replayed.State = stateRunning
+		if err := applyReplayedEvent(&replayed, event); err != nil {
+			return Status{}, err
 		}
 	}
 	return replayed, nil
+}
+
+func applyReplayedEvent(status *Status, event Event) error {
+	switch event.Type {
+	case eventRunCreated:
+		return stableerr.Errorf("event %d duplicate %s event", event.Sequence, eventRunCreated)
+	case eventStatusUpdated:
+		return applyReplayedStatusUpdated(status, event)
+	case eventArtifactWritten:
+		return applyReplayedArtifactWritten(status, event)
+	case eventAttemptStarted:
+		return applyReplayedAttemptStarted(status, event)
+	case eventAttemptPrompted:
+		return applyReplayedAttemptPrompted(status, event)
+	case eventAttemptLogged:
+		return applyReplayedAttemptLogged(status, event)
+	case eventAttemptProcess:
+		return applyReplayedAttemptProcess(status, event)
+	case eventAttemptFinished, eventAttemptRecovered:
+		return applyReplayedAttemptFinished(status, event)
+	case eventAttemptReported:
+		return applyReplayedAttemptReported(status, event)
+	case eventAttemptWarning:
+		return applyReplayedAttemptWarningEvent(status, event)
+	case eventReportIgnored:
+		return validateReplayedReportIgnored(event)
+	case eventRunContinued:
+		return applyReplayedRunContinued(status, event)
+	case eventWorkflowStepSkipped:
+		return applyReplayedWorkflowStepSkipped(status, event)
+	case eventWorkflowSoftCap:
+		return applyReplayedWorkflowSoftCap(status, event)
+	case eventWorkflowHardCap:
+		return applyReplayedWorkflowHardCap(status, event)
+	case eventWorkflowHardCapOverride:
+		return applyReplayedWorkflowHardCapOverride(status, event)
+	default:
+		return nil
+	}
+}
+
+func applyReplayedStatusUpdated(status *Status, event Event) error {
+	var payload statusUpdatedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d status payload: %w", event.Sequence, err)
+	}
+	if payload.State == "" {
+		return stableerr.Errorf("event %d status state is required", event.Sequence)
+	}
+	if status.ActiveAttempt != nil && payload.State != stateRunning {
+		return stableerr.Errorf("event %d updates run state to %q while attempt %q is active", event.Sequence, payload.State, status.ActiveAttempt.AttemptID)
+	}
+	if err := applyReplayedWorkflowStateEntry(status, event, payload.WorkflowStateEntry); err != nil {
+		return err
+	}
+	status.State = payload.State
+	return nil
+}
+
+func applyReplayedArtifactWritten(status *Status, event Event) error {
+	var payload artifactWrittenPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d artifact payload: %w", event.Sequence, err)
+	}
+	if err := validateArtifactEventRef(event, payload.Artifact); err != nil {
+		return err
+	}
+	status.Artifacts = append(status.Artifacts, payload.Artifact)
+	return nil
+}
+
+func applyReplayedAttemptStarted(status *Status, event Event) error {
+	var payload attemptStartedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d attempt.started payload: %w", event.Sequence, err)
+	}
+	routing := attemptStartRoutingFromFields(payload.ConsumeAttemptID, payload.RetryLineage, payload.SupersedeReason)
+	if err := validateReplayedAttemptStart(*status, event, payload, routing); err != nil {
+		return err
+	}
+	if err := applyReplayedWorkflowStateEntry(status, event, payload.WorkflowStateEntry); err != nil {
+		return err
+	}
+	if payload.ConsumedWorkflowLoopHardCapOverride != nil {
+		status.WorkflowLoop.PendingHardCapOverride = nil
+	}
+	status.Continued = nil
+	attempt := payload.Attempt
+	applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
+	status.ActiveAttempt = &attempt
+	status.Attempts = append(status.Attempts, attempt)
+	return nil
+}
+
+func validateReplayedAttemptStart(status Status, event Event, payload attemptStartedPayload, routing attemptStartRouting) error {
+	if status.State != stateRunning {
+		return stableerr.Errorf("event %d starts attempt while run state is %q, want %q", event.Sequence, status.State, stateRunning)
+	}
+	if status.ActiveAttempt != nil {
+		return stableerr.Errorf("event %d starts attempt %q while attempt %q is active", event.Sequence, payload.Attempt.AttemptID, status.ActiveAttempt.AttemptID)
+	}
+	if err := validateAttemptStartRouting(status, routing); err != nil {
+		return fmt.Errorf("event %d attempt routing: %w", event.Sequence, err)
+	}
+	if payload.ConsumedWorkflowLoopHardCapOverride != nil {
+		if payload.WorkflowStateEntry == nil {
+			return stableerr.Errorf("event %d consumes workflow loop hard cap override without workflow state entry", event.Sequence)
+		}
+		if err := validateWorkflowLoopHardCapOverrideConsumption(status, *payload.WorkflowStateEntry, *payload.ConsumedWorkflowLoopHardCapOverride); err != nil {
+			return fmt.Errorf("event %d workflow loop hard cap override consumption: %w", event.Sequence, err)
+		}
+	}
+	if err := validateStartedAttemptEvent(event, payload.Attempt, status.RunID); err != nil {
+		return err
+	}
+	if slices.ContainsFunc(status.Attempts, func(existing Attempt) bool {
+		return existing.AttemptID == payload.Attempt.AttemptID
+	}) {
+		return stableerr.Errorf("event %d duplicate attempt %q", event.Sequence, payload.Attempt.AttemptID)
+	}
+	return nil
+}
+
+func applyReplayedAttemptPrompted(status *Status, event Event) error {
+	var payload attemptPromptedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d attempt.prompted payload: %w", event.Sequence, err)
+	}
+	return updateReplayedActiveAttempt(status, event, payload.AttemptID, func(attempt *Attempt) error {
+		return applyAttemptPromptRef(*status, attempt, payload.AttemptID, payload.PromptRef)
+	})
+}
+
+func applyReplayedAttemptLogged(status *Status, event Event) error {
+	var payload attemptLoggedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d attempt.logged payload: %w", event.Sequence, err)
+	}
+	return updateReplayedActiveAttempt(status, event, payload.AttemptID, func(attempt *Attempt) error {
+		return applyAttemptLogRef(*status, attempt, payload.AttemptID, payload.LogRef)
+	})
+}
+
+func applyReplayedAttemptProcess(status *Status, event Event) error {
+	var payload attemptProcessPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d attempt.process_started payload: %w", event.Sequence, err)
+	}
+	return updateReplayedActiveAttempt(status, event, payload.AttemptID, func(attempt *Attempt) error {
+		return applyAttemptProcessMetadata(attempt, payload.AttemptID, payload.PID, payload.ProcessStartTime)
+	})
+}
+
+func applyReplayedAttemptFinished(status *Status, event Event) error {
+	var payload attemptFinishedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d %s payload: %w", event.Sequence, event.Type, err)
+	}
+	return finishReplayedActiveAttempt(status, event, payload, event.Type == eventAttemptRecovered)
+}
+
+func applyReplayedAttemptReported(status *Status, event Event) error {
+	var payload attemptReportedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d attempt.reported payload: %w", event.Sequence, err)
+	}
+	return reportReplayedActiveAttempt(status, event, payload)
+}
+
+func applyReplayedAttemptWarningEvent(status *Status, event Event) error {
+	var payload attemptWarningPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d attempt.warning payload: %w", event.Sequence, err)
+	}
+	return applyReplayedAttemptWarning(status, event, payload.Warning)
+}
+
+func validateReplayedReportIgnored(event Event) error {
+	var payload reportIgnoredPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d report.ignored payload: %w", event.Sequence, err)
+	}
+	if payload.Reason == "" {
+		return stableerr.Errorf("event %d report ignored reason is required", event.Sequence)
+	}
+	if payload.RunID != "" && payload.RunID != event.RunID {
+		return stableerr.Errorf("event %d report ignored run_id %q does not match event run_id %q", event.Sequence, payload.RunID, event.RunID)
+	}
+	return nil
+}
+
+func applyReplayedRunContinued(status *Status, event Event) error {
+	var payload runContinuedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d run.continued payload: %w", event.Sequence, err)
+	}
+	if err := validateRunContinuedPayload(*status, payload); err != nil {
+		return fmt.Errorf("event %d run.continued payload: %w", event.Sequence, err)
+	}
+	applyRunContinued(status, payload)
+	return nil
+}
+
+func applyReplayedWorkflowStepSkipped(status *Status, event Event) error {
+	var payload workflowStepSkippedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d workflow.step_skipped payload: %w", event.Sequence, err)
+	}
+	skipped, err := validateWorkflowStepSkippedPayload(*status, event, payload)
+	if err != nil {
+		return err
+	}
+	if err := applyReplayedWorkflowStateEntry(status, event, payload.WorkflowStateEntry); err != nil {
+		return err
+	}
+	applyAttemptOutcomeConsumption(status, event, payload.ConsumeAttemptID)
+	applyStepSkipped(status, skipped)
+	status.State = payload.State
+	status.RetryLineage = nil
+	status.Continued = nil
+	return nil
+}
+
+func applyReplayedWorkflowSoftCap(status *Status, event Event) error {
+	var payload workflowLoopSoftCapPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d workflow.loop_soft_cap payload: %w", event.Sequence, err)
+	}
+	if err := validateWorkflowLoopSoftCap(payload.Cap); err != nil {
+		return fmt.Errorf("event %d workflow.loop_soft_cap payload: %w", event.Sequence, err)
+	}
+	if payload.Cap.Workflow != status.Workflow {
+		return stableerr.Errorf("event %d workflow loop soft cap workflow %q does not match status workflow %q", event.Sequence, payload.Cap.Workflow, status.Workflow)
+	}
+	applyWorkflowLoopSoftCap(status, payload.Cap)
+	return nil
+}
+
+func applyReplayedWorkflowHardCap(status *Status, event Event) error {
+	var payload workflowLoopHardCapPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d workflow.loop_hard_cap payload: %w", event.Sequence, err)
+	}
+	if err := validateWorkflowLoopHardCap(payload.Cap); err != nil {
+		return fmt.Errorf("event %d workflow.loop_hard_cap payload: %w", event.Sequence, err)
+	}
+	if err := validateReplayedWorkflowHardCap(*status, event, payload); err != nil {
+		return err
+	}
+	applyWorkflowLoopHardCap(status, payload.Cap)
+	status.State = stateBlockedHuman
+	return nil
+}
+
+func validateReplayedWorkflowHardCap(status Status, event Event, payload workflowLoopHardCapPayload) error {
+	if payload.Cap.Workflow != status.Workflow {
+		return stableerr.Errorf("event %d workflow loop hard cap workflow %q does not match status workflow %q", event.Sequence, payload.Cap.Workflow, status.Workflow)
+	}
+	if payload.State != stateBlockedHuman {
+		return stableerr.Errorf("event %d workflow loop hard cap state = %q, want %q", event.Sequence, payload.State, stateBlockedHuman)
+	}
+	if status.ActiveAttempt != nil {
+		return stableerr.Errorf("event %d blocks workflow loop while attempt %q is active", event.Sequence, status.ActiveAttempt.AttemptID)
+	}
+	return nil
+}
+
+func applyReplayedWorkflowHardCapOverride(status *Status, event Event) error {
+	var payload workflowLoopHardCapOverridePayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return fmt.Errorf("event %d workflow.loop_hard_cap_override payload: %w", event.Sequence, err)
+	}
+	if err := validateWorkflowLoopHardCapOverride(payload.Override); err != nil {
+		return fmt.Errorf("event %d workflow.loop_hard_cap_override payload: %w", event.Sequence, err)
+	}
+	if err := validateReplayedWorkflowHardCapOverride(*status, event, payload); err != nil {
+		return err
+	}
+	applyWorkflowLoopHardCapOverride(status, payload.Override)
+	status.State = stateRunning
+	return nil
+}
+
+func validateReplayedWorkflowHardCapOverride(status Status, event Event, payload workflowLoopHardCapOverridePayload) error {
+	if payload.Override.Workflow != status.Workflow {
+		return stableerr.Errorf("event %d workflow loop hard cap override workflow %q does not match status workflow %q", event.Sequence, payload.Override.Workflow, status.Workflow)
+	}
+	if payload.State != stateRunning {
+		return stableerr.Errorf("event %d workflow loop hard cap override state = %q, want %q", event.Sequence, payload.State, stateRunning)
+	}
+	block := status.WorkflowLoop.HardCapBlock
+	if status.State != stateBlockedHuman || block == nil {
+		return stableerr.Errorf("event %d workflow loop hard cap override requires active hard-cap block", event.Sequence)
+	}
+	if block.Workflow != payload.Override.Workflow ||
+		block.BlockedState != payload.Override.TargetState ||
+		block.CurrentCount != payload.Override.CountBeforeOverride ||
+		block.ProspectiveCount != payload.Override.CountAfterOverride ||
+		block.Soft != payload.Override.Soft ||
+		block.Hard != payload.Override.Hard ||
+		block.Reason != payload.Override.Reason {
+		return stableerr.Errorf("event %d workflow loop hard cap override does not match active hard-cap block", event.Sequence)
+	}
+	return nil
 }
 
 func updateReplayedActiveAttempt(status *Status, event Event, attemptID string, update func(*Attempt) error) error {

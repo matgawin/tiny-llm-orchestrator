@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
@@ -54,63 +55,13 @@ func (s *Store) CreateContext(ctx context.Context, req CreateRunRequest) (*Run, 
 			_ = os.RemoveAll(tempDir)
 		}
 	}()
-	for _, dir := range artifactDirs() {
-		if err := os.Mkdir(filepath.Join(tempDir, dir), 0o750); err != nil {
-			return nil, fmt.Errorf("create run %q artifact directory %s: %w", runID, dir, err)
-		}
-	}
-	if err := os.Mkdir(filepath.Join(tempDir, configDirName), 0o750); err != nil {
-		return nil, fmt.Errorf("create run %q config directory: %w", runID, err)
-	}
-	if err := writeAtomic(filepath.Join(tempDir, followupsName), nil); err != nil {
-		return nil, fmt.Errorf("create run %q followups.md: %w", runID, err)
-	}
-	// Materialize the final per-run lock file in the temporary layout before
-	// publication; the runs-directory lock below owns publication itself.
-	lockFile, err := os.OpenFile(filepath.Join(tempDir, ".lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600) // #nosec G304,G703 -- lock path is scoped to a newly created temporary run directory.
-	if err != nil {
-		return nil, fmt.Errorf("create run %q lock: %w", runID, err)
-	}
-	if err := lockFile.Close(); err != nil {
-		return nil, fmt.Errorf("create run %q lock: %w", runID, err)
-	}
-
-	status := Status{
-		SchemaVersion: schemaVersion,
-		RunID:         runID,
-		Workflow:      req.Workflow,
-		State:         stateRunning,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		LastSequence:  1,
-		Artifacts:     []ArtifactRef{},
-		Attempts:      []Attempt{},
-		Warnings:      []AttemptWarning{},
-	}
-	var workflowEntry *WorkflowStateEntry
-	if req.InitialState != "" {
-		entry, err := nextWorkflowStateEntry(status, WorkflowStateEntryRequest{State: req.InitialState})
-		if err != nil {
-			return nil, err
-		}
-		workflowEntry = &entry
-		applyWorkflowStateEntry(&status, entry)
-	}
-	payload, err := marshalPayload(createRunPayload{
-		Workflow:           req.Workflow,
-		TaskSlug:           req.TaskSlug,
-		WorkflowStateEntry: workflowEntry,
-	})
-	if err != nil {
+	if err := initializeTempRunLayout(tempDir, runID); err != nil {
 		return nil, err
 	}
-	event := Event{
-		SchemaVersion: schemaVersion,
-		Sequence:      1,
-		Time:          now,
-		RunID:         runID,
-		Type:          eventRunCreated,
-		Payload:       payload,
+
+	status, event, err := initialRunState(runID, req, now)
+	if err != nil {
+		return nil, err
 	}
 	if err := writeInitialEventLog(filepath.Join(tempDir, eventsName), event); err != nil {
 		return nil, fmt.Errorf("run %q events: %w", runID, err)
@@ -151,6 +102,74 @@ func (s *Store) CreateContext(ctx context.Context, req CreateRunRequest) (*Run, 
 		Path:   runDir,
 		Status: status,
 		Events: []Event{event},
+	}, nil
+}
+
+func initializeTempRunLayout(tempDir, runID string) error {
+	for _, dir := range artifactDirs() {
+		if err := os.Mkdir(filepath.Join(tempDir, dir), 0o750); err != nil {
+			return fmt.Errorf("create run %q artifact directory %s: %w", runID, dir, err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(tempDir, configDirName), 0o750); err != nil {
+		return fmt.Errorf("create run %q config directory: %w", runID, err)
+	}
+	if err := writeAtomic(filepath.Join(tempDir, followupsName), nil); err != nil {
+		return fmt.Errorf("create run %q followups.md: %w", runID, err)
+	}
+	return createTempRunLock(tempDir, runID)
+}
+
+func createTempRunLock(tempDir, runID string) error {
+	// Materialize the final per-run lock file in the temporary layout before
+	// publication; the runs-directory lock below owns publication itself.
+	lockFile, err := os.OpenFile(filepath.Join(tempDir, ".lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600) // #nosec G304,G703 -- lock path is scoped to a newly created temporary run directory.
+	if err != nil {
+		return fmt.Errorf("create run %q lock: %w", runID, err)
+	}
+	if err := lockFile.Close(); err != nil {
+		return fmt.Errorf("create run %q lock: %w", runID, err)
+	}
+	return nil
+}
+
+func initialRunState(runID string, req CreateRunRequest, now time.Time) (Status, Event, error) {
+	status := Status{
+		SchemaVersion: schemaVersion,
+		RunID:         runID,
+		Workflow:      req.Workflow,
+		State:         stateRunning,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		LastSequence:  1,
+		Artifacts:     []ArtifactRef{},
+		Attempts:      []Attempt{},
+		Warnings:      []AttemptWarning{},
+	}
+	var workflowEntry *WorkflowStateEntry
+	if req.InitialState != "" {
+		entry, err := nextWorkflowStateEntry(status, WorkflowStateEntryRequest{State: req.InitialState})
+		if err != nil {
+			return Status{}, Event{}, err
+		}
+		workflowEntry = &entry
+		applyWorkflowStateEntry(&status, entry)
+	}
+	payload, err := marshalPayload(createRunPayload{
+		Workflow:           req.Workflow,
+		TaskSlug:           req.TaskSlug,
+		WorkflowStateEntry: workflowEntry,
+	})
+	if err != nil {
+		return Status{}, Event{}, err
+	}
+	return status, Event{
+		SchemaVersion: schemaVersion,
+		Sequence:      1,
+		Time:          now,
+		RunID:         runID,
+		Type:          eventRunCreated,
+		Payload:       payload,
 	}, nil
 }
 
