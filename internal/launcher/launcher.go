@@ -2,7 +2,6 @@ package launcher
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 
 	"go.uber.org/zap"
@@ -68,13 +68,13 @@ type Result struct {
 // LaunchNext launches the workflow-selected worker process for a run.
 func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
-		return Result{}, errors.New("context is required")
+		return Result{}, stableerr.New("context is required")
 	}
 	if opts.Root == "" {
-		return Result{}, errors.New("project root is required")
+		return Result{}, stableerr.New("project root is required")
 	}
 	if opts.RunID == "" {
-		return Result{}, errors.New("run id is required")
+		return Result{}, stableerr.New("run id is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -116,10 +116,10 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		}); err != nil {
 			return Result{}, err
 		}
-		return Result{RunID: opts.RunID, Attempt: latestOutcome}, fmt.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
+		return Result{RunID: opts.RunID, Attempt: latestOutcome}, stableerr.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
 	}
 	if decision.Kind != workflow.DecisionSelectStep && decision.Kind != workflow.DecisionRetryStep {
-		return Result{}, fmt.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
+		return Result{}, stableerr.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
 	}
 	step := loaded.Workflow.Steps[decision.Step]
 	at := normalizeTime(opts.Time)
@@ -143,7 +143,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 			if err != nil {
 				return Result{}, err
 			}
-			return Result{RunID: opts.RunID, Attempt: latestOutcome}, fmt.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
+			return Result{RunID: opts.RunID, Attempt: latestOutcome}, stableerr.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
 		}
 	}
 	attempt, _, err := loaded.Store.StartAttemptContext(ctx, opts.RunID, runstore.StartAttemptRequest{

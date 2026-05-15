@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
@@ -215,7 +216,7 @@ func TestCleanupStartedRunRemovesRunDirectory(t *testing.T) {
 		t.Fatalf("create partial run dir: %v", err)
 	}
 
-	cause := errors.New("artifact write failed")
+	cause := stableerr.New("artifact write failed")
 	err := cleanupStartedRun(runPath, cause)
 	if !errors.Is(err, cause) {
 		t.Fatalf("cleanup error = %v, want original cause", err)
@@ -230,7 +231,7 @@ func TestCleanupStartedRunReportsCleanupFailure(t *testing.T) {
 	writeRunStartFile(t, parentFile, "content\n")
 	runPath := filepath.Join(parentFile, "partial-run")
 
-	err := cleanupStartedRun(runPath, errors.New("artifact write failed"))
+	err := cleanupStartedRun(runPath, stableerr.New("artifact write failed"))
 	if err == nil {
 		t.Fatal("cleanupStartedRun returned nil error, want cleanup failure")
 	}

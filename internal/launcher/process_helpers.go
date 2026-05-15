@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func terminateProcessGroup(pid int) {
@@ -51,7 +51,7 @@ func processIdentityMatches(pid int, wantStartTime string) bool {
 
 func processStartIdentity(pid int) (string, error) {
 	if runtime.GOOS != "linux" {
-		return "", fmt.Errorf("process identity requires linux procfs, got %s", runtime.GOOS)
+		return "", stableerr.Errorf("process identity requires linux procfs, got %s", runtime.GOOS)
 	}
 	content, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat") // #nosec G304 -- pid is numeric and scoped to procfs.
 	if err != nil {
@@ -63,12 +63,12 @@ func processStartIdentity(pid int) (string, error) {
 func parseProcStatStartTime(stat string) (string, error) {
 	end := strings.LastIndex(stat, ") ")
 	if end == -1 {
-		return "", errors.New("parse process identity: missing command field")
+		return "", stableerr.New("parse process identity: missing command field")
 	}
 	fields := strings.Fields(stat[end+2:])
 	const startTimeIndexAfterCommand = 19
 	if len(fields) <= startTimeIndexAfterCommand {
-		return "", errors.New("parse process identity: missing starttime field")
+		return "", stableerr.New("parse process identity: missing starttime field")
 	}
 	if _, err := strconv.ParseUint(fields[startTimeIndexAfterCommand], 10, 64); err != nil {
 		return "", fmt.Errorf("parse process identity starttime: %w", err)

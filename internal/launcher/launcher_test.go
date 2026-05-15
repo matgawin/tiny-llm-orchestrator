@@ -2,7 +2,6 @@ package launcher
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +17,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -600,7 +600,7 @@ func scheduleReadyReportWhenActiveAfter(t *testing.T, store *runstore.Store, run
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
-		done <- errors.New("attempt did not become active")
+		done <- stableerr.New("attempt did not become active")
 	}()
 	return func() {
 		t.Helper()

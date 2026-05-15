@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
@@ -23,7 +24,7 @@ func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return initFlagError(cmd, stderr, fmt.Errorf("unexpected argument %q", args[0]))
+				return initFlagError(cmd, stderr, stableerr.Errorf("unexpected argument %q", args[0]))
 			}
 			return executeInit(opts, stderr)
 		},

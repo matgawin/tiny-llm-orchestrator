@@ -1,11 +1,12 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -234,7 +235,7 @@ type SandboxCommand struct {
 func (c *SandboxCommand) UnmarshalYAML(data []byte) error {
 	var shellCommand string
 	if err := yaml.Unmarshal(data, &shellCommand); err == nil {
-		return errors.New("sandbox.command must use argv; shell-string commands are not supported")
+		return stableerr.New("sandbox.command must use argv; shell-string commands are not supported")
 	}
 	type sandboxCommand SandboxCommand
 	var decoded sandboxCommand

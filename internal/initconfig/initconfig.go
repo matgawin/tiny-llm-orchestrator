@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -39,10 +41,10 @@ type Options struct {
 // Run creates or previews the Tiny Orc project scaffold.
 func Run(opts Options) error {
 	if opts.Root == "" {
-		return errors.New("project root is required")
+		return stableerr.New("project root is required")
 	}
 	if opts.DryRun && opts.Yes {
-		return errors.New("--dry-run and --yes cannot be used together")
+		return stableerr.New("--dry-run and --yes cannot be used together")
 	}
 	if opts.Stdout == nil {
 		opts.Stdout = io.Discard
@@ -163,7 +165,7 @@ func (r runner) planFile(item scaffoldFile) (plannedAction, error) {
 			return noopAction("would prompt before overwriting", item.path), nil
 		}
 		if r.yes {
-			return plannedAction{}, fmt.Errorf("%s already exists with different content; rerun without --yes to review the overwrite prompt", item.path)
+			return plannedAction{}, stableerr.Errorf("%s already exists with different content; rerun without --yes to review the overwrite prompt", item.path)
 		}
 		ok, err := r.confirm("Overwrite " + item.path + "?")
 		if err != nil {
@@ -202,7 +204,7 @@ func (r runner) planGitignore() (plannedAction, error) {
 	case targetExists:
 		analysis := analyzeIgnoreContent(string(target.content), runsIgnoreEntry)
 		if analysis.hasBroadOrcIgnore {
-			return plannedAction{}, fmt.Errorf("%s ignores all persistent .orc config with %q; replace it with %s and rerun init", gitignoreName, analysis.broadPattern, runsIgnoreEntry)
+			return plannedAction{}, stableerr.Errorf("%s ignores all persistent .orc config with %q; replace it with %s and rerun init", gitignoreName, analysis.broadPattern, runsIgnoreEntry)
 		}
 		if analysis.hasRunsEntry {
 			return noopAction("exists", entryTarget), nil
@@ -244,7 +246,7 @@ func (r runner) planRuntimeDir() (plannedAction, error) {
 	switch {
 	case err == nil:
 		if !info.IsDir() {
-			return plannedAction{}, fmt.Errorf("%s already exists and is not a directory", runsDirPath)
+			return plannedAction{}, stableerr.Errorf("%s already exists and is not a directory", runsDirPath)
 		}
 		return noopAction("exists", runsDirPath), nil
 	case errors.Is(err, os.ErrNotExist):
@@ -331,7 +333,7 @@ func writeNewFile(path string, content []byte) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- path is resolved under the selected project root.
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("%s changed during init; rerun init", path)
+			return stableerr.Errorf("%s changed during init; rerun init", path)
 		}
 		return err
 	}
@@ -348,7 +350,7 @@ func writeFileIfUnchanged(path string, expected, next []byte) error {
 		return err
 	}
 	if !bytes.Equal(current, expected) {
-		return fmt.Errorf("%s changed during init; rerun init", path)
+		return stableerr.Errorf("%s changed during init; rerun init", path)
 	}
 	return os.WriteFile(path, next, 0o600) // #nosec G703 -- path is resolved under the selected project root.
 }
@@ -427,7 +429,7 @@ func (r runner) targetPath(relPath string) (string, error) {
 func cleanScaffoldPath(relPath string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(relPath))
 	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
-		return "", fmt.Errorf("scaffold path %q must stay under project root", relPath)
+		return "", stableerr.Errorf("scaffold path %q must stay under project root", relPath)
 	}
 	return clean, nil
 }
@@ -506,7 +508,7 @@ func validateExistingAncestor(realRoot, containmentRoot, target string) error {
 		}
 		next := filepath.Dir(ancestor)
 		if next == ancestor {
-			return fmt.Errorf("no existing ancestor for %s", target)
+			return stableerr.Errorf("no existing ancestor for %s", target)
 		}
 		ancestor = next
 	}
@@ -518,7 +520,7 @@ func validateUnderRoot(realRoot, path string) error {
 		return fmt.Errorf("resolve path relative to project root: %w", err)
 	}
 	if rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return errors.New("path must not escape project root")
+		return stableerr.New("path must not escape project root")
 	}
 	return nil
 }

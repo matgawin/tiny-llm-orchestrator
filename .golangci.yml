@@ -35,6 +35,7 @@ linters:
     - exhaustive      # Check enum-like switch statements cover all values
     - contextcheck    # Check function whether use a non-inherited context
     - noctx           # Check for contextless blocking calls
+    - err113          # Enforce stable error values instead of dynamic construction
 
   settings:
     errcheck:

@@ -3,7 +3,6 @@ package runskip
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
@@ -38,24 +38,24 @@ type Result struct {
 // currently selected workflow step.
 func Skip(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
-		return Result{}, errors.New("context is required")
+		return Result{}, stableerr.New("context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
 	if opts.Root == "" {
-		return Result{}, errors.New("project root is required")
+		return Result{}, stableerr.New("project root is required")
 	}
 	if opts.RunID == "" {
-		return Result{}, errors.New("run id is required")
+		return Result{}, stableerr.New("run id is required")
 	}
 	opts.StepID = strings.TrimSpace(opts.StepID)
 	if opts.StepID == "" {
-		return Result{}, errors.New("step id is required")
+		return Result{}, stableerr.New("step id is required")
 	}
 	opts.Reason = strings.TrimSpace(opts.Reason)
 	if opts.Reason == "" {
-		return Result{}, errors.New("skip reason is required")
+		return Result{}, stableerr.New("skip reason is required")
 	}
 	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
@@ -80,31 +80,31 @@ func Skip(ctx context.Context, opts Options) (Result, error) {
 
 func validateSkip(workflowConfig config.Workflow, status runstore.Status, stepID string) (runstore.StepSkipTransition, error) {
 	if status.ActiveAttempt != nil {
-		return runstore.StepSkipTransition{}, fmt.Errorf("run %q has active attempt %q; cannot skip step", status.RunID, status.ActiveAttempt.AttemptID)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("run %q has active attempt %q; cannot skip step", status.RunID, status.ActiveAttempt.AttemptID)
 	}
 	switch status.State {
 	case workflow.RunStatusReadyForHuman, workflow.RunStatusBlockedForHuman, workflow.RunStatusCancelled:
-		return runstore.StepSkipTransition{}, fmt.Errorf("run %q is terminal (%s); cannot skip step", status.RunID, status.State)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("run %q is terminal (%s); cannot skip step", status.RunID, status.State)
 	}
 	decision, err := workflow.Evaluate(workflowConfig, runstate.WorkflowState(status))
 	if err != nil {
 		return runstore.StepSkipTransition{}, fmt.Errorf("evaluate run %q: %w", status.RunID, err)
 	}
 	if decision.Kind != workflow.DecisionSelectStep {
-		return runstore.StepSkipTransition{}, fmt.Errorf("run %q decision is %s; only a selected step can be skipped", status.RunID, decision.Kind)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("run %q decision is %s; only a selected step can be skipped", status.RunID, decision.Kind)
 	}
 	if decision.Step != stepID {
-		return runstore.StepSkipTransition{}, fmt.Errorf("step %q is not selected for run %q; selected step is %q", stepID, status.RunID, decision.Step)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("step %q is not selected for run %q; selected step is %q", stepID, status.RunID, decision.Step)
 	}
 	step, ok := workflowConfig.Steps[stepID]
 	if !ok {
-		return runstore.StepSkipTransition{}, fmt.Errorf("step %q is not declared in workflow %q", stepID, workflowConfig.Name)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("step %q is not declared in workflow %q", stepID, workflowConfig.Name)
 	}
 	if !step.Skippable {
-		return runstore.StepSkipTransition{}, fmt.Errorf("step %q is not skippable", stepID)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("step %q is not skippable", stepID)
 	}
 	if !declaresSkipOutcome(step) {
-		return runstore.StepSkipTransition{}, fmt.Errorf("step %q does not declare %s", stepID, config.SystemSkipPair)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("step %q does not declare %s", stepID, config.SystemSkipPair)
 	}
 	skipDecision, err := workflow.Evaluate(workflowConfig, workflow.RunState{
 		Status:       workflow.RunStatusRunning,
@@ -141,9 +141,9 @@ func validateSkip(workflowConfig config.Workflow, status runstore.Status, stepID
 			},
 		}, nil
 	case workflow.DecisionRetryStep, workflow.DecisionWaitActiveAttempt:
-		return runstore.StepSkipTransition{}, fmt.Errorf("step %q %s transition produced %s; skip cannot be retried or wait", stepID, config.SystemSkipPair, skipDecision.Kind)
+		return runstore.StepSkipTransition{}, stableerr.Errorf("step %q %s transition produced %s; skip cannot be retried or wait", stepID, config.SystemSkipPair, skipDecision.Kind)
 	}
-	return runstore.StepSkipTransition{}, fmt.Errorf("step %q %s transition produced %s; skip cannot be retried or wait", stepID, config.SystemSkipPair, skipDecision.Kind)
+	return runstore.StepSkipTransition{}, stableerr.Errorf("step %q %s transition produced %s; skip cannot be retried or wait", stepID, config.SystemSkipPair, skipDecision.Kind)
 }
 
 func declaresSkipOutcome(step config.Step) bool {

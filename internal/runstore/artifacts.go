@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // WriteArtifact persists an artifact under the run directory and records it in the event log.
@@ -29,7 +31,7 @@ func (s *Store) WriteArtifactFromFile(runID string, artifact Artifact, sourcePat
 // WriteArtifactFromFileContext persists an artifact by streaming content from sourcePath unless ctx is canceled before commit.
 func (s *Store) WriteArtifactFromFileContext(ctx context.Context, runID string, artifact Artifact, sourcePath string) (ArtifactRef, error) {
 	if sourcePath == "" {
-		return ArtifactRef{}, errors.New("artifact source path is required")
+		return ArtifactRef{}, stableerr.New("artifact source path is required")
 	}
 	return s.writeArtifactWithStage(ctx, runID, artifact, nil, func(path string, artifact Artifact) (stagedArtifact, error) {
 		return stageArtifactFromFile(path, artifact, sourcePath)
@@ -44,7 +46,7 @@ func (s *Store) WriteArtifactIfState(runID, expectedState string, artifact Artif
 // WriteArtifactIfStateContext persists an artifact only while the run is in the expected state unless ctx is canceled before commit.
 func (s *Store) WriteArtifactIfStateContext(ctx context.Context, runID, expectedState string, artifact Artifact) (ArtifactRef, error) {
 	if expectedState == "" {
-		return ArtifactRef{}, errors.New("expected state is required")
+		return ArtifactRef{}, stableerr.New("expected state is required")
 	}
 	return s.writeArtifact(ctx, runID, artifact, func(run *Run) error {
 		if run.Status.State != expectedState {
@@ -60,7 +62,7 @@ func (s *Store) writeArtifact(ctx context.Context, runID string, artifact Artifa
 
 func (s *Store) writeArtifactWithStage(ctx context.Context, runID string, artifact Artifact, validate func(*Run) error, stage func(string, Artifact) (stagedArtifact, error)) (ArtifactRef, error) {
 	if ctx == nil {
-		return ArtifactRef{}, errors.New("context is required")
+		return ArtifactRef{}, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return ArtifactRef{}, err
@@ -166,7 +168,7 @@ func (s *Store) ReadArtifact(runID string, ref ArtifactRef) ([]byte, error) {
 // ReadArtifactContext reads a persisted artifact unless ctx is canceled before the run lock is acquired.
 func (s *Store) ReadArtifactContext(ctx context.Context, runID string, ref ArtifactRef) ([]byte, error) {
 	if ctx == nil {
-		return nil, errors.New("context is required")
+		return nil, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return nil, err
@@ -201,13 +203,13 @@ func (s *Store) OpenArtifactAppend(runID string, ref ArtifactRef) (*os.File, err
 // OpenArtifactAppendContext opens a recorded artifact for append unless ctx is canceled before the run lock is acquired.
 func (s *Store) OpenArtifactAppendContext(ctx context.Context, runID string, ref ArtifactRef) (*os.File, error) {
 	if ctx == nil {
-		return nil, errors.New("context is required")
+		return nil, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return nil, err
 	}
 	if ref.Kind != KindLog {
-		return nil, fmt.Errorf("artifact %s kind %q, want %q", ref.Path, ref.Kind, KindLog)
+		return nil, stableerr.Errorf("artifact %s kind %q, want %q", ref.Path, ref.Kind, KindLog)
 	}
 	var file *os.File
 	err := s.withRunLockContext(ctx, runID, func() error {
@@ -223,7 +225,7 @@ func (s *Store) OpenArtifactAppendContext(ctx context.Context, runID string, ref
 			return err
 		}
 		if run.Status.ActiveAttempt == nil || run.Status.ActiveAttempt.LogRef == nil || *run.Status.ActiveAttempt.LogRef != ref {
-			return fmt.Errorf("artifact %s is not the current active attempt log for run %q", ref.Path, runID)
+			return stableerr.Errorf("artifact %s is not the current active attempt log for run %q", ref.Path, runID)
 		}
 		opened, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600) // #nosec G304,G703 -- path is scoped to the validated run directory and opened without following final-component symlinks.
 		if err != nil {
@@ -255,7 +257,7 @@ func resolveRecordedArtifactPath(run *Run, ref ArtifactRef) (string, error) {
 		return "", err
 	}
 	if !slices.Contains(run.Status.Artifacts, ref) {
-		return "", fmt.Errorf("artifact %s is not recorded for run %q", ref.Path, run.ID)
+		return "", stableerr.Errorf("artifact %s is not recorded for run %q", ref.Path, run.ID)
 	}
 	if err := validateArtifactParentDir(run.Path, ref.Path); err != nil {
 		return "", err
@@ -288,10 +290,10 @@ func validateRecordedArtifactRef(status Status, ref ArtifactRef, kind ArtifactKi
 		return err
 	}
 	if ref.Kind != kind {
-		return fmt.Errorf("artifact %s kind %q, want %q", ref.Path, ref.Kind, kind)
+		return stableerr.Errorf("artifact %s kind %q, want %q", ref.Path, ref.Kind, kind)
 	}
 	if !slices.Contains(status.Artifacts, ref) {
-		return fmt.Errorf("artifact %s is not recorded for run %q", ref.Path, status.RunID)
+		return stableerr.Errorf("artifact %s is not recorded for run %q", ref.Path, status.RunID)
 	}
 	return nil
 }
@@ -308,7 +310,7 @@ func validateArtifactRef(ref ArtifactRef, eventSequence int) error {
 		return err
 	}
 	if eventSequence > 0 && ref.EventSequence != eventSequence {
-		return fmt.Errorf("event_sequence %d does not match", ref.EventSequence)
+		return stableerr.Errorf("event_sequence %d does not match", ref.EventSequence)
 	}
 	if err := validateArtifactPathForKind(ref); err != nil {
 		return err
@@ -319,11 +321,11 @@ func validateArtifactRef(ref ArtifactRef, eventSequence int) error {
 func validateArtifactPathForKind(ref ArtifactRef) error {
 	spec, ok := artifactSpec(ref.Kind)
 	if !ok {
-		return fmt.Errorf("unsupported artifact kind %q", ref.Kind)
+		return stableerr.Errorf("unsupported artifact kind %q", ref.Kind)
 	}
 	if spec.fixedPath != "" {
 		if ref.Path != spec.fixedPath {
-			return fmt.Errorf("artifact path %q does not match kind %q", ref.Path, ref.Kind)
+			return stableerr.Errorf("artifact path %q does not match kind %q", ref.Path, ref.Kind)
 		}
 		return nil
 	}
@@ -335,7 +337,7 @@ func validateArtifactWriteAllowed(existing []ArtifactRef, kind ArtifactKind, pat
 	case KindTaskContext, KindTaskSnapshot:
 		for _, ref := range existing {
 			if ref.Kind == kind && ref.Path == path {
-				return fmt.Errorf("artifact %s for kind %q has already been written", path, kind)
+				return stableerr.Errorf("artifact %s for kind %q has already been written", path, kind)
 			}
 		}
 	case KindReport, KindPrompt, KindLog, KindSnapshot, KindSummary, KindFollowup:
@@ -346,11 +348,11 @@ func validateArtifactWriteAllowed(existing []ArtifactRef, kind ArtifactKind, pat
 func validateNumberedArtifactPath(ref ArtifactRef, dir, ext string) error {
 	prefix := fmt.Sprintf("%s/%06d-", dir, ref.EventSequence)
 	if !strings.HasPrefix(ref.Path, prefix) || !strings.HasSuffix(ref.Path, ext) {
-		return fmt.Errorf("artifact path %q does not match kind %q", ref.Path, ref.Kind)
+		return stableerr.Errorf("artifact path %q does not match kind %q", ref.Path, ref.Kind)
 	}
 	name := strings.TrimPrefix(ref.Path, dir+"/")
 	if strings.Contains(name, "/") {
-		return fmt.Errorf("artifact path %q does not match kind %q", ref.Path, ref.Kind)
+		return stableerr.Errorf("artifact path %q does not match kind %q", ref.Path, ref.Kind)
 	}
 	return nil
 }

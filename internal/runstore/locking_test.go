@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func TestStartAttemptAllowsOnlyOneConcurrentActiveAttempt(t *testing.T) {
@@ -304,7 +305,7 @@ func TestReadArtifactWaitsForRunLock(t *testing.T) {
 	go func() {
 		content, err := store.ReadArtifact(run.ID, ref)
 		if err == nil && string(content) != testReportContent {
-			err = fmt.Errorf("content = %q, want report", string(content))
+			err = stableerr.Errorf("content = %q, want report", string(content))
 		}
 		readDone <- err
 	}()

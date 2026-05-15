@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"tiny-llm-orchestrator/orc/internal/launcher"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func newWorkerCommand(stdout, stderr io.Writer) *cobra.Command {
@@ -40,12 +41,12 @@ func newWorkerLaunchNextCommand(stdout, stderr io.Writer) *cobra.Command {
 				if _, err := fmt.Fprintf(stderr, "%s worker launch-next: requires <run-id>\n", appName); err != nil {
 					return err
 				}
-				return fmt.Errorf("worker launch-next requires run id")
+				return stableerr.Errorf("worker launch-next requires run id")
 			}
 			if _, err := fmt.Fprintf(stderr, "%s worker launch-next: accepts exactly one <run-id>\n", appName); err != nil {
 				return err
 			}
-			return fmt.Errorf("worker launch-next accepts exactly one run id")
+			return stableerr.Errorf("worker launch-next accepts exactly one run id")
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executeWorkerLaunchNext(args[0], stdout, stderr)

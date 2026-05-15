@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"tiny-llm-orchestrator/orc/internal/progress"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func newProgressCommand(stdout, stderr io.Writer) *cobra.Command {
@@ -51,7 +52,7 @@ func executeProgress(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 		Message:   message,
 	}
 	if req.RunID == "" || req.StepID == "" || req.AttemptID == "" || req.Token == "" {
-		return progressFlagError(cmd, stderr, errors.New("ORC_RUN_ID, ORC_STEP_ID, ORC_ATTEMPT_ID, and ORC_PROGRESS_TOKEN must be set when ORC_PROGRESS_SOCKET is set"))
+		return progressFlagError(cmd, stderr, stableerr.New("ORC_RUN_ID, ORC_STEP_ID, ORC_ATTEMPT_ID, and ORC_PROGRESS_TOKEN must be set when ORC_PROGRESS_SOCKET is set"))
 	}
 	resp, err := progress.Send(socketPath, req)
 	if err != nil {
@@ -71,9 +72,9 @@ func executeProgress(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 		if resp.Error == "" {
 			resp.Error = "progress listener rejected the update"
 		}
-		return progressFlagError(cmd, stderr, errors.New(resp.Error))
+		return progressFlagError(cmd, stderr, stableerr.New(resp.Error))
 	default:
-		return progressFlagError(cmd, stderr, fmt.Errorf("progress listener returned unknown status %q", resp.Status))
+		return progressFlagError(cmd, stderr, stableerr.Errorf("progress listener returned unknown status %q", resp.Status))
 	}
 }
 
@@ -82,7 +83,7 @@ func parseProgressMessage(args []string) (message string, help bool, err error) 
 		return "", true, nil
 	}
 	if len(args) == 0 {
-		return "", false, errors.New("requires <message>")
+		return "", false, stableerr.New("requires <message>")
 	}
 	words := make([]string, 0, len(args))
 	allowFlags := false
@@ -92,12 +93,12 @@ func parseProgressMessage(args []string) (message string, help bool, err error) 
 			continue
 		}
 		if !allowFlags && strings.HasPrefix(arg, "-") {
-			return "", false, fmt.Errorf("unknown flag %q; use -- before a message word that starts with '-'", arg)
+			return "", false, stableerr.Errorf("unknown flag %q; use -- before a message word that starts with '-'", arg)
 		}
 		words = append(words, arg)
 	}
 	if len(words) == 0 {
-		return "", false, errors.New("requires <message>")
+		return "", false, stableerr.New("requires <message>")
 	}
 	return strings.Join(words, " "), false, nil
 }

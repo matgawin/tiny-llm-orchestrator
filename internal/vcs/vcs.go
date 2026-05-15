@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -73,7 +74,7 @@ func InspectRefresh(ctx context.Context, opts Options) (Snapshot, error) {
 // RecordPostRun writes a post-run VCS snapshot artifact for an existing run.
 func RecordPostRun(ctx context.Context, store *runstore.Store, runID string, opts Options) (runstore.ArtifactRef, Snapshot, error) {
 	if store == nil {
-		return runstore.ArtifactRef{}, Snapshot{}, errors.New("run store is required")
+		return runstore.ArtifactRef{}, Snapshot{}, stableerr.New("run store is required")
 	}
 	snapshot, err := InspectPostRun(ctx, opts)
 	if err != nil {
@@ -100,7 +101,7 @@ func WriteSnapshot(ctx context.Context, store *runstore.Store, runID, name strin
 
 func inspect(ctx context.Context, opts Options, phase string) (Snapshot, error) {
 	if opts.Root == "" {
-		return Snapshot{}, errors.New("project root is required")
+		return Snapshot{}, stableerr.New("project root is required")
 	}
 	env := opts.Env
 	if env == nil {
@@ -185,7 +186,7 @@ func inspectGit(ctx context.Context, root string, env []string, phase string) (S
 
 func runCommand(ctx context.Context, root string, env, command []string) (string, error) {
 	if len(command) == 0 {
-		return "", errors.New("command is required")
+		return "", stableerr.New("command is required")
 	}
 	executable, err := lookPathEnv(command[0], env)
 	if err != nil {

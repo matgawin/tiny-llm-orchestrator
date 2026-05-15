@@ -13,6 +13,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
@@ -157,7 +158,7 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 	err = &runstore.ReportTargetError{
 		RunID:  run.ID,
 		Reason: "report does not target current active attempt",
-		Err:    errors.New("run active attempt changed"),
+		Err:    stableerr.New("run active attempt changed"),
 	}
 	ignored, result := recordTargetRaceAsIgnored(context.Background(), store, report, time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC), err)
 	if !ignored {

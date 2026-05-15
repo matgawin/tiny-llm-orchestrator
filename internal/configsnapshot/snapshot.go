@@ -14,6 +14,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
 
@@ -27,7 +28,7 @@ const (
 // BuildInitial returns the version 1 run config snapshot files for project.
 func BuildInitial(project *config.Project, workflowName string, at time.Time) (runstore.ConfigSnapshot, error) {
 	if project == nil {
-		return runstore.ConfigSnapshot{}, fmt.Errorf("project config is required")
+		return runstore.ConfigSnapshot{}, stableerr.Errorf("project config is required")
 	}
 	resolved, err := marshalResolved(project)
 	if err != nil {
@@ -47,13 +48,13 @@ func BuildInitial(project *config.Project, workflowName string, at time.Time) (r
 // BuildRefresh returns the next run config snapshot files for an explicit refresh.
 func BuildRefresh(project *config.Project, workflowName string, version int, source string, vcsSnapshot vcs.Snapshot, at time.Time) (runstore.ConfigSnapshot, error) {
 	if project == nil {
-		return runstore.ConfigSnapshot{}, fmt.Errorf("project config is required")
+		return runstore.ConfigSnapshot{}, stableerr.Errorf("project config is required")
 	}
 	if version <= 1 {
-		return runstore.ConfigSnapshot{}, fmt.Errorf("refresh config snapshot version = %d, want > 1", version)
+		return runstore.ConfigSnapshot{}, stableerr.Errorf("refresh config snapshot version = %d, want > 1", version)
 	}
 	if source == "" {
-		return runstore.ConfigSnapshot{}, fmt.Errorf("refresh config snapshot source is required")
+		return runstore.ConfigSnapshot{}, stableerr.Errorf("refresh config snapshot source is required")
 	}
 	versionDir := fmt.Sprintf("%06d", version)
 	resolved, err := marshalResolved(project)

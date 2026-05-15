@@ -10,6 +10,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/report"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func newReportCommand(stdout, stderr io.Writer) *cobra.Command {
@@ -27,7 +28,7 @@ Use a JSON report file or direct report flags. JSON input is validated with stri
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return reportFlagError(cmd, stderr, fmt.Errorf("unexpected argument %q", args[0]))
+				return reportFlagError(cmd, stderr, stableerr.Errorf("unexpected argument %q", args[0]))
 			}
 			if len(args) == 0 && noReportFlagsChanged(cmd) {
 				return cmd.Help()

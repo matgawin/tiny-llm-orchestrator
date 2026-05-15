@@ -19,6 +19,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/sandbox"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 
 	"go.uber.org/zap"
@@ -113,7 +114,7 @@ func (r *workerRunner) selectCommand(ctx context.Context) (runstore.Attempt, err
 		r.promptMode = runtimePromptDeliveryStdin
 	}
 	if r.command[0] == "" {
-		err := errors.New("worker command is required")
+		err := stableerr.New("worker command is required")
 		return r.finishPreStartContext(ctx, exitStateInvalidCommand, runstore.ArtifactRef{}, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -125,26 +126,26 @@ func (r *workerRunner) selectCommand(ctx context.Context) (runstore.Attempt, err
 func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 	step, ok := r.loaded.Workflow.Steps[r.attempt.StepID]
 	if !ok {
-		return nil, "", fmt.Errorf("step %q is not configured", r.attempt.StepID)
+		return nil, "", stableerr.Errorf("step %q is not configured", r.attempt.StepID)
 	}
 	runtimeID := r.loaded.Workflow.EffectiveRuntime(step)
 	if runtimeID == "" {
-		return nil, "", fmt.Errorf("step %q has no effective runtime", r.attempt.StepID)
+		return nil, "", stableerr.Errorf("step %q has no effective runtime", r.attempt.StepID)
 	}
 	runtime, ok := r.loaded.Project.Runtimes[runtimeID]
 	if !ok {
-		return nil, "", fmt.Errorf("step %q references missing runtime %q", r.attempt.StepID, runtimeID)
+		return nil, "", stableerr.Errorf("step %q references missing runtime %q", r.attempt.StepID, runtimeID)
 	}
 	promptMode := runtime.Prompt.Delivery
 	if promptMode != runtimePromptDeliveryStdin && promptMode != runtimePromptDeliveryFile {
-		return nil, "", fmt.Errorf("runtime %q prompt.delivery %q is unsupported by launcher", runtimeID, promptMode)
+		return nil, "", stableerr.Errorf("runtime %q prompt.delivery %q is unsupported by launcher", runtimeID, promptMode)
 	}
 	sandboxMode := r.loaded.Project.Config.Sandbox != nil && verifyWorkerRepoSandbox(r.loaded.Project.Root) == nil
 	if sandboxMode && !runtime.Sandbox.Supported {
-		return nil, "", fmt.Errorf("runtime %q does not support sandbox worker launches", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q does not support sandbox worker launches", runtimeID)
 	}
 	if !sandboxMode && runtime.Sandbox.Required {
-		return nil, "", fmt.Errorf("runtime %q requires sandbox worker launch but Orc sandbox markers are not verified", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q requires sandbox worker launch but Orc sandbox markers are not verified", runtimeID)
 	}
 
 	values := runtimePlaceholderValues{
@@ -157,23 +158,23 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 		runID:      r.loaded.Run.ID,
 	}
 	if runtime.Model.Required && values.model == "" {
-		return nil, "", fmt.Errorf("runtime %q requires a model but no effective model resolved", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q requires a model but no effective model resolved", runtimeID)
 	}
 	if values.model != "" && !runtime.Model.Supported {
-		return nil, "", fmt.Errorf("runtime %q does not support model arguments", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q does not support model arguments", runtimeID)
 	}
 	if runtime.Reasoning.Required && values.reasoning == "" {
-		return nil, "", fmt.Errorf("runtime %q requires reasoning but no effective reasoning resolved", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q requires reasoning but no effective reasoning resolved", runtimeID)
 	}
 	if values.reasoning != "" && !runtime.Reasoning.Supported {
-		return nil, "", fmt.Errorf("runtime %q does not support reasoning arguments", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q does not support reasoning arguments", runtimeID)
 	}
 	runtimeDirs := r.loaded.Workflow.EffectiveRuntimeDirs(step)
 	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
-		return nil, "", fmt.Errorf("runtime %q does not support runtime_dirs", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q does not support runtime_dirs", runtimeID)
 	}
 	if len(runtimeDirs) > 0 && len(runtime.Directories.Args) == 0 {
-		return nil, "", fmt.Errorf("runtime %q directories.args are required for runtime_dirs", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q directories.args are required for runtime_dirs", runtimeID)
 	}
 	if sandboxMode {
 		if err := r.verifySandboxRuntimeDirs(runtimeID, runtimeDirs); err != nil {
@@ -181,7 +182,7 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 		}
 	}
 	if promptMode == runtimePromptDeliveryFile && values.promptFile == "" {
-		return nil, "", fmt.Errorf("runtime %q prompt.delivery=file requires a persisted prompt artifact path", runtimeID)
+		return nil, "", stableerr.Errorf("runtime %q prompt.delivery=file requires a persisted prompt artifact path", runtimeID)
 	}
 
 	command := []string{runtime.Command.Executable}
@@ -238,7 +239,7 @@ func (r *workerRunner) verifySandboxRuntimeDirs(runtimeID string, runtimeDirs []
 func activeSandboxRuntimeDirCoverage() ([]string, error) {
 	value := os.Getenv(sandbox.RuntimeDirCoverageEnv)
 	if value == "" {
-		return nil, fmt.Errorf("active sandbox runtime_dir coverage marker %s is not set", sandbox.RuntimeDirCoverageEnv)
+		return nil, stableerr.Errorf("active sandbox runtime_dir coverage marker %s is not set", sandbox.RuntimeDirCoverageEnv)
 	}
 	var targets []string
 	if err := json.Unmarshal([]byte(value), &targets); err != nil {
@@ -279,7 +280,7 @@ func pathCoveredBy(path, root string) bool {
 }
 
 func runtimeDirSandboxCoverageError(stepID, runtimeID, original, resolved, reason string) error {
-	return fmt.Errorf("runtime_dir sandbox coverage error for step %q runtime %q: runtime_dirs value %q resolved to %q: %s", stepID, runtimeID, original, resolved, reason)
+	return stableerr.Errorf("runtime_dir sandbox coverage error for step %q runtime %q: runtime_dirs value %q resolved to %q: %s", stepID, runtimeID, original, resolved, reason)
 }
 
 type runtimePlaceholderValues struct {
@@ -317,15 +318,15 @@ func substituteRuntimeArgPlaceholders(arg string, values runtimePlaceholderValue
 	for _, placeholder := range runtimeArgPlaceholderRegex.FindAllString(arg, -1) {
 		value, ok := runtimePlaceholderValue(placeholder, values)
 		if !ok {
-			return "", fmt.Errorf("unknown placeholder %s", placeholder)
+			return "", stableerr.Errorf("unknown placeholder %s", placeholder)
 		}
 		if value == "" {
-			return "", fmt.Errorf("placeholder %s has no value", placeholder)
+			return "", stableerr.Errorf("placeholder %s has no value", placeholder)
 		}
 		result = strings.ReplaceAll(result, placeholder, value)
 	}
 	if strings.ContainsAny(runtimeArgPlaceholderRegex.ReplaceAllString(arg, ""), "{}") {
-		return "", errors.New("malformed placeholder syntax")
+		return "", stableerr.New("malformed placeholder syntax")
 	}
 	return result, nil
 }
@@ -666,7 +667,7 @@ func loggerOrNop(logger *zap.Logger) *zap.Logger {
 func recoverOrRefuseActiveAttempt(ctx context.Context, store *runstore.Store, run *runstore.Run, logger *zap.Logger) (Result, error) {
 	active := *run.Status.ActiveAttempt
 	if attemptStillStarting(active, time.Now().UTC()) {
-		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has starting attempt %q", run.ID, active.AttemptID)
+		return Result{RunID: run.ID, Attempt: active}, stableerr.Errorf("run %q already has starting attempt %q", run.ID, active.AttemptID)
 	}
 	if active.PID > 0 && processIdentityMatches(active.PID, active.ProcessStartTime) {
 		if attemptTimedOut(active, time.Now().UTC()) {
@@ -674,7 +675,7 @@ func recoverOrRefuseActiveAttempt(ctx context.Context, store *runstore.Store, ru
 			recovered, err := recoverActiveAttempt(ctx, store, run, active, runstore.AttemptStateTimedOut, resultTimeout, exitStateTimeout, logger)
 			return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
 		}
-		return Result{RunID: run.ID, Attempt: active}, fmt.Errorf("run %q already has active attempt %q", run.ID, active.AttemptID)
+		return Result{RunID: run.ID, Attempt: active}, stableerr.Errorf("run %q already has active attempt %q", run.ID, active.AttemptID)
 	}
 	recovered, err := recoverActiveAttempt(ctx, store, run, active, runstore.AttemptStateProcessError, resultProcessError, exitStateUnknown, logger)
 	if err != nil {

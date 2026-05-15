@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // RecordAttemptReport terminalizes the current active attempt with a structured worker report.
@@ -18,7 +20,7 @@ func (s *Store) RecordAttemptReport(runID string, req RecordReportRequest) (Atte
 // RecordAttemptReportContext terminalizes the current active attempt with a structured worker report unless ctx is canceled before commit.
 func (s *Store) RecordAttemptReportContext(ctx context.Context, runID string, req RecordReportRequest) (Attempt, Event, error) {
 	if ctx == nil {
-		return Attempt{}, Event{}, errors.New("context is required")
+		return Attempt{}, Event{}, stableerr.New("context is required")
 	}
 	report := req.Report
 	state := req.State
@@ -43,19 +45,19 @@ func (s *Store) RecordAttemptReportContext(ctx context.Context, runID string, re
 			return &ReportTargetError{
 				RunID:  runID,
 				Reason: "report does not target current active attempt",
-				Err:    fmt.Errorf("run %q has no active attempt", runID),
+				Err:    stableerr.Errorf("run %q has no active attempt", runID),
 			}
 		}
 		if run.Status.ActiveAttempt.AttemptID != report.AttemptID {
 			return &ReportTargetError{
 				RunID:  runID,
 				Reason: "report does not target current active attempt",
-				Err:    fmt.Errorf("run %q active attempt is %q, not %q", runID, run.Status.ActiveAttempt.AttemptID, report.AttemptID),
+				Err:    stableerr.Errorf("run %q active attempt is %q, not %q", runID, run.Status.ActiveAttempt.AttemptID, report.AttemptID),
 			}
 		}
 		attempt := *run.Status.ActiveAttempt
 		if !req.ReportContentSet && report.ReportRef != nil {
-			return errors.New("report_ref cannot be supplied by callers; provide report content for the run store to stage")
+			return stableerr.New("report_ref cannot be supplied by callers; provide report content for the run store to stage")
 		}
 		eventTime := normalizeTime(req.Time)
 		eventSequence := nextEventSequence(run)
@@ -220,7 +222,7 @@ func (s *Store) stageReportArtifactForEvent(run *Run, name string, content []byt
 	}
 	if existing, err := os.ReadFile(path); err == nil { // #nosec G304 -- path is a validated report artifact path scoped to the run directory.
 		if !bytes.Equal(existing, content) {
-			return ArtifactRef{}, stagedArtifact{}, fmt.Errorf("run %q artifact %s already exists with different content", run.ID, relPath)
+			return ArtifactRef{}, stagedArtifact{}, stableerr.Errorf("run %q artifact %s already exists with different content", run.ID, relPath)
 		}
 		noop := func() error { return nil }
 		return ref, stagedArtifact{commit: noop, rollback: noop, cleanup: func() {}}, nil
@@ -242,13 +244,13 @@ func (s *Store) RecordIgnoredReport(runID string, req IgnoreReportRequest) (Even
 // RecordIgnoredReportContext records a report that did not target the active attempt unless ctx is canceled before commit.
 func (s *Store) RecordIgnoredReportContext(ctx context.Context, runID string, req IgnoreReportRequest) (Event, error) {
 	if ctx == nil {
-		return Event{}, errors.New("context is required")
+		return Event{}, stableerr.New("context is required")
 	}
 	if req.Reason == "" {
-		return Event{}, errors.New("reason is required")
+		return Event{}, stableerr.New("reason is required")
 	}
 	if req.RunID != "" && req.RunID != runID {
-		return Event{}, fmt.Errorf("report ignored run_id %q does not match run %q", req.RunID, runID)
+		return Event{}, stableerr.Errorf("report ignored run_id %q does not match run %q", req.RunID, runID)
 	}
 	payload, err := marshalPayload(reportIgnoredPayload{
 		RunID:     req.RunID,

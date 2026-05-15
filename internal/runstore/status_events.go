@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // AppendEvent appends a caller event and advances status metadata.
@@ -16,10 +18,10 @@ func (s *Store) AppendEvent(runID string, event Event) (Event, error) {
 		return Event{}, err
 	}
 	if event.Type == "" {
-		return Event{}, errors.New("event type is required")
+		return Event{}, stableerr.New("event type is required")
 	}
 	if reservedEventType(event.Type) {
-		return Event{}, fmt.Errorf("event type %q is store-owned; use the dedicated runstore API", event.Type)
+		return Event{}, stableerr.Errorf("event type %q is store-owned; use the dedicated runstore API", event.Type)
 	}
 	if len(event.Payload) == 0 {
 		event.Payload = json.RawMessage(`{}`)
@@ -53,13 +55,13 @@ func (s *Store) UpdateStatus(runID string, update StatusUpdate) (Status, Event, 
 // UpdateStatusContext appends a status event unless ctx is canceled before commit.
 func (s *Store) UpdateStatusContext(ctx context.Context, runID string, update StatusUpdate) (Status, Event, error) {
 	if ctx == nil {
-		return Status{}, Event{}, errors.New("context is required")
+		return Status{}, Event{}, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
 	if update.State == "" {
-		return Status{}, Event{}, errors.New("state is required")
+		return Status{}, Event{}, stableerr.New("state is required")
 	}
 	event := Event{
 		Time: update.Time,
@@ -75,7 +77,7 @@ func (s *Store) UpdateStatusContext(ctx context.Context, runID string, update St
 			return err
 		}
 		if run.Status.ActiveAttempt != nil && update.State != stateRunning {
-			return fmt.Errorf("run %q has active attempt %q; state update to %q is not allowed", runID, run.Status.ActiveAttempt.AttemptID, update.State)
+			return stableerr.Errorf("run %q has active attempt %q; state update to %q is not allowed", runID, run.Status.ActiveAttempt.AttemptID, update.State)
 		}
 		var workflowEntry *WorkflowStateEntry
 		if update.WorkflowStateEntry.State != "" {
@@ -248,19 +250,19 @@ func readStatus(path string) (Status, error) {
 		return Status{}, err
 	}
 	if status.SchemaVersion != schemaVersion {
-		return Status{}, fmt.Errorf("unsupported schema_version %d", status.SchemaVersion)
+		return Status{}, stableerr.Errorf("unsupported schema_version %d", status.SchemaVersion)
 	}
 	if status.RunID == "" {
-		return Status{}, errors.New("run_id is required")
+		return Status{}, stableerr.New("run_id is required")
 	}
 	if status.Workflow == "" {
-		return Status{}, errors.New("workflow is required")
+		return Status{}, stableerr.New("workflow is required")
 	}
 	if status.CreatedAt.IsZero() {
-		return Status{}, errors.New("created_at is required")
+		return Status{}, stableerr.New("created_at is required")
 	}
 	if status.UpdatedAt.IsZero() {
-		return Status{}, errors.New("updated_at is required")
+		return Status{}, stableerr.New("updated_at is required")
 	}
 	return status, nil
 }

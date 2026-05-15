@@ -3,9 +3,10 @@ package runstore
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func TestAppendEventPreservesOrderedLogAndUpdatesStatus(t *testing.T) {
@@ -143,7 +144,7 @@ func TestEventAppendPossiblyCommitted(t *testing.T) {
 			err := &EventAppendError{
 				Path:             "events.jsonl",
 				PossiblyAppended: tc.possiblyAppended,
-				Err:              errors.New(tc.underlyingMessage),
+				Err:              stableerr.New(tc.underlyingMessage),
 			}
 
 			if got := eventAppendPossiblyCommitted(err); got != tc.want {

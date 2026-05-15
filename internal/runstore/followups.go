@@ -1,10 +1,11 @@
 package runstore
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // RecordFollowup appends one structured follow-up entry to followups.md.
@@ -25,23 +26,23 @@ func (s *Store) RecordFollowup(runID string, req RecordFollowupRequest) (Artifac
 func formatFollowupEntry(req RecordFollowupRequest) ([]byte, error) {
 	title := strings.TrimSpace(req.Followup.Title)
 	if title == "" {
-		return nil, errors.New("follow-up title is required")
+		return nil, stableerr.New("follow-up title is required")
 	}
 	source := req.Source
 	switch source {
 	case FollowupSourceReport:
 		if strings.TrimSpace(req.StepID) == "" {
-			return nil, errors.New("follow-up report step id is required")
+			return nil, stableerr.New("follow-up report step id is required")
 		}
 		if strings.TrimSpace(req.AgentID) == "" {
-			return nil, errors.New("follow-up report agent id is required")
+			return nil, stableerr.New("follow-up report agent id is required")
 		}
 		if strings.TrimSpace(req.AttemptID) == "" {
-			return nil, errors.New("follow-up report attempt id is required")
+			return nil, stableerr.New("follow-up report attempt id is required")
 		}
 	case FollowupSourceOrchestrator:
 	default:
-		return nil, fmt.Errorf("follow-up source %q is not supported", source)
+		return nil, stableerr.Errorf("follow-up source %q is not supported", source)
 	}
 	recordedAt := normalizeTime(req.Time)
 	var out strings.Builder

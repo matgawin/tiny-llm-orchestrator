@@ -2,11 +2,12 @@ package runstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"time"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // StartAttempt records a new starting worker attempt for a running run.
@@ -17,7 +18,7 @@ func (s *Store) StartAttempt(runID string, req StartAttemptRequest) (Attempt, Ev
 // StartAttemptContext records a new starting worker attempt for a running run unless ctx is canceled before the attempt commits.
 func (s *Store) StartAttemptContext(ctx context.Context, runID string, req StartAttemptRequest) (Attempt, Event, error) {
 	if ctx == nil {
-		return Attempt{}, Event{}, errors.New("context is required")
+		return Attempt{}, Event{}, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return Attempt{}, Event{}, err
@@ -41,15 +42,15 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 			return err
 		}
 		if run.Status.State != stateRunning {
-			return fmt.Errorf("run %q state is %q, want %q to start attempt", runID, run.Status.State, stateRunning)
+			return stableerr.Errorf("run %q state is %q, want %q to start attempt", runID, run.Status.State, stateRunning)
 		}
 		if run.Status.ActiveAttempt != nil {
-			return fmt.Errorf("run %q already has active attempt %q", runID, run.Status.ActiveAttempt.AttemptID)
+			return stableerr.Errorf("run %q already has active attempt %q", runID, run.Status.ActiveAttempt.AttemptID)
 		}
 		if slices.ContainsFunc(run.Status.Attempts, func(existing Attempt) bool {
 			return existing.AttemptID == attempt.AttemptID
 		}) {
-			return fmt.Errorf("run %q already has attempt %q", runID, attempt.AttemptID)
+			return stableerr.Errorf("run %q already has attempt %q", runID, attempt.AttemptID)
 		}
 		routing := attemptStartRoutingFromFields(req.ConsumeAttemptID, req.RetryLineage, req.SupersedeReason)
 		if err := validateAttemptStartRouting(run.Status, routing); err != nil {
@@ -71,7 +72,7 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 			}
 			workflowEntry = &entry
 		} else if req.ConsumeWorkflowLoopHardCapOverride != nil {
-			return errors.New("workflow loop hard-cap override consumption requires workflow state entry")
+			return stableerr.New("workflow loop hard-cap override consumption requires workflow state entry")
 		}
 		payload, err := marshalPayload(attemptStartedPayload{
 			Attempt:                             attempt,
@@ -166,10 +167,10 @@ func (s *Store) RecordAttemptProcess(runID string, req AttemptProcessRequest) (A
 // RecordAttemptProcessContext records worker process metadata unless ctx is canceled before the process event commits.
 func (s *Store) RecordAttemptProcessContext(ctx context.Context, runID string, req AttemptProcessRequest) (Attempt, Event, error) {
 	if ctx == nil {
-		return Attempt{}, Event{}, errors.New("context is required")
+		return Attempt{}, Event{}, stableerr.New("context is required")
 	}
 	if req.PID <= 0 {
-		return Attempt{}, Event{}, errors.New("process id must be > 0")
+		return Attempt{}, Event{}, stableerr.New("process id must be > 0")
 	}
 	payload := attemptProcessPayload{
 		AttemptID:        req.AttemptID,
@@ -212,7 +213,7 @@ func (s *Store) RecordAttemptWarning(runID string, warning AttemptWarning) (Stat
 // RecordAttemptWarningContext records a process warning unless ctx is canceled before commit.
 func (s *Store) RecordAttemptWarningContext(ctx context.Context, runID string, warning AttemptWarning) (Status, Event, error) {
 	if ctx == nil {
-		return Status{}, Event{}, errors.New("context is required")
+		return Status{}, Event{}, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
@@ -256,7 +257,7 @@ func (s *Store) RecordAttemptWarningContext(ctx context.Context, runID string, w
 
 func (s *Store) terminalizeAttempt(ctx context.Context, runID string, req FinishAttemptRequest, eventType string, recovered bool) (Attempt, Event, error) {
 	if ctx == nil {
-		return Attempt{}, Event{}, errors.New("context is required")
+		return Attempt{}, Event{}, stableerr.New("context is required")
 	}
 	if err := validateFinishedAttempt(req); err != nil {
 		return Attempt{}, Event{}, err
@@ -324,10 +325,10 @@ func (outcome terminalAttemptOutcome) payload(attemptID string) attemptFinishedP
 
 func applyAttemptPromptRef(status Status, attempt *Attempt, attemptID string, promptRef ArtifactRef) error {
 	if attempt.State != AttemptStateStarting {
-		return fmt.Errorf("attempt %q state %q, want starting", attemptID, attempt.State)
+		return stableerr.Errorf("attempt %q state %q, want starting", attemptID, attempt.State)
 	}
 	if attempt.PromptRef != nil {
-		return fmt.Errorf("attempt %q already has prompt ref", attemptID)
+		return stableerr.Errorf("attempt %q already has prompt ref", attemptID)
 	}
 	if err := validateRecordedArtifactRef(status, promptRef, KindPrompt); err != nil {
 		return err
@@ -339,10 +340,10 @@ func applyAttemptPromptRef(status Status, attempt *Attempt, attemptID string, pr
 
 func applyAttemptLogRef(status Status, attempt *Attempt, attemptID string, logRef ArtifactRef) error {
 	if attempt.State != AttemptStateStarting {
-		return fmt.Errorf("attempt %q state %q, want starting", attemptID, attempt.State)
+		return stableerr.Errorf("attempt %q state %q, want starting", attemptID, attempt.State)
 	}
 	if attempt.LogRef != nil {
-		return fmt.Errorf("attempt %q already has log ref", attemptID)
+		return stableerr.Errorf("attempt %q already has log ref", attemptID)
 	}
 	if err := validateRecordedArtifactRef(status, logRef, KindLog); err != nil {
 		return err
@@ -354,19 +355,19 @@ func applyAttemptLogRef(status Status, attempt *Attempt, attemptID string, logRe
 
 func applyAttemptProcessMetadata(attempt *Attempt, attemptID string, pid int, processStartTime string) error {
 	if pid <= 0 {
-		return errors.New("process id must be > 0")
+		return stableerr.New("process id must be > 0")
 	}
 	if attempt.State != AttemptStateStarting {
-		return fmt.Errorf("attempt %q state %q, want starting", attemptID, attempt.State)
+		return stableerr.Errorf("attempt %q state %q, want starting", attemptID, attempt.State)
 	}
 	if attempt.PID != 0 {
-		return fmt.Errorf("attempt %q already has process metadata", attemptID)
+		return stableerr.Errorf("attempt %q already has process metadata", attemptID)
 	}
 	if attempt.PromptRef == nil {
-		return fmt.Errorf("attempt %q prompt ref is required before process start", attemptID)
+		return stableerr.Errorf("attempt %q prompt ref is required before process start", attemptID)
 	}
 	if attempt.LogRef == nil {
-		return fmt.Errorf("attempt %q log ref is required before process start", attemptID)
+		return stableerr.Errorf("attempt %q log ref is required before process start", attemptID)
 	}
 	if err := validateProcessStartTime(processStartTime); err != nil {
 		return err
@@ -403,22 +404,22 @@ func applyTerminalAttemptOutcome(status Status, attempt *Attempt, outcome termin
 func applyAttemptReport(status Status, attempt *Attempt, state string, report Report, req RecordReportRequest) error {
 	switch {
 	case attempt.State != AttemptStateActive && (!req.AllowStartingAttempt || attempt.State != AttemptStateStarting):
-		return fmt.Errorf("attempt %q state %q, want active", attempt.AttemptID, attempt.State)
+		return stableerr.Errorf("attempt %q state %q, want active", attempt.AttemptID, attempt.State)
 	case report.RunID != attempt.RunID:
-		return fmt.Errorf("report run_id %q does not match active attempt run_id %q", report.RunID, attempt.RunID)
+		return stableerr.Errorf("report run_id %q does not match active attempt run_id %q", report.RunID, attempt.RunID)
 	case report.StepID != attempt.StepID:
-		return fmt.Errorf("report step_id %q does not match active attempt step_id %q", report.StepID, attempt.StepID)
+		return stableerr.Errorf("report step_id %q does not match active attempt step_id %q", report.StepID, attempt.StepID)
 	case report.AgentID != attempt.AgentID:
-		return fmt.Errorf("report agent_id %q does not match active attempt agent_id %q", report.AgentID, attempt.AgentID)
+		return stableerr.Errorf("report agent_id %q does not match active attempt agent_id %q", report.AgentID, attempt.AgentID)
 	case report.AttemptID != attempt.AttemptID:
-		return fmt.Errorf("report attempt_id %q does not match active attempt attempt_id %q", report.AttemptID, attempt.AttemptID)
+		return stableerr.Errorf("report attempt_id %q does not match active attempt attempt_id %q", report.AttemptID, attempt.AttemptID)
 	}
 	if report.ReportRef != nil {
 		if err := validateArtifactRef(*report.ReportRef, 0); err != nil {
 			return err
 		}
 		if report.ReportRef.Kind != KindReport {
-			return fmt.Errorf("artifact %s kind %q, want %q", report.ReportRef.Path, report.ReportRef.Kind, KindReport)
+			return stableerr.Errorf("artifact %s kind %q, want %q", report.ReportRef.Path, report.ReportRef.Kind, KindReport)
 		}
 		ref := *report.ReportRef
 		report.ReportRef = &ref
@@ -450,7 +451,7 @@ func applyAttemptReport(status Status, attempt *Attempt, state string, report Re
 
 func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID string, at time.Time, eventType string, apply func(Status, *Attempt) (any, error)) (Attempt, Event, error) {
 	if ctx == nil {
-		return Attempt{}, Event{}, errors.New("context is required")
+		return Attempt{}, Event{}, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return Attempt{}, Event{}, err
@@ -460,7 +461,7 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 	}
 	at = normalizeTime(at)
 	if attemptID == "" {
-		return Attempt{}, Event{}, errors.New("attempt id is required")
+		return Attempt{}, Event{}, stableerr.New("attempt id is required")
 	}
 	var out Attempt
 	var event Event
@@ -473,10 +474,10 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 			return err
 		}
 		if run.Status.ActiveAttempt == nil {
-			return fmt.Errorf("run %q has no active attempt", runID)
+			return stableerr.Errorf("run %q has no active attempt", runID)
 		}
 		if run.Status.ActiveAttempt.AttemptID != attemptID {
-			return fmt.Errorf("run %q active attempt is %q, not %q", runID, run.Status.ActiveAttempt.AttemptID, attemptID)
+			return stableerr.Errorf("run %q active attempt is %q, not %q", runID, run.Status.ActiveAttempt.AttemptID, attemptID)
 		}
 		attempt := *run.Status.ActiveAttempt
 		payload, err := apply(run.Status, &attempt)
@@ -532,15 +533,15 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 func newStartedAttempt(runID string, req StartAttemptRequest) (Attempt, error) {
 	switch {
 	case req.StepID == "":
-		return Attempt{}, errors.New("step id is required")
+		return Attempt{}, stableerr.New("step id is required")
 	case req.AgentID == "":
-		return Attempt{}, errors.New("agent id is required")
+		return Attempt{}, stableerr.New("agent id is required")
 	case req.AttemptID == "":
-		return Attempt{}, errors.New("attempt id is required")
+		return Attempt{}, stableerr.New("attempt id is required")
 	case req.Timeout <= 0:
-		return Attempt{}, errors.New("timeout must be > 0")
+		return Attempt{}, stableerr.New("timeout must be > 0")
 	case req.ReportExitGrace <= 0:
-		return Attempt{}, errors.New("report exit grace must be > 0")
+		return Attempt{}, stableerr.New("report exit grace must be > 0")
 	}
 	return Attempt{
 		RunID:                 runID,
@@ -557,7 +558,7 @@ func newStartedAttempt(runID string, req StartAttemptRequest) (Attempt, error) {
 
 func validateFinishedAttempt(req FinishAttemptRequest) error {
 	if req.AttemptID == "" {
-		return errors.New("attempt id is required")
+		return stableerr.New("attempt id is required")
 	}
 	return validateTerminalAttemptOutcomeFields(req.State, req.Status, req.Result, "attempt")
 }
@@ -565,23 +566,23 @@ func validateFinishedAttempt(req FinishAttemptRequest) error {
 func validateReportTerminalization(state string, report Report) error {
 	switch {
 	case report.RunID == "":
-		return errors.New("report run id is required")
+		return stableerr.New("report run id is required")
 	case report.StepID == "":
-		return errors.New("report step id is required")
+		return stableerr.New("report step id is required")
 	case report.AgentID == "":
-		return errors.New("report agent id is required")
+		return stableerr.New("report agent id is required")
 	case report.AttemptID == "":
-		return errors.New("report attempt id is required")
+		return stableerr.New("report attempt id is required")
 	case report.Status == "":
-		return errors.New("report status is required")
+		return stableerr.New("report status is required")
 	case report.Result == "":
-		return errors.New("report result is required")
+		return stableerr.New("report result is required")
 	case report.Summary == "":
-		return errors.New("report summary is required")
+		return stableerr.New("report summary is required")
 	case state != AttemptStateReported && state != AttemptStateInvalidReport:
-		return fmt.Errorf("report state %q is not terminal", state)
+		return stableerr.Errorf("report state %q is not terminal", state)
 	case state == AttemptStateInvalidReport && (report.Status != attemptStatusFailed || report.Result != AttemptResultInvalidReport):
-		return fmt.Errorf("report terminal outcome %s/%s with state %q is invalid", report.Status, report.Result, state)
+		return stableerr.Errorf("report terminal outcome %s/%s with state %q is invalid", report.Status, report.Result, state)
 	default:
 		return nil
 	}
@@ -589,13 +590,13 @@ func validateReportTerminalization(state string, report Report) error {
 
 func validateTerminalAttemptOutcomeFields(state, status, result, subject string) error {
 	if state == "" || status == "" || result == "" {
-		return fmt.Errorf("%s state/status/result are required", subject)
+		return stableerr.Errorf("%s state/status/result are required", subject)
 	}
 	if !terminalAttemptState(state) {
-		return fmt.Errorf("%s state %q is not terminal", subject, state)
+		return stableerr.Errorf("%s state %q is not terminal", subject, state)
 	}
 	if !validTerminalAttemptOutcome(state, status, result) {
-		return fmt.Errorf("%s terminal outcome %s/%s with state %q is invalid", subject, status, result, state)
+		return stableerr.Errorf("%s terminal outcome %s/%s with state %q is invalid", subject, status, result, state)
 	}
 	return nil
 }
@@ -615,7 +616,7 @@ func validTerminalAttemptOutcome(state, status, result string) bool {
 
 func validateAttemptTerminalizationHasProcessContext(attempt Attempt, terminalState string) error {
 	if attempt.PID == 0 && terminalState != AttemptStateProcessError {
-		return fmt.Errorf("attempt %q has no process metadata; terminal state %q is not allowed before process start", attempt.AttemptID, terminalState)
+		return stableerr.Errorf("attempt %q has no process metadata; terminal state %q is not allowed before process start", attempt.AttemptID, terminalState)
 	}
 	return nil
 }
@@ -779,14 +780,14 @@ func applyAttemptOutcomeConsumption(status *Status, event Event, attemptID strin
 
 func validateRetryLineage(retry RetryLineage) error {
 	if retry.StepID == "" {
-		return errors.New("retry lineage step_id is required")
+		return stableerr.New("retry lineage step_id is required")
 	}
 	for pair, count := range retry.Counts {
 		if pair == "" {
-			return errors.New("retry lineage pair is required")
+			return stableerr.New("retry lineage pair is required")
 		}
 		if count < 0 {
-			return fmt.Errorf("retry count for %q must be >= 0, got %d", pair, count)
+			return stableerr.Errorf("retry count for %q must be >= 0, got %d", pair, count)
 		}
 	}
 	return nil
@@ -809,14 +810,14 @@ func attemptStartRoutingFromFields(consumeAttemptID string, retryLineage *RetryL
 func validateAttemptStartRouting(status Status, routing attemptStartRouting) error {
 	latest, hasLatest := LatestConsumableOutcome(status)
 	if hasLatest && unconsumedLauncherAttemptOutcome(latest) && routing.ConsumeAttemptID != latest.AttemptID {
-		return fmt.Errorf("has unconsumed launcher outcome %s/%s for attempt %q", latest.Status, latest.Result, latest.AttemptID)
+		return stableerr.Errorf("has unconsumed launcher outcome %s/%s for attempt %q", latest.Status, latest.Result, latest.AttemptID)
 	}
 	if routing.ConsumeAttemptID != "" && (!hasLatest || latest.AttemptID != routing.ConsumeAttemptID) {
-		return fmt.Errorf("latest outcome attempt is not %q", routing.ConsumeAttemptID)
+		return stableerr.Errorf("latest outcome attempt is not %q", routing.ConsumeAttemptID)
 	}
 	if routing.RetryLineage != nil {
 		if routing.ConsumeAttemptID == "" {
-			return errors.New("retry lineage requires consume_attempt_id")
+			return stableerr.New("retry lineage requires consume_attempt_id")
 		}
 		if err := validateRetryLineage(*routing.RetryLineage); err != nil {
 			return fmt.Errorf("retry lineage: %w", err)
@@ -831,10 +832,10 @@ func validateAttemptOutcomeConsumption(status Status, attemptID string) error {
 	}
 	latest, ok := LatestConsumableOutcome(status)
 	if !ok {
-		return fmt.Errorf("latest outcome attempt is not %q", attemptID)
+		return stableerr.Errorf("latest outcome attempt is not %q", attemptID)
 	}
 	if latest.AttemptID != attemptID {
-		return fmt.Errorf("latest outcome attempt is %q, want %q", latest.AttemptID, attemptID)
+		return stableerr.Errorf("latest outcome attempt is %q, want %q", latest.AttemptID, attemptID)
 	}
 	return nil
 }
@@ -849,53 +850,53 @@ func cloneRetryLineagePtr(retry *RetryLineage) *RetryLineage {
 func validateStartedAttemptEvent(event Event, attempt Attempt, runID string) error {
 	switch {
 	case attempt.RunID != runID:
-		return fmt.Errorf("event %d attempt run_id %q does not match", event.Sequence, attempt.RunID)
+		return stableerr.Errorf("event %d attempt run_id %q does not match", event.Sequence, attempt.RunID)
 	case attempt.StepID == "":
-		return fmt.Errorf("event %d attempt step_id is required", event.Sequence)
+		return stableerr.Errorf("event %d attempt step_id is required", event.Sequence)
 	case attempt.AgentID == "":
-		return fmt.Errorf("event %d attempt agent_id is required", event.Sequence)
+		return stableerr.Errorf("event %d attempt agent_id is required", event.Sequence)
 	case attempt.AttemptID == "":
-		return fmt.Errorf("event %d attempt attempt_id is required", event.Sequence)
+		return stableerr.Errorf("event %d attempt attempt_id is required", event.Sequence)
 	case attempt.State != AttemptStateStarting:
-		return fmt.Errorf("event %d attempt state %q, want starting", event.Sequence, attempt.State)
+		return stableerr.Errorf("event %d attempt state %q, want starting", event.Sequence, attempt.State)
 	case attempt.Status != "":
-		return fmt.Errorf("event %d attempt status must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt status must be empty for starting attempt", event.Sequence)
 	case attempt.Result != "":
-		return fmt.Errorf("event %d attempt result must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt result must be empty for starting attempt", event.Sequence)
 	case attempt.PID != 0:
-		return fmt.Errorf("event %d attempt pid must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt pid must be empty for starting attempt", event.Sequence)
 	case attempt.ProcessStartTime != "":
-		return fmt.Errorf("event %d attempt process_start_time must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt process_start_time must be empty for starting attempt", event.Sequence)
 	case attempt.ExitCode != nil:
-		return fmt.Errorf("event %d attempt exit_code must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt exit_code must be empty for starting attempt", event.Sequence)
 	case attempt.ExitState != "":
-		return fmt.Errorf("event %d attempt exit_state must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt exit_state must be empty for starting attempt", event.Sequence)
 	case attempt.PromptRef != nil:
-		return fmt.Errorf("event %d attempt prompt_ref must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt prompt_ref must be empty for starting attempt", event.Sequence)
 	case attempt.LogRef != nil:
-		return fmt.Errorf("event %d attempt log_ref must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt log_ref must be empty for starting attempt", event.Sequence)
 	case attempt.ReportRef != nil:
-		return fmt.Errorf("event %d attempt report_ref must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt report_ref must be empty for starting attempt", event.Sequence)
 	case attempt.Report != nil:
-		return fmt.Errorf("event %d attempt report must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt report must be empty for starting attempt", event.Sequence)
 	case attempt.FinishedAt != nil:
-		return fmt.Errorf("event %d attempt finished_at must be empty for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt finished_at must be empty for starting attempt", event.Sequence)
 	case attempt.Recovered:
-		return fmt.Errorf("event %d attempt recovered must be false for starting attempt", event.Sequence)
+		return stableerr.Errorf("event %d attempt recovered must be false for starting attempt", event.Sequence)
 	case attempt.Timeout == "":
-		return fmt.Errorf("event %d attempt timeout is required", event.Sequence)
+		return stableerr.Errorf("event %d attempt timeout is required", event.Sequence)
 	case attempt.ReportExitGrace == "":
-		return fmt.Errorf("event %d attempt report_exit_grace is required", event.Sequence)
+		return stableerr.Errorf("event %d attempt report_exit_grace is required", event.Sequence)
 	case !attempt.StartedAt.Equal(event.Time):
-		return fmt.Errorf("event %d attempt started_at does not match event time", event.Sequence)
+		return stableerr.Errorf("event %d attempt started_at does not match event time", event.Sequence)
 	default:
 		timeout, err := time.ParseDuration(attempt.Timeout)
 		if err != nil || timeout <= 0 {
-			return fmt.Errorf("event %d attempt timeout must be > 0", event.Sequence)
+			return stableerr.Errorf("event %d attempt timeout must be > 0", event.Sequence)
 		}
 		grace, err := time.ParseDuration(attempt.ReportExitGrace)
 		if err != nil || grace <= 0 {
-			return fmt.Errorf("event %d attempt report_exit_grace must be > 0", event.Sequence)
+			return stableerr.Errorf("event %d attempt report_exit_grace must be > 0", event.Sequence)
 		}
 		return nil
 	}
@@ -903,14 +904,14 @@ func validateStartedAttemptEvent(event Event, attempt Attempt, runID string) err
 
 func validateProcessStartTime(value string) error {
 	if value == "" {
-		return errors.New("process_start_time is required")
+		return stableerr.New("process_start_time is required")
 	}
 	if len(value) > 32 {
-		return errors.New("process_start_time is too long")
+		return stableerr.New("process_start_time is too long")
 	}
 	for _, ch := range value {
 		if ch < '0' || ch > '9' {
-			return fmt.Errorf("process_start_time %q must be decimal digits", value)
+			return stableerr.Errorf("process_start_time %q must be decimal digits", value)
 		}
 	}
 	return nil
@@ -918,15 +919,15 @@ func validateProcessStartTime(value string) error {
 
 func validateAttemptWarning(status Status, warning AttemptWarning) error {
 	if warning.AttemptID == "" {
-		return errors.New("attempt_id is required")
+		return stableerr.New("attempt_id is required")
 	}
 	if warning.Kind == "" {
-		return errors.New("kind is required")
+		return stableerr.New("kind is required")
 	}
 	if !slices.ContainsFunc(status.Attempts, func(attempt Attempt) bool {
 		return attempt.AttemptID == warning.AttemptID
 	}) {
-		return fmt.Errorf("has no attempt %q", warning.AttemptID)
+		return stableerr.Errorf("has no attempt %q", warning.AttemptID)
 	}
 	return nil
 }

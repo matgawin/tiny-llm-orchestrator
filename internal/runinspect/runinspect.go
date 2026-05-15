@@ -21,6 +21,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -152,15 +153,15 @@ func inspect(ctx context.Context, opts Options) (inspection, error) {
 
 func loadProjectRun(ctx context.Context, opts Options) (config.Workflow, *runstore.Store, *runstore.Run, error) {
 	if opts.Root == "" {
-		return config.Workflow{}, nil, nil, errors.New("project root is required")
+		return config.Workflow{}, nil, nil, stableerr.New("project root is required")
 	}
 	if opts.RunID == "" {
-		return config.Workflow{}, nil, nil, errors.New("run id is required")
+		return config.Workflow{}, nil, nil, stableerr.New("run id is required")
 	}
 	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return config.Workflow{}, nil, nil, fmt.Errorf("run %q not found", opts.RunID)
+			return config.Workflow{}, nil, nil, stableerr.Errorf("run %q not found", opts.RunID)
 		}
 		return config.Workflow{}, nil, nil, err
 	}
@@ -169,10 +170,10 @@ func loadProjectRun(ctx context.Context, opts Options) (config.Workflow, *runsto
 
 func loadRun(ctx context.Context, opts Options) (*runstore.Store, *runstore.Run, io.Writer, error) {
 	if opts.Root == "" {
-		return nil, nil, nil, errors.New("project root is required")
+		return nil, nil, nil, stableerr.New("project root is required")
 	}
 	if opts.RunID == "" {
-		return nil, nil, nil, errors.New("run id is required")
+		return nil, nil, nil, stableerr.New("run id is required")
 	}
 	store, err := runstore.Open(opts.Root)
 	if err != nil {
@@ -181,7 +182,7 @@ func loadRun(ctx context.Context, opts Options) (*runstore.Store, *runstore.Run,
 	run, err := store.LoadContext(ctx, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, nil, fmt.Errorf("run %q not found", opts.RunID)
+			return nil, nil, nil, stableerr.Errorf("run %q not found", opts.RunID)
 		}
 		return nil, nil, nil, err
 	}
@@ -884,7 +885,7 @@ func readRequiredArtifactText(ctx context.Context, store *runstore.Store, run *r
 		return "", err
 	}
 	if !found {
-		return "", fmt.Errorf("run %q has no %s artifact", run.ID, kind)
+		return "", stableerr.Errorf("run %q has no %s artifact", run.ID, kind)
 	}
 	return content, nil
 }

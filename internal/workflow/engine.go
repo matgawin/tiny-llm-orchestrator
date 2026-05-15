@@ -1,11 +1,11 @@
 package workflow
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // Evaluate applies deterministic workflow routing to a validated workflow and
@@ -17,17 +17,17 @@ func Evaluate(workflow config.Workflow, state RunState) (Decision, error) {
 	case RunStatusRunning:
 	default:
 		if state.Status == "" {
-			return Decision{}, fmt.Errorf("run status is required")
+			return Decision{}, stableerr.Errorf("run status is required")
 		}
-		return Decision{}, fmt.Errorf("unsupported run status %q", state.Status)
+		return Decision{}, stableerr.Errorf("unsupported run status %q", state.Status)
 	}
 
 	if state.ActiveAttempt {
 		if state.SelectedStep != "" {
-			return Decision{}, fmt.Errorf("running state has both selected step %q and active attempt", state.SelectedStep)
+			return Decision{}, stableerr.Errorf("running state has both selected step %q and active attempt", state.SelectedStep)
 		}
 		if state.Outcome != nil {
-			return Decision{}, fmt.Errorf("running state has both active attempt and terminal outcome")
+			return Decision{}, stableerr.Errorf("running state has both active attempt and terminal outcome")
 		}
 		return Decision{Kind: DecisionWaitActiveAttempt, RunStatus: RunStatusRunning}, nil
 	}
@@ -38,7 +38,7 @@ func Evaluate(workflow config.Workflow, state RunState) (Decision, error) {
 			step = workflow.Start
 		}
 		if _, ok := workflow.Steps[step]; !ok {
-			return Decision{}, fmt.Errorf("selected step %q is not declared", step)
+			return Decision{}, stableerr.Errorf("selected step %q is not declared", step)
 		}
 		if err := validateRetryLineage(state.Retry, step); err != nil {
 			return Decision{}, err
@@ -51,26 +51,26 @@ func Evaluate(workflow config.Workflow, state RunState) (Decision, error) {
 
 func evaluateOutcome(workflow config.Workflow, state RunState) (Decision, error) {
 	if state.SelectedStep == "" {
-		return Decision{}, fmt.Errorf("selected step is required when evaluating an outcome")
+		return Decision{}, stableerr.Errorf("selected step is required when evaluating an outcome")
 	}
 	outcome := *state.Outcome
 	if outcome.Step == "" {
-		return Decision{}, fmt.Errorf("outcome step is required")
+		return Decision{}, stableerr.Errorf("outcome step is required")
 	}
 	if outcome.Step != state.SelectedStep {
-		return Decision{}, fmt.Errorf("outcome step %q does not match selected step %q", outcome.Step, state.SelectedStep)
+		return Decision{}, stableerr.Errorf("outcome step %q does not match selected step %q", outcome.Step, state.SelectedStep)
 	}
 	step, ok := workflow.Steps[outcome.Step]
 	if !ok {
-		return Decision{}, fmt.Errorf("outcome step %q is not declared", outcome.Step)
+		return Decision{}, stableerr.Errorf("outcome step %q is not declared", outcome.Step)
 	}
 	pair := pairKey(outcome.Status, outcome.Result)
 	if !allowedPair(step, outcome.Status, outcome.Result) {
-		return Decision{}, fmt.Errorf("step %q outcome %q is not declared in allowed_results", outcome.Step, pair)
+		return Decision{}, stableerr.Errorf("step %q outcome %q is not declared in allowed_results", outcome.Step, pair)
 	}
 	target, ok := step.On[pair]
 	if !ok {
-		return Decision{}, fmt.Errorf("step %q outcome %q has no deterministic transition", outcome.Step, pair)
+		return Decision{}, stableerr.Errorf("step %q outcome %q has no deterministic transition", outcome.Step, pair)
 	}
 	if err := validateRetryLineage(state.Retry, outcome.Step); err != nil {
 		return Decision{}, err
@@ -105,20 +105,20 @@ func evaluateOutcome(workflow config.Workflow, state RunState) (Decision, error)
 	if isTerminalRunStatus(target) {
 		return Decision{Kind: DecisionTerminal, RunStatus: target}, nil
 	}
-	return Decision{}, fmt.Errorf("step %q outcome %q targets unknown step or terminal state %q", outcome.Step, pair, target)
+	return Decision{}, stableerr.Errorf("step %q outcome %q targets unknown step or terminal state %q", outcome.Step, pair, target)
 }
 
 func validateRetryLineage(retry RetryLineage, step string) error {
 	if retry.Step != "" && retry.Step != step {
-		return fmt.Errorf("retry lineage step %q does not match selected step %q", retry.Step, step)
+		return stableerr.Errorf("retry lineage step %q does not match selected step %q", retry.Step, step)
 	}
 	for pair, count := range retry.Counts {
 		if count < 0 {
-			return fmt.Errorf("retry count for %q must be >= 0, got %d", pair, count)
+			return stableerr.Errorf("retry count for %q must be >= 0, got %d", pair, count)
 		}
 	}
 	if retry.Step == "" && len(retry.Counts) > 0 {
-		return fmt.Errorf("retry lineage step is required when retry counts are present")
+		return stableerr.Errorf("retry lineage step is required when retry counts are present")
 	}
 	return nil
 }

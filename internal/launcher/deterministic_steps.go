@@ -16,6 +16,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
@@ -215,7 +216,7 @@ func validateGeneratedOutcome(step config.Step, status, result string) error {
 	if slices.Contains(step.AllowedResults[status], result) {
 		return nil
 	}
-	return fmt.Errorf("step generated outcome %q is not declared in allowed_results", status+"/"+result)
+	return stableerr.Errorf("step generated outcome %q is not declared in allowed_results", status+"/"+result)
 }
 
 func openDeterministicOutputFile(attempt runstore.Attempt, stream string) (*os.File, string, error) {
@@ -256,7 +257,7 @@ func deterministicExecSpec(root string, step config.Step) ([]string, string, []s
 		}
 		command = append([]string{path}, step.Script.Args...)
 	default:
-		return nil, "", nil, fmt.Errorf("step kind %q is not deterministic", step.EffectiveKind())
+		return nil, "", nil, stableerr.Errorf("step kind %q is not deterministic", step.EffectiveKind())
 	}
 	env := mergeEnv(os.Environ(), step.Env)
 	return command, cwd, env, nil
@@ -264,7 +265,7 @@ func deterministicExecSpec(root string, step config.Step) ([]string, string, []s
 
 func deterministicCommandPath(command, env []string, cwd string) (string, error) {
 	if len(command) == 0 || command[0] == "" {
-		return "", errors.New("command argv[0] is required")
+		return "", stableerr.New("command argv[0] is required")
 	}
 	return resolveWorkerExecutable(command[0], env, cwd)
 }

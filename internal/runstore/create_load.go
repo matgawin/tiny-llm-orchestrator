@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // Create creates a new run directory with an initial event and status file.
@@ -17,10 +19,10 @@ func (s *Store) Create(req CreateRunRequest) (*Run, error) {
 // CreateContext creates a new run directory unless ctx is canceled before publication.
 func (s *Store) CreateContext(ctx context.Context, req CreateRunRequest) (*Run, error) {
 	if ctx == nil {
-		return nil, errors.New("context is required")
+		return nil, stableerr.New("context is required")
 	}
 	if req.Workflow == "" {
-		return nil, errors.New("workflow is required")
+		return nil, stableerr.New("workflow is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -134,7 +136,7 @@ func (s *Store) CreateContext(ctx context.Context, req CreateRunRequest) (*Run, 
 				unlockRuns = nil
 				return s.CreateContext(ctx, req)
 			}
-			return nil, fmt.Errorf("run %q already exists", runID)
+			return nil, stableerr.Errorf("run %q already exists", runID)
 		}
 		return nil, fmt.Errorf("reserve run directory %q: %w", runID, err)
 	}
@@ -179,7 +181,7 @@ func reserveRunDir(runDir string) (*runDirReservation, error) {
 
 func publishReservedRunDir(tempDir string, reservation *runDirReservation) error {
 	if reservation == nil {
-		return errors.New("run directory reservation is required")
+		return stableerr.New("run directory reservation is required")
 	}
 	if err := os.Remove(filepath.Join(tempDir, ".lock")); err != nil {
 		return err
@@ -215,7 +217,7 @@ func (s *Store) Load(runID string) (*Run, error) {
 // LoadContext recovers structured run state unless ctx is canceled before the run lock is acquired.
 func (s *Store) LoadContext(ctx context.Context, runID string) (*Run, error) {
 	if ctx == nil {
-		return nil, errors.New("context is required")
+		return nil, stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return nil, err
@@ -257,14 +259,14 @@ func (s *Store) load(runID string) (*Run, error) {
 		return nil, fmt.Errorf("run %q status.json: %w", runID, err)
 	}
 	if status.RunID != runID {
-		return nil, fmt.Errorf("run %q status.json run_id %q does not match", runID, status.RunID)
+		return nil, stableerr.Errorf("run %q status.json run_id %q does not match", runID, status.RunID)
 	}
 	events, err := readEvents(filepath.Join(runDir, eventsName), runID)
 	if err != nil {
 		return nil, fmt.Errorf("run %q events.jsonl: %w", runID, err)
 	}
 	if len(events) == 0 {
-		return nil, fmt.Errorf("run %q events.jsonl: no events", runID)
+		return nil, stableerr.Errorf("run %q events.jsonl: no events", runID)
 	}
 	replayedStatus, err := replayStatus(events, status)
 	if err != nil {

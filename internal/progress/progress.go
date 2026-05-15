@@ -20,6 +20,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"tiny-llm-orchestrator/orc/internal/stableerr"
+
 	"golang.org/x/time/rate"
 )
 
@@ -82,7 +84,7 @@ func NewListener() (*Listener, error) {
 
 func NewListenerContext(ctx context.Context) (*Listener, error) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		return nil, fmt.Errorf("progress sockets are unsupported on %s", runtime.GOOS)
+		return nil, stableerr.Errorf("progress sockets are unsupported on %s", runtime.GOOS)
 	}
 	dir, err := os.MkdirTemp("", "orc-progress-*")
 	if err != nil {
@@ -164,24 +166,24 @@ func (l *Listener) Accepted() <-chan AcceptedMessage {
 
 func (l *Listener) Register(reg Registration) error {
 	if l == nil {
-		return errors.New("listener is nil")
+		return stableerr.New("listener is nil")
 	}
 	if reg.RunID == "" {
-		return errors.New("run id is required")
+		return stableerr.New("run id is required")
 	}
 	if reg.StepID == "" {
-		return errors.New("step id is required")
+		return stableerr.New("step id is required")
 	}
 	if reg.AttemptID == "" {
-		return errors.New("attempt id is required")
+		return stableerr.New("attempt id is required")
 	}
 	if reg.Token == "" {
-		return errors.New("token is required")
+		return stableerr.New("token is required")
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {
-		return errors.New("listener is closed")
+		return stableerr.New("listener is closed")
 	}
 	l.registration = reg
 	l.limiter = newProgressLimiter()
@@ -333,10 +335,10 @@ func sanitizeMessage(raw string) (string, error) {
 	}
 	msg := strings.TrimSpace(b.String())
 	if msg == "" {
-		return "", errors.New("progress message is empty after sanitization")
+		return "", stableerr.New("progress message is empty after sanitization")
 	}
 	if len([]byte(msg)) > maxMessageBytes {
-		return "", fmt.Errorf("progress message exceeds %d bytes after sanitization", maxMessageBytes)
+		return "", stableerr.Errorf("progress message exceeds %d bytes after sanitization", maxMessageBytes)
 	}
 	return msg, nil
 }

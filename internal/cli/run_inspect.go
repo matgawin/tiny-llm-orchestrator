@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"tiny-llm-orchestrator/orc/internal/runinspect"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func executeRunInspect(command string, args []string, stdout, stderr io.Writer, inspect func(context.Context, runinspect.Options) error) error {
@@ -14,7 +15,7 @@ func executeRunInspect(command string, args []string, stdout, stderr io.Writer, 
 		if _, err := fmt.Fprintf(stderr, "%s run %s: requires <run-id>\n", appName, command); err != nil {
 			return err
 		}
-		return fmt.Errorf("run %s requires run id", command)
+		return stableerr.Errorf("run %s requires run id", command)
 	}
 	root, err := os.Getwd()
 	if err != nil {

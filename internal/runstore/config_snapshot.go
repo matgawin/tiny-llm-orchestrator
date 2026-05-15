@@ -3,11 +3,12 @@ package runstore
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -55,7 +56,7 @@ func (s *Store) WriteInitialConfigSnapshotContext(ctx context.Context, runID str
 		snapshot.Version = 1
 	}
 	if snapshot.Version != 1 {
-		return fmt.Errorf("initial config snapshot version = %d, want 1", snapshot.Version)
+		return stableerr.Errorf("initial config snapshot version = %d, want 1", snapshot.Version)
 	}
 	return s.writeConfigSnapshot(ctx, runID, snapshot, true)
 }
@@ -68,28 +69,28 @@ func (s *Store) RefreshConfigSnapshot(runID string, req RefreshConfigSnapshotReq
 // RefreshConfigSnapshotContext publishes the next config snapshot unless ctx is canceled before commit.
 func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, req RefreshConfigSnapshotRequest, validate ConfigSnapshotRefreshValidator) (ConfigSnapshotRefresh, error) {
 	if ctx == nil {
-		return ConfigSnapshotRefresh{}, errors.New("context is required")
+		return ConfigSnapshotRefresh{}, stableerr.New("context is required")
 	}
 	if req.Source == "" {
-		return ConfigSnapshotRefresh{}, errors.New("config snapshot refresh source is required")
+		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh source is required")
 	}
 	if req.ManifestHashAlgorithm == "" {
-		return ConfigSnapshotRefresh{}, errors.New("config snapshot refresh manifest hash algorithm is required")
+		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh manifest hash algorithm is required")
 	}
 	if req.ManifestHash == "" {
-		return ConfigSnapshotRefresh{}, errors.New("config snapshot refresh manifest hash is required")
+		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh manifest hash is required")
 	}
 	if validate == nil {
-		return ConfigSnapshotRefresh{}, errors.New("config snapshot refresh validator is required")
+		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh validator is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return ConfigSnapshotRefresh{}, err
 	}
 	if len(req.Snapshot.Resolved) == 0 {
-		return ConfigSnapshotRefresh{}, errors.New("config snapshot resolved.json content is required")
+		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot resolved.json content is required")
 	}
 	if len(req.Snapshot.Manifest) == 0 {
-		return ConfigSnapshotRefresh{}, errors.New("config snapshot manifest.json content is required")
+		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot manifest.json content is required")
 	}
 
 	var refresh ConfigSnapshotRefresh
@@ -111,7 +112,7 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 			return err
 		}
 		if req.Snapshot.Version != current.Version+1 {
-			return fmt.Errorf("run %q refresh config snapshot version = %d, want %d", runID, req.Snapshot.Version, current.Version+1)
+			return stableerr.Errorf("run %q refresh config snapshot version = %d, want %d", runID, req.Snapshot.Version, current.Version+1)
 		}
 		newVersionDir, err := configVersionDir(req.Snapshot.Version)
 		if err != nil {
@@ -161,16 +162,16 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 
 func (s *Store) writeConfigSnapshot(ctx context.Context, runID string, snapshot ConfigSnapshot, initial bool) error {
 	if ctx == nil {
-		return errors.New("context is required")
+		return stableerr.New("context is required")
 	}
 	if err := validateRunID(runID); err != nil {
 		return err
 	}
 	if len(snapshot.Resolved) == 0 {
-		return errors.New("config snapshot resolved.json content is required")
+		return stableerr.New("config snapshot resolved.json content is required")
 	}
 	if len(snapshot.Manifest) == 0 {
-		return errors.New("config snapshot manifest.json content is required")
+		return stableerr.New("config snapshot manifest.json content is required")
 	}
 	return s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
@@ -183,7 +184,7 @@ func (s *Store) writeConfigSnapshot(ctx context.Context, runID string, snapshot 
 		if initial {
 			currentPath := filepath.Join(run.Path, configDirName, configCurrentName)
 			if _, err := os.Lstat(currentPath); err == nil {
-				return fmt.Errorf("run %q config snapshot current.json already exists", runID)
+				return stableerr.Errorf("run %q config snapshot current.json already exists", runID)
 			} else if !os.IsNotExist(err) {
 				return fmt.Errorf("run %q config snapshot current.json: %w", runID, err)
 			}
@@ -239,24 +240,24 @@ func readConfigCurrentFile(path string) (configCurrent, error) {
 		return configCurrent{}, fmt.Errorf("decode current snapshot: %w", err)
 	}
 	if current.SchemaVersion != configSnapshotVersion {
-		return configCurrent{}, fmt.Errorf("schema_version = %d, want %d", current.SchemaVersion, configSnapshotVersion)
+		return configCurrent{}, stableerr.Errorf("schema_version = %d, want %d", current.SchemaVersion, configSnapshotVersion)
 	}
 	if current.Version <= 0 {
-		return configCurrent{}, errors.New("version must be positive")
+		return configCurrent{}, stableerr.New("version must be positive")
 	}
 	wantDir, err := configVersionDir(current.Version)
 	if err != nil {
 		return configCurrent{}, err
 	}
 	if current.VersionDir != wantDir {
-		return configCurrent{}, fmt.Errorf("version_dir = %q, want %q", current.VersionDir, wantDir)
+		return configCurrent{}, stableerr.Errorf("version_dir = %q, want %q", current.VersionDir, wantDir)
 	}
 	return current, nil
 }
 
 func configVersionDir(version int) (string, error) {
 	if version <= 0 || version > 999999 {
-		return "", fmt.Errorf("config snapshot version %d is outside supported range 1..999999", version)
+		return "", stableerr.Errorf("config snapshot version %d is outside supported range 1..999999", version)
 	}
 	return fmt.Sprintf("%06d", version), nil
 }
@@ -267,7 +268,7 @@ func ensureConfigSnapshotDir(configDir, versionPath string) error {
 	}
 	versionName := filepath.Base(versionPath)
 	if _, err := strconv.Atoi(versionName); err != nil || len(versionName) != 6 {
-		return fmt.Errorf("invalid config snapshot version directory %q", versionName)
+		return stableerr.Errorf("invalid config snapshot version directory %q", versionName)
 	}
 	info, err := os.Lstat(versionPath)
 	if os.IsNotExist(err) {
@@ -281,7 +282,7 @@ func ensureConfigSnapshotDir(configDir, versionPath string) error {
 
 func writeNewRegularFile(path string, content []byte) error {
 	if _, err := os.Lstat(path); err == nil {
-		return fmt.Errorf("%s already exists", filepath.Base(path))
+		return stableerr.Errorf("%s already exists", filepath.Base(path))
 	} else if !os.IsNotExist(err) {
 		return err
 	}

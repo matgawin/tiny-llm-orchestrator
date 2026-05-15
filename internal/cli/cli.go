@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"tiny-llm-orchestrator/orc/internal/sandbox"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -103,7 +104,7 @@ Supported shells are bash, zsh, fish, and powershell.`,
 			case "powershell":
 				return cmd.Root().GenPowerShellCompletion(stdout)
 			default:
-				return completionShellError(cmd, stderr, fmt.Errorf("unsupported shell %q", args[0]))
+				return completionShellError(cmd, stderr, stableerr.Errorf("unsupported shell %q", args[0]))
 			}
 		},
 		SilenceUsage:  true,
@@ -118,9 +119,9 @@ func completionShellArgs(stderr io.Writer) cobra.PositionalArgs {
 			return nil
 		}
 		if len(args) == 0 || args[0] == "" {
-			return completionShellError(cmd, stderr, fmt.Errorf("requires <shell>"))
+			return completionShellError(cmd, stderr, stableerr.Errorf("requires <shell>"))
 		}
-		return completionShellError(cmd, stderr, fmt.Errorf("accepts exactly one <shell>"))
+		return completionShellError(cmd, stderr, stableerr.Errorf("accepts exactly one <shell>"))
 	}
 }
 

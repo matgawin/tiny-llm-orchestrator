@@ -11,6 +11,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/launcher"
 	"tiny-llm-orchestrator/orc/internal/runinspect"
+	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func newRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
@@ -57,7 +58,7 @@ Usage:
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return runFlagError(cmd, stderr, "start", fmt.Errorf("unexpected argument %q", args[0]))
+				return runFlagError(cmd, stderr, "start", stableerr.Errorf("unexpected argument %q", args[0]))
 			}
 			return executeRunStart(runstartOptions(workflow, bead, fallbackTaskFile, taskFile, task, taskStdin, stdin), stdout, stderr)
 		},
@@ -89,10 +90,10 @@ With --json, progress and launcher diagnostics are written to stderr so stdout c
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 || args[0] == "" {
-				return runFlagError(cmd, stderr, "advance", fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "advance", stableerr.Errorf("requires <run-id>"))
 			}
 			if maxSteps < 1 {
-				return runFlagError(cmd, stderr, "advance", fmt.Errorf("--max-steps must be a positive integer"))
+				return runFlagError(cmd, stderr, "advance", stableerr.Errorf("--max-steps must be a positive integer"))
 			}
 			return executeRunAdvance(args[0], maxSteps, once, jsonOutput, stdout, stderr)
 		},
@@ -120,25 +121,25 @@ Usage:
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 || args[0] == "" {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "continue", stableerr.Errorf("requires <run-id>"))
 			}
 			if allowLoopCap && resolveBlock {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--resolve-block and --allow-loop-cap are mutually exclusive continuation modes"))
+				return runFlagError(cmd, stderr, "continue", stableerr.Errorf("--resolve-block and --allow-loop-cap are mutually exclusive continuation modes"))
 			}
 			if len(reason.Values) > 1 {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("repeated --reason flags are ambiguous"))
+				return runFlagError(cmd, stderr, "continue", stableerr.Errorf("repeated --reason flags are ambiguous"))
 			}
 			if len(reason.Values) > 0 && !resolveBlock {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is only valid with --resolve-block"))
+				return runFlagError(cmd, stderr, "continue", stableerr.Errorf("--reason is only valid with --resolve-block"))
 			}
 			if resolveBlock && len(reason.Values) == 0 {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is required for --resolve-block"))
+				return runFlagError(cmd, stderr, "continue", stableerr.Errorf("--reason is required for --resolve-block"))
 			}
 			if !allowLoopCap && !resolveBlock {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("choose one continuation mode: --allow-loop-cap or --resolve-block --reason <text>"))
+				return runFlagError(cmd, stderr, "continue", stableerr.Errorf("choose one continuation mode: --allow-loop-cap or --resolve-block --reason <text>"))
 			}
 			if resolveBlock && strings.TrimSpace(reason.Values[0]) == "" {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is required for --resolve-block and must be non-empty after trimming"))
+				return runFlagError(cmd, stderr, "continue", stableerr.Errorf("--reason is required for --resolve-block and must be non-empty after trimming"))
 			}
 			return executeRunContinue(args[0], allowLoopCap, resolveBlock, reason.Values, stdout, stderr)
 		},
@@ -169,19 +170,19 @@ JSON output and additional confirmation flags are not supported in v1.`,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 || args[0] == "" {
-				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "skip-step", stableerr.Errorf("requires <run-id>"))
 			}
 			if len(step.Values) > 1 {
-				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("repeated --step flags are ambiguous"))
+				return runFlagError(cmd, stderr, "skip-step", stableerr.Errorf("repeated --step flags are ambiguous"))
 			}
 			if len(reason.Values) > 1 {
-				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("repeated --reason flags are ambiguous"))
+				return runFlagError(cmd, stderr, "skip-step", stableerr.Errorf("repeated --reason flags are ambiguous"))
 			}
 			if len(step.Values) == 0 || strings.TrimSpace(step.Values[0]) == "" {
-				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("--step is required"))
+				return runFlagError(cmd, stderr, "skip-step", stableerr.Errorf("--step is required"))
 			}
 			if len(reason.Values) == 0 || strings.TrimSpace(reason.Values[0]) == "" {
-				return runFlagError(cmd, stderr, "skip-step", fmt.Errorf("--reason is required and must be non-empty after trimming"))
+				return runFlagError(cmd, stderr, "skip-step", stableerr.Errorf("--reason is required and must be non-empty after trimming"))
 			}
 			return executeRunSkipStep(args[0], step.Values, reason.Values, stdout, stderr)
 		},
@@ -206,10 +207,10 @@ Usage:
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 || args[0] == "" {
-				return runFlagError(cmd, stderr, "add-followup", fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "add-followup", stableerr.Errorf("requires <run-id>"))
 			}
 			if strings.TrimSpace(title) == "" {
-				return runFlagError(cmd, stderr, "add-followup", fmt.Errorf("--title is required"))
+				return runFlagError(cmd, stderr, "add-followup", stableerr.Errorf("--title is required"))
 			}
 			return executeRunAddFollowup(args[0], title, details, stdout, stderr)
 		},
@@ -234,10 +235,10 @@ Usage:
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 || args[0] == "" {
-				return runFlagError(cmd, stderr, "record-summary", fmt.Errorf("requires <run-id>"))
+				return runFlagError(cmd, stderr, "record-summary", stableerr.Errorf("requires <run-id>"))
 			}
 			if strings.TrimSpace(file) == "" {
-				return runFlagError(cmd, stderr, "record-summary", fmt.Errorf("--file is required"))
+				return runFlagError(cmd, stderr, "record-summary", stableerr.Errorf("--file is required"))
 			}
 			return executeRunRecordSummary(args[0], file, stdout, stderr)
 		},
