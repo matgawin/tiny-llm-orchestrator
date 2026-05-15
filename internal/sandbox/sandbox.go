@@ -307,7 +307,7 @@ func (p *protectedHostPaths) add(path string, seen map[string]struct{}) {
 	p.paths = append(p.paths, clean)
 }
 
-func (p protectedHostPaths) conflict(path string) (string, bool) {
+func (p *protectedHostPaths) conflict(path string) (string, bool) {
 	clean := filepath.Clean(path)
 	for _, protected := range p.paths {
 		if pathIntersects(clean, protected) {

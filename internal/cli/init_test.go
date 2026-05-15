@@ -137,5 +137,5 @@ func withTempCwd(t *testing.T) string {
 }
 
 func confirmThreeInitPromptsThroughCLI() *strings.Reader {
-	return strings.NewReader("yes\nyes\nyes\n")
+	return strings.NewReader(strings.Join([]string{"yes", "yes", "yes"}, "\n") + "\n")
 }

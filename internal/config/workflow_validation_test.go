@@ -570,6 +570,7 @@ func generatedWorkflowCase(t *testing.T, name string, mutate func(Workflow) Work
 }
 
 func workflowWithoutRetries(t *testing.T) string {
+	t.Helper()
 	return removeOnce(t, workflowYAML(t, nil), "  retries: {}\n")
 }
 

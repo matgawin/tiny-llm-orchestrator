@@ -250,7 +250,9 @@ func (l *Listener) handleConn(conn net.Conn) {
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			_ = enc.Encode(Response{Status: StatusRejected, Error: "invalid progress request JSON"})
+			if err := enc.Encode(Response{Status: StatusRejected, Error: "invalid progress request JSON"}); err != nil {
+				return
+			}
 			return
 		}
 		if err := enc.Encode(l.evaluate(req)); err != nil {

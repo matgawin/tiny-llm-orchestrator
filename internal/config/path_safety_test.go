@@ -390,6 +390,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
     argv: ["codex"]
   cwd: linked-outside`,
 			prepare: func(t *testing.T, root string) {
+				t.Helper()
 				outside := t.TempDir()
 				if err := os.Symlink(outside, filepath.Join(root, "linked-outside")); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
@@ -439,6 +440,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       target: /outside
       mode: rw`,
 			prepare: func(t *testing.T, root string) {
+				t.Helper()
 				if err := os.Mkdir(filepath.Join(root, "..", "outside"), 0o755); err != nil {
 					t.Fatalf("create outside dir: %v", err)
 				}
@@ -456,6 +458,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       mode: rw
       optional: true`,
 			prepare: func(t *testing.T, root string) {
+				t.Helper()
 				if err := os.Mkdir(filepath.Join(root, "..", "outside"), 0o755); err != nil {
 					t.Fatalf("create outside dir: %v", err)
 				}
@@ -484,6 +487,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       target: /outside
       mode: rw`,
 			prepare: func(t *testing.T, root string) {
+				t.Helper()
 				outside := t.TempDir()
 				if err := os.Symlink(outside, filepath.Join(root, "linked-outside")); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
@@ -625,6 +629,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       target: REPO_PLACEHOLDER/cache
       mode: rw`,
 			prepare: func(t *testing.T, root string) {
+				t.Helper()
 				configPath := filepath.Join(root, ".orc", "config.yaml")
 				content, err := os.ReadFile(configPath)
 				if err != nil {
@@ -647,6 +652,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       target: REPO_PARENT_PLACEHOLDER
       mode: ro`,
 			prepare: func(t *testing.T, root string) {
+				t.Helper()
 				configPath := filepath.Join(root, ".orc", "config.yaml")
 				content, err := os.ReadFile(configPath)
 				if err != nil {

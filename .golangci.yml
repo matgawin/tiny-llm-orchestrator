@@ -24,6 +24,13 @@ linters:
     - errorlint       # Check error wrapping
     - nilerr          # Finds code that returns nil even if it checks that the error is not nil
     - wastedassign    # Finds wasted assignment statements
+    - errchkjson      # Check JSON encoding/decoding errors
+    - nilnil          # Finds nil value plus nil error returns
+    - recvcheck       # Check for mixed receiver types
+    - thelper         # Check test helpers call t.Helper
+    - nolintlint      # Check nolint directives are precise and justified
+    - dupword         # Finds duplicate words
+    - musttag         # Enforce tags on JSON marshaled structs
 
   settings:
     errcheck:

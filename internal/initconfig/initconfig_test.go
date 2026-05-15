@@ -582,7 +582,7 @@ func runWithGitignore(t *testing.T, content string, opts Options) gitignoreRun {
 }
 
 func confirmOverwriteConfigCreateGitignoreAndInstructions() *strings.Reader {
-	return strings.NewReader("yes\nyes\nyes\n")
+	return strings.NewReader(strings.Join([]string{"yes", "yes", "yes"}, "\n") + "\n")
 }
 
 func readGitignore(t *testing.T, path string) []byte {

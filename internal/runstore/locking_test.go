@@ -230,6 +230,7 @@ func TestLoadRejectsSymlinkedStoreParents(t *testing.T) {
 		{
 			name: "orc",
 			setup: func(t *testing.T, root string) {
+				t.Helper()
 				realOrc := filepath.Join(root, "real-orc")
 				relocatePathBehindSymlink(t, filepath.Join(root, orcDirName), realOrc)
 			},
@@ -237,6 +238,7 @@ func TestLoadRejectsSymlinkedStoreParents(t *testing.T) {
 		{
 			name: "runs",
 			setup: func(t *testing.T, root string) {
+				t.Helper()
 				realRuns := filepath.Join(root, "real-runs")
 				relocatePathBehindSymlink(t, filepath.Join(root, orcDirName, runsDirName), realRuns)
 			},

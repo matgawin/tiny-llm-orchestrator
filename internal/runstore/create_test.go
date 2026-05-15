@@ -216,6 +216,7 @@ func TestCreateRejectsSymlinkedStoreParents(t *testing.T) {
 		{
 			name: "orc",
 			setup: func(t *testing.T, root string) {
+				t.Helper()
 				outside := filepath.Join(root, "outside-orc")
 				if err := os.Mkdir(outside, 0o750); err != nil {
 					t.Fatalf("mkdir outside .orc: %v", err)
@@ -226,6 +227,7 @@ func TestCreateRejectsSymlinkedStoreParents(t *testing.T) {
 		{
 			name: "runs",
 			setup: func(t *testing.T, root string) {
+				t.Helper()
 				if err := os.Mkdir(filepath.Join(root, orcDirName), 0o750); err != nil {
 					t.Fatalf("mkdir .orc: %v", err)
 				}

@@ -17,8 +17,8 @@ func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 	const (
 		workflowStateCode = "code"
 	)
-	workflowStatusDone := "done"   //nolint:goconst // Keep this trigger literal local to this narrow test.
-	workflowResultReady := "ready" //nolint:goconst // Keep this trigger literal local to this narrow test.
+	workflowStatusDone := "done" //nolint:goconst // Keep this trigger literal local to this narrow test.
+	workflowResultReady := "ready"
 
 	store := openStore(t, t.TempDir())
 	run, err := store.Create(CreateRunRequest{RunID: "loop-start", Workflow: "implementation", InitialState: workflowStateCode})

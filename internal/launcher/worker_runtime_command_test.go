@@ -367,6 +367,7 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t
 		{
 			name: "missing",
 			setup: func(t *testing.T, root string) string {
+				t.Helper()
 				return "missing"
 			},
 			wantErr: "not visible inside the active sandbox",
@@ -374,6 +375,7 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t
 		{
 			name: "file",
 			setup: func(t *testing.T, root string) string {
+				t.Helper()
 				path := filepath.Join(root, "runtime-file")
 				if err := os.WriteFile(path, []byte("not a dir"), 0o640); err != nil {
 					t.Fatalf("create runtime file: %v", err)
