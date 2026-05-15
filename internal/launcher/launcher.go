@@ -77,7 +77,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, stableerr.New("run id is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("launch next: %w", err)
 	}
 
 	loaded, err := loadLaunchContext(ctx, opts.Root, opts.RunID)
@@ -88,7 +88,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("launch next: %w", err)
 	}
 	latestOutcome, hasOutcome := runstore.LatestConsumableOutcome(loaded.Run.Status)
 	state := runstate.WorkflowState(loaded.Run.Status)
@@ -114,7 +114,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 				TriggerResult: latestOutcome.Result,
 			},
 		}); err != nil {
-			return Result{}, err
+			return Result{}, fmt.Errorf("launch next: %w", err)
 		}
 		return Result{RunID: opts.RunID, Attempt: latestOutcome}, stableerr.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
 	}
@@ -128,7 +128,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("launch next: %w", err)
 	}
 	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
 	workflowOutcome, hasWorkflowOutcome := workflowEntryOutcome(loaded.Run.Status, latestOutcome, hasOutcome)
@@ -141,7 +141,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		} else {
 			status, _, err := loaded.Store.BlockWorkflowLoopHardCapContext(ctx, opts.RunID, capDecision.HardCap(), at)
 			if err != nil {
-				return Result{}, err
+				return Result{}, fmt.Errorf("launch next: %w", err)
 			}
 			return Result{RunID: opts.RunID, Attempt: latestOutcome}, stableerr.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
 		}
@@ -161,13 +161,13 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		ConsumeWorkflowLoopHardCapOverride: consumeLoopCapOverride,
 	})
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("launch next: %w", err)
 	}
 	var softCap *runstore.WorkflowLoopSoftCap
 	if capDecision.Kind == loopcap.DecisionSoft {
 		loopCap := capDecision.SoftCap()
 		if _, _, err := loaded.Store.RecordWorkflowLoopSoftCapContext(ctx, opts.RunID, loopCap, at); err != nil {
-			return Result{}, err
+			return Result{}, fmt.Errorf("launch next: %w", err)
 		}
 		softCap = &loopCap
 	}

@@ -24,7 +24,7 @@ func stageArtifact(path string, artifact Artifact) (stagedArtifact, error) {
 	existing, readErr := os.ReadFile(path) // #nosec G304 -- path is scoped to the run directory.
 	existed := readErr == nil
 	if readErr != nil && !os.IsNotExist(readErr) {
-		return stagedArtifact{}, readErr
+		return stagedArtifact{}, fmt.Errorf("stage artifact: %w", readErr)
 	}
 	if existed && artifact.Kind != KindFollowup {
 		return stagedArtifact{}, stableerr.Errorf("artifact %s already exists", filepath.Base(path))
@@ -51,7 +51,7 @@ func stageArtifact(path string, artifact Artifact) (stagedArtifact, error) {
 			return writeAtomic(path, existing)
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("stage artifact: %w", err)
 		}
 		return nil
 	}
@@ -75,7 +75,7 @@ func stageArtifactFromFile(path string, artifact Artifact, sourcePath string) (s
 	if _, err := os.Lstat(path); err == nil {
 		return stagedArtifact{}, stableerr.Errorf("artifact %s already exists", filepath.Base(path))
 	} else if !os.IsNotExist(err) {
-		return stagedArtifact{}, err
+		return stagedArtifact{}, fmt.Errorf("stage artifact from file: %w", err)
 	}
 	tempName, err := writeStagedFileFromFile(path, sourcePath)
 	if err != nil {
@@ -92,7 +92,7 @@ func stageArtifactFromFile(path string, artifact Artifact, sourcePath string) (s
 	}
 	rollback := func() error {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("stage artifact from file: %w", err)
 		}
 		return nil
 	}
@@ -109,7 +109,7 @@ func writeStagedFile(path string, content []byte) (string, error) {
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp") // #nosec G304 -- path is scoped to the run directory.
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("write staged file: %w", err)
 	}
 	tempName := temp.Name()
 	cleanup := func(closeFile bool) {
@@ -120,15 +120,15 @@ func writeStagedFile(path string, content []byte) (string, error) {
 	}
 	if _, err := temp.Write(content); err != nil {
 		cleanup(true)
-		return "", err
+		return "", fmt.Errorf("write staged file: %w", err)
 	}
 	if err := temp.Chmod(0o600); err != nil {
 		cleanup(true)
-		return "", err
+		return "", fmt.Errorf("write staged file: %w", err)
 	}
 	if err := temp.Close(); err != nil {
 		cleanup(false)
-		return "", err
+		return "", fmt.Errorf("write staged file: %w", err)
 	}
 	return tempName, nil
 }
@@ -139,14 +139,14 @@ func writeStagedFileFromFile(path, sourcePath string) (string, error) {
 	}
 	source, err := os.OpenFile(sourcePath, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- sourcePath is validated as a regular launcher-owned artifact source.
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("write staged file from file: %w", err)
 	}
 	defer func() {
 		_ = source.Close()
 	}()
 	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp") // #nosec G304 -- path is scoped to the run directory.
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("write staged file from file: %w", err)
 	}
 	tempName := temp.Name()
 	cleanup := func(closeFile bool) {
@@ -157,15 +157,15 @@ func writeStagedFileFromFile(path, sourcePath string) (string, error) {
 	}
 	if _, err := io.Copy(temp, source); err != nil {
 		cleanup(true)
-		return "", err
+		return "", fmt.Errorf("write staged file from file: %w", err)
 	}
 	if err := temp.Chmod(0o600); err != nil {
 		cleanup(true)
-		return "", err
+		return "", fmt.Errorf("write staged file from file: %w", err)
 	}
 	if err := temp.Close(); err != nil {
 		cleanup(false)
-		return "", err
+		return "", fmt.Errorf("write staged file from file: %w", err)
 	}
 	return tempName, nil
 }
@@ -213,7 +213,7 @@ func checkArtifactParentDir(runDir, relPath string, createMissing bool) error {
 				return fmt.Errorf("artifact parent %s: %w", displayPath, err)
 			}
 			if err := os.Mkdir(current, 0o750); err != nil { // #nosec G703 -- current is built from validated relative artifact path components under runDir.
-				return err
+				return fmt.Errorf("check artifact parent dir: %w", err)
 			}
 			continue
 		}
@@ -266,12 +266,12 @@ func ensureDir(path string) error {
 	info, err := os.Lstat(path) // #nosec G703 -- caller validates run-store scoped paths before directory checks.
 	if os.IsNotExist(err) {
 		if err := os.Mkdir(path, 0o750); err != nil && !os.IsExist(err) { // #nosec G703 -- caller validates run-store scoped paths before directory creation.
-			return err
+			return fmt.Errorf("ensure dir: %w", err)
 		}
 		return validateDir(path)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("ensure dir: %w", err)
 	}
 	return validateDirInfo(path, info)
 }
@@ -279,7 +279,7 @@ func ensureDir(path string) error {
 func validateDir(path string) error {
 	info, err := os.Lstat(path) // #nosec G703 -- caller validates run-store scoped paths before directory checks.
 	if err != nil {
-		return err
+		return fmt.Errorf("validate dir: %w", err)
 	}
 	return validateDirInfo(path, info)
 }
@@ -300,7 +300,7 @@ func validateArtifactFile(path string) error {
 		return nil
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("validate artifact file: %w", err)
 	}
 	return validateFileInfo("artifact "+filepath.Base(path), info)
 }
@@ -308,7 +308,7 @@ func validateArtifactFile(path string) error {
 func validateRegularFile(path, name string) error {
 	info, err := os.Lstat(path) // #nosec G703 -- caller validates run-store scoped paths before file checks.
 	if err != nil {
-		return err
+		return fmt.Errorf("validate regular file: %w", err)
 	}
 	return validateFileInfo(name, info)
 }

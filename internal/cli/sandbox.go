@@ -39,7 +39,7 @@ func newSandboxRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Comm
 				return nil
 			}
 			if _, err := fmt.Fprintf(stderr, "%s sandbox run: unexpected argument %q\n\n", appName, args[0]); err != nil {
-				return err
+				return fmt.Errorf("new sandbox run command: %w", err)
 			}
 			return stableerr.Errorf("unexpected sandbox run argument: %s", args[0])
 		},
@@ -52,7 +52,7 @@ func newSandboxRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Comm
 func executeSandboxRun(stdin io.Reader, stdout, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("execute sandbox run: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -65,9 +65,9 @@ func executeSandboxRun(stdin io.Reader, stdout, stderr io.Writer) error {
 		Stderr: stderr,
 	}); err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s sandbox run: %v\n", appName, err); writeErr != nil {
-			return writeErr
+			return fmt.Errorf("execute sandbox run: %w", writeErr)
 		}
-		return err
+		return fmt.Errorf("execute sandbox run: %w", err)
 	}
 	return nil
 }

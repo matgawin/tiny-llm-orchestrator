@@ -70,7 +70,7 @@ func (s *Store) writeArtifactWithStage(ctx context.Context, runID string, artifa
 	var ref ArtifactRef
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("write artifact with stage: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -176,7 +176,7 @@ func (s *Store) ReadArtifactContext(ctx context.Context, runID string, ref Artif
 	var content []byte
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("read artifact context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -187,7 +187,10 @@ func (s *Store) ReadArtifactContext(ctx context.Context, runID string, ref Artif
 			return err
 		}
 		content, err = os.ReadFile(path) // #nosec G304,G703 -- path is scoped to the validated run directory.
-		return err
+		if err != nil {
+			return fmt.Errorf("read artifact context: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -214,7 +217,7 @@ func (s *Store) OpenArtifactAppendContext(ctx context.Context, runID string, ref
 	var file *os.File
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("open artifact append context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -229,12 +232,12 @@ func (s *Store) OpenArtifactAppendContext(ctx context.Context, runID string, ref
 		}
 		opened, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600) // #nosec G304,G703 -- path is scoped to the validated run directory and opened without following final-component symlinks.
 		if err != nil {
-			return err
+			return fmt.Errorf("open artifact append context: %w", err)
 		}
 		info, err := opened.Stat()
 		if err != nil {
 			_ = opened.Close()
-			return err
+			return fmt.Errorf("open artifact append context: %w", err)
 		}
 		if err := validateFileInfo("artifact "+ref.Path, info); err != nil {
 			_ = opened.Close()

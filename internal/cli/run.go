@@ -326,11 +326,11 @@ func runFlagError(cmd *cobra.Command, stderr io.Writer, command string, err erro
 		prefix += " " + command
 	}
 	if _, writeErr := fmt.Fprintf(stderr, "%s: %v\n\n", prefix, err); writeErr != nil {
-		return writeErr
+		return fmt.Errorf("run flag error: %w", writeErr)
 	}
 	cmd.SetOut(stderr)
 	if usageErr := cmd.Usage(); usageErr != nil {
-		return usageErr
+		return fmt.Errorf("run flag error: %w", usageErr)
 	}
 	return fmt.Errorf("%s: %w", prefix, err)
 }

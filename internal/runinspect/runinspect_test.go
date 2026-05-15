@@ -1242,11 +1242,11 @@ func snapshotRunDir(t *testing.T, root, runID string) map[string]string {
 		}
 		rel, err := filepath.Rel(runDir, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("snapshot run dir: %w", err)
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("snapshot run dir: %w", err)
 		}
 		snapshot[filepath.ToSlash(rel)] = string(content)
 		return nil

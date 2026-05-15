@@ -951,7 +951,7 @@ func runSpec(ctx context.Context, spec BwrapSpec, opts Options) error {
 		if err != nil {
 			return errors.Join(ctx.Err(), exitError(err))
 		}
-		return ctx.Err()
+		return fmt.Errorf("run spec: %w", ctx.Err())
 	}
 }
 

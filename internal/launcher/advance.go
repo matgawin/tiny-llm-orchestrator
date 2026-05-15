@@ -262,7 +262,10 @@ func terminalizeAdvanceOutcome(ctx context.Context, eval advanceEvaluation, at t
 			TriggerResult: eval.latestOutcome.Result,
 		},
 	})
-	return status, err
+	if err != nil {
+		return status, fmt.Errorf("terminalize advance outcome: %w", err)
+	}
+	return status, nil
 }
 
 func launchOptions(opts AdvanceOptions) Options {

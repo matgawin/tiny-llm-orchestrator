@@ -33,10 +33,13 @@ func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 	err := root.Execute()
 	if err != nil && isRootRoutingError(err) {
 		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
-			return writeErr
+			return fmt.Errorf("execute with input: %w", writeErr)
 		}
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("execute with input: %w", err)
+	}
+	return nil
 }
 
 func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
@@ -80,7 +83,10 @@ func newVersionCommand(stdout io.Writer) *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := fmt.Fprintf(stdout, "%s %s\n", appName, version)
-			return err
+			if err != nil {
+				return fmt.Errorf("new version command: %w", err)
+			}
+			return nil
 		},
 	}
 }
@@ -127,11 +133,11 @@ func completionShellArgs(stderr io.Writer) cobra.PositionalArgs {
 
 func completionShellError(cmd *cobra.Command, stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s completion: %v\n\n", appName, err); writeErr != nil {
-		return writeErr
+		return fmt.Errorf("completion shell error: %w", writeErr)
 	}
 	cmd.SetOut(stderr)
 	if usageErr := cmd.Usage(); usageErr != nil {
-		return usageErr
+		return fmt.Errorf("completion shell error: %w", usageErr)
 	}
 	return fmt.Errorf("%s completion: %w", appName, err)
 }

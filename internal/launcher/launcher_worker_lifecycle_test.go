@@ -12,7 +12,30 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runstore"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
+
+func TestFinishAttemptWithCleanupContextReturnsNilOnSuccessfulFinish(t *testing.T) {
+	root, runID := createLauncherRun(t, "200ms")
+	loaded, attempt := prepareRunProcessAttempt(t, root, runID, "cleanup-finish-success")
+	linkLauncherPromptAndLog(t, loaded.Store, runID, attempt.AttemptID)
+	recordProcessForLauncherTest(t, loaded.Store, runID, attempt.AttemptID)
+
+	finished, err := finishAttemptWithCleanupContext(context.Background(), loaded.Store, runID, runstore.FinishAttemptRequest{
+		AttemptID: attempt.AttemptID,
+		State:     runstore.AttemptStateMissingReport,
+		Status:    workflow.ReportStatusFailed,
+		Result:    resultMissingReport,
+		ExitState: exitStateExited,
+		Time:      fixedLauncherTime().Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("finishAttemptWithCleanupContext returned error: %v", err)
+	}
+	if finished.AttemptID != attempt.AttemptID || finished.State != runstore.AttemptStateMissingReport {
+		t.Fatalf("finished attempt = %+v, want terminal missing_report attempt %q", finished, attempt.AttemptID)
+	}
+}
 
 func TestWorkerRunnerUsesTerminalReportInsteadOfSynthesizedFinish(t *testing.T) {
 	root, runID := createLauncherRun(t, "200ms")

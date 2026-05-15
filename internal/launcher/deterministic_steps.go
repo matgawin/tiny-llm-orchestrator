@@ -222,7 +222,7 @@ func validateGeneratedOutcome(step config.Step, status, result string) error {
 func openDeterministicOutputFile(attempt runstore.Attempt, stream string) (*os.File, string, error) {
 	file, err := os.CreateTemp("", "orc-"+attempt.StepID+"-"+attempt.AttemptID+"-"+stream+"-*")
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("open deterministic output file: %w", err)
 	}
 	name := file.Name()
 	return file, name, nil
@@ -341,14 +341,14 @@ func deterministicReportSummary(kind string, command []string, status, result, s
 func boundedLogTailFromFile(path string) (string, error) {
 	file, err := os.Open(path) // #nosec G304 -- path is a launcher-owned temp file.
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
 	defer func() {
 		_ = file.Close()
 	}()
 	info, err := file.Stat()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
 	start := int64(0)
 	truncated := false
@@ -357,11 +357,11 @@ func boundedLogTailFromFile(path string) (string, error) {
 		truncated = true
 	}
 	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return "", err
+		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
 	content, err := io.ReadAll(file)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
 	if truncated {
 		if i := bytes.IndexByte(content, '\n'); i >= 0 && i+1 < len(content) {

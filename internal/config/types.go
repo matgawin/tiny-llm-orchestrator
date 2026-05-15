@@ -106,7 +106,7 @@ func (r *WorkflowReference) UnmarshalYAML(data []byte) error {
 	type workflowReference WorkflowReference
 	var expanded workflowReference
 	if err := yaml.Unmarshal(data, &expanded); err != nil {
-		return err
+		return fmt.Errorf("unmarshal workflow reference YAML: %w", err)
 	}
 	*r = WorkflowReference(expanded)
 	return nil
@@ -169,7 +169,7 @@ func (p *SandboxProtectedPath) UnmarshalYAML(data []byte) error {
 
 	var raw yaml.MapSlice
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return err
+		return fmt.Errorf("unmarshal sandbox protected path YAML: %w", err)
 	}
 	for _, item := range raw {
 		key, ok := item.Key.(string)
@@ -240,7 +240,7 @@ func (c *SandboxCommand) UnmarshalYAML(data []byte) error {
 	type sandboxCommand SandboxCommand
 	var decoded sandboxCommand
 	if err := yaml.Unmarshal(data, &decoded); err != nil {
-		return err
+		return fmt.Errorf("unmarshal sandbox command YAML: %w", err)
 	}
 	*c = SandboxCommand(decoded)
 	return nil
@@ -394,7 +394,7 @@ func (t *RuntimeSandboxMountTarget) UnmarshalYAML(data []byte) error {
 	type target RuntimeSandboxMountTarget
 	var decoded target
 	if err := yaml.Unmarshal(data, &decoded); err != nil {
-		return err
+		return fmt.Errorf("unmarshal runtime sandbox mount target YAML: %w", err)
 	}
 	*t = RuntimeSandboxMountTarget(decoded)
 	return nil
@@ -521,7 +521,7 @@ func (d *Duration) UnmarshalYAML(data []byte) error {
 	d.Set = true
 	var raw string
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return err
+		return fmt.Errorf("unmarshal duration YAML: %w", err)
 	}
 	if raw == "" {
 		d.Duration = 0
@@ -553,7 +553,10 @@ type RequiredBool struct {
 // UnmarshalYAML parses a YAML boolean and records field presence.
 func (b *RequiredBool) UnmarshalYAML(data []byte) error {
 	b.Set = true
-	return yaml.Unmarshal(data, &b.Value)
+	if err := yaml.Unmarshal(data, &b.Value); err != nil {
+		return fmt.Errorf("unmarshal YAML bool: %w", err)
+	}
+	return nil
 }
 
 // MarshalYAML emits the public boolean scalar instead of internal presence
@@ -574,7 +577,10 @@ type OptionalInt struct {
 // UnmarshalYAML parses an integer and records field presence.
 func (i *OptionalInt) UnmarshalYAML(data []byte) error {
 	i.Set = true
-	return yaml.Unmarshal(data, &i.Value)
+	if err := yaml.Unmarshal(data, &i.Value); err != nil {
+		return fmt.Errorf("unmarshal YAML integer: %w", err)
+	}
+	return nil
 }
 
 // MarshalYAML emits the public integer scalar instead of internal presence

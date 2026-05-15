@@ -122,7 +122,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 
 	store, err := runstore.Open(project.Root)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("start: %w", err)
 	}
 	return createRun(ctx, opts, project, store, workflow.Start, task, vcsSnapshot)
 }
@@ -130,7 +130,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 func createRun(ctx context.Context, opts Options, project *config.Project, store *runstore.Store, initialState string, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {
 	configSnapshot, err := configsnapshot.BuildInitial(project, opts.Workflow, opts.Time)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("create run: %w", err)
 	}
 	run, err := store.CreateContext(ctx, runstore.CreateRunRequest{
 		RunID:        opts.RunID,
@@ -140,7 +140,7 @@ func createRun(ctx context.Context, opts Options, project *config.Project, store
 		Time:         opts.Time,
 	})
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("create run: %w", err)
 	}
 	if err := store.WriteInitialConfigSnapshotContext(ctx, run.ID, configSnapshot); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
@@ -187,7 +187,10 @@ func writeTaskArtifact(ctx context.Context, store *runstore.Store, runID string,
 		Content: content,
 		Time:    at,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("write task artifact: %w", err)
+	}
+	return nil
 }
 
 func resolveTask(ctx context.Context, workflow config.Workflow, opts Options) (resolvedTask, error) {

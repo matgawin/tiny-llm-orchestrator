@@ -62,7 +62,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, stableerr.New("context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("render: %w", err)
 	}
 	if err := validateOptions(opts); err != nil {
 		return Result{}, err
@@ -72,14 +72,14 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("render: %w", err)
 	}
 	content, err := renderPrompt(ctx, renderCtx, opts)
 	if err != nil {
 		return Result{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("render: %w", err)
 	}
 	ref, err := renderCtx.store.WriteArtifactContext(ctx, opts.RunID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
@@ -89,7 +89,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	})
 	result := resultFromArtifact(renderCtx.run.Path, ref, content)
 	if err != nil {
-		return result, err
+		return result, fmt.Errorf("render: %w", err)
 	}
 	return result, nil
 }
@@ -125,7 +125,7 @@ func validateOptions(opts Options) error {
 func loadRenderContext(ctx context.Context, opts Options) (renderContext, error) {
 	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
-		return renderContext{}, err
+		return renderContext{}, fmt.Errorf("load render context: %w", err)
 	}
 	decision, err := renderSelectionDecision(loaded.Workflow, loaded.Run)
 	if err != nil {
@@ -161,7 +161,11 @@ func renderSelectionDecision(workflowConfig config.Workflow, run *runstore.Run) 
 	if active := run.Status.ActiveAttempt; active != nil {
 		return workflow.Decision{Kind: workflow.DecisionSelectStep, Step: active.StepID, RunStatus: run.Status.State}, nil
 	}
-	return workflow.Evaluate(workflowConfig, runstate.WorkflowState(run.Status))
+	decision, err := workflow.Evaluate(workflowConfig, runstate.WorkflowState(run.Status))
+	if err != nil {
+		return workflow.Decision{}, fmt.Errorf("evaluate workflow for prompt rendering: %w", err)
+	}
+	return decision, nil
 }
 
 func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([]byte, error) {
@@ -300,7 +304,7 @@ func renderPriorReports(reports []reportContext) string {
 
 func taskContextContent(ctx context.Context, renderCtx renderContext) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", fmt.Errorf("task context content: %w", err)
 	}
 	for _, ref := range renderCtx.run.Status.Artifacts {
 		if ref.Kind != runstore.KindTaskContext {
@@ -335,7 +339,7 @@ func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]report
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("prior report contexts: %w", err)
 		}
 		content, err := renderCtx.store.ReadArtifactContext(ctx, renderCtx.run.ID, ref)
 		if err != nil {
@@ -355,7 +359,7 @@ func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]report
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("prior report contexts: %w", err)
 		}
 		var detail []byte
 		if attempt.Report.ReportRef != nil {

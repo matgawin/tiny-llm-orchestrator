@@ -2,6 +2,7 @@ package runcontext
 
 import (
 	"context"
+	"fmt"
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
@@ -31,22 +32,22 @@ func LoadContext(ctx context.Context, root, runID string) (Context, error) {
 		return Context{}, stableerr.Errorf("context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return Context{}, err
+		return Context{}, fmt.Errorf("load context: %w", err)
 	}
 	store, err := runstore.Open(root)
 	if err != nil {
-		return Context{}, err
+		return Context{}, fmt.Errorf("load context: %w", err)
 	}
 	run, err := store.LoadContext(ctx, runID)
 	if err != nil {
-		return Context{}, err
+		return Context{}, fmt.Errorf("load context: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return Context{}, err
+		return Context{}, fmt.Errorf("load context: %w", err)
 	}
 	snapshot, err := configsnapshot.LoadCurrent(run)
 	if err != nil {
-		return Context{}, err
+		return Context{}, fmt.Errorf("load context: %w", err)
 	}
 	project := snapshot.Project
 	workflowConfig, ok := project.Workflows[run.Status.Workflow]

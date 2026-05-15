@@ -885,7 +885,10 @@ func startCLIProcess(t *testing.T, root string, env []string, args ...string) *c
 }
 
 func (r *cliProcessResult) wait() error {
-	return r.cmd.Wait()
+	if err := r.cmd.Wait(); err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
+	return nil
 }
 
 func (r *cliProcessResult) output() string {

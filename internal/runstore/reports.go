@@ -35,7 +35,7 @@ func (s *Store) RecordAttemptReportContext(ctx context.Context, runID string, re
 	var event Event
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("record attempt report context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -267,7 +267,7 @@ func (s *Store) RecordIgnoredReportContext(ctx context.Context, runID string, re
 	var committed Event
 	err = s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("record ignored report context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {

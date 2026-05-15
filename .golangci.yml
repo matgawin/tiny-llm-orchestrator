@@ -36,10 +36,14 @@ linters:
     - contextcheck    # Check function whether use a non-inherited context
     - noctx           # Check for contextless blocking calls
     - err113          # Enforce stable error values instead of dynamic construction
+    - wrapcheck       # Require local context on returned boundary errors
 
   settings:
     errcheck:
       check-type-assertions: true
+    wrapcheck:
+      extra-ignore-sigs:
+        - tiny-llm-orchestrator/orc/internal/stableerr.New(
     gosec:
       excludes:
         - G104 # Audit errors not checked - covered by errcheck

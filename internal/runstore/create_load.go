@@ -25,7 +25,7 @@ func (s *Store) CreateContext(ctx context.Context, req CreateRunRequest) (*Run, 
 		return nil, stableerr.New("workflow is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create context: %w", err)
 	}
 	now := normalizeTime(req.Time)
 	runID := req.RunID
@@ -162,19 +162,19 @@ type runDirReservation struct {
 
 func reserveRunDir(runDir string) (*runDirReservation, error) {
 	if err := os.Mkdir(runDir, 0o750); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reserve run dir: %w", err)
 	}
 	reservation := &runDirReservation{path: runDir}
 	file, err := os.OpenFile(filepath.Join(runDir, ".lock"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600) // #nosec G304,G703 -- lock path is scoped to an atomically reserved run directory.
 	if err != nil {
 		reservation.cleanup()
-		return nil, err
+		return nil, fmt.Errorf("reserve run dir: %w", err)
 	}
 	reservation.file = file
 	fd := int(file.Fd()) // #nosec G115 -- file descriptors fit int on supported Linux targets.
 	if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
 		reservation.cleanup()
-		return nil, err
+		return nil, fmt.Errorf("reserve run dir: %w", err)
 	}
 	return reservation, nil
 }
@@ -184,14 +184,17 @@ func publishReservedRunDir(tempDir string, reservation *runDirReservation) error
 		return stableerr.New("run directory reservation is required")
 	}
 	if err := os.Remove(filepath.Join(tempDir, ".lock")); err != nil {
-		return err
+		return fmt.Errorf("publish reserved run dir: %w", err)
 	}
 	for _, name := range append(artifactDirs(), configDirName, followupsName, eventsName, statusName) {
 		if err := os.Rename(filepath.Join(tempDir, name), filepath.Join(reservation.path, name)); err != nil {
-			return err
+			return fmt.Errorf("publish reserved run dir: %w", err)
 		}
 	}
-	return os.Remove(tempDir)
+	if err := os.Remove(tempDir); err != nil {
+		return fmt.Errorf("publish reserved run dir: %w", err)
+	}
+	return nil
 }
 
 func (r *runDirReservation) cleanup() {
@@ -225,7 +228,7 @@ func (s *Store) LoadContext(ctx context.Context, runID string) (*Run, error) {
 	var run *Run
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("load context: %w", err)
 		}
 		loaded, err := s.load(runID)
 		if err != nil {

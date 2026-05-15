@@ -20,7 +20,10 @@ func finishAttemptWithCleanupContext(parent context.Context, store *runstore.Sto
 	ctx, cancel := context.WithTimeout(cleanupContext(parent), launchCleanupTimeout)
 	defer cancel()
 	finished, _, err := store.FinishAttemptContext(ctx, runID, req)
-	return finished, err
+	if err != nil {
+		return finished, fmt.Errorf("finish attempt with cleanup context: %w", err)
+	}
+	return finished, nil
 }
 
 func cleanupContext(parent context.Context) context.Context {
@@ -60,7 +63,11 @@ func isContextError(err error) bool {
 }
 
 func loadLaunchContext(ctx context.Context, root, runID string) (runcontext.Context, error) {
-	return runcontext.LoadContext(ctx, root, runID)
+	launchContext, err := runcontext.LoadContext(ctx, root, runID)
+	if err != nil {
+		return runcontext.Context{}, fmt.Errorf("load run context for %s: %w", runID, err)
+	}
+	return launchContext, nil
 }
 
 func newAttemptID(now time.Time, step string) (string, error) {

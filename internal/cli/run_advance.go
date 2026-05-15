@@ -20,7 +20,7 @@ func executeRunAdvance(runID string, maxSteps int, once, jsonOutput bool, stdout
 	}
 	root, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("execute run advance: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -37,7 +37,7 @@ func executeRunAdvance(runID string, maxSteps int, once, jsonOutput bool, stdout
 	result, err := launcher.Advance(ctx, opts)
 	if jsonOutput {
 		if encodeErr := json.NewEncoder(stdout).Encode(advanceJSON(result)); encodeErr != nil {
-			return encodeErr
+			return fmt.Errorf("execute run advance: %w", encodeErr)
 		}
 	} else {
 		if writeErr := printAdvanceResult(stdout, result); writeErr != nil {
@@ -46,9 +46,9 @@ func executeRunAdvance(runID string, maxSteps int, once, jsonOutput bool, stdout
 	}
 	if err != nil && result.ExitCode == 1 {
 		if _, writeErr := fmt.Fprintf(stderr, "%s run advance: %v\n", appName, err); writeErr != nil {
-			return writeErr
+			return fmt.Errorf("execute run advance: %w", writeErr)
 		}
-		return err
+		return fmt.Errorf("execute run advance: %w", err)
 	}
 	if result.ExitCode != 0 {
 		return exitError{Code: result.ExitCode, Err: err}
@@ -80,26 +80,29 @@ func advanceJSON(result launcher.AdvanceResult) advanceJSONResult {
 
 func printAdvanceResult(w io.Writer, result launcher.AdvanceResult) error {
 	if _, err := fmt.Fprintf(w, "advanced run %s\n", result.RunID); err != nil {
-		return err
+		return fmt.Errorf("print advance result: %w", err)
 	}
 	if _, err := fmt.Fprintf(w, "launched attempts: %d\n", len(result.LaunchedAttempts)); err != nil {
-		return err
+		return fmt.Errorf("print advance result: %w", err)
 	}
 	if _, err := fmt.Fprintf(w, "final status: %s\n", result.FinalStatus); err != nil {
-		return err
+		return fmt.Errorf("print advance result: %w", err)
 	}
 	if _, err := fmt.Fprintf(w, "final decision: %s\n", result.FinalDecision); err != nil {
-		return err
+		return fmt.Errorf("print advance result: %w", err)
 	}
 	if _, err := fmt.Fprintf(w, "stop reason: %s\n", result.StopReason); err != nil {
-		return err
+		return fmt.Errorf("print advance result: %w", err)
 	}
 	if _, err := fmt.Fprintf(w, "exit code: %d\n", result.ExitCode); err != nil {
-		return err
+		return fmt.Errorf("print advance result: %w", err)
 	}
 	if result.Error != "" {
 		_, err := fmt.Fprintf(w, "error: %s\n", result.Error)
-		return err
+		if err != nil {
+			return fmt.Errorf("print advance result: %w", err)
+		}
+		return nil
 	}
 	return nil
 }

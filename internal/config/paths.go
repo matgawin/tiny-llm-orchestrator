@@ -29,7 +29,11 @@ func readConfigFile(realOrcDir, path string) ([]byte, error) {
 	if err := validateResolvedUnderDir(realOrcDir, path); err != nil {
 		return nil, err
 	}
-	return os.ReadFile(path) // #nosec G304
+	content, err := os.ReadFile(path) // #nosec G304
+	if err != nil {
+		return nil, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	return content, nil
 }
 
 func resolveOrcRelativePath(orcDir, realOrcDir, relPath string) (string, error) {
@@ -55,7 +59,7 @@ func resolveOrcRelativePath(orcDir, realOrcDir, relPath string) (string, error) 
 func validateResolvedUnderDir(realDir, path string) error {
 	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate resolved under dir: %w", err)
 	}
 	rel, err := filepath.Rel(realDir, realPath)
 	if err != nil {

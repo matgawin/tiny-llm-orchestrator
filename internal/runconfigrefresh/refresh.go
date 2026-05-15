@@ -61,7 +61,7 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 		source = defaultSource
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
 	project, err := config.Load(opts.Root)
 	if err != nil {
@@ -69,15 +69,15 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 	}
 	store, err := runstore.Open(opts.Root)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
 	run, err := store.LoadContext(ctx, opts.RunID)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
 	current, err := configsnapshot.LoadCurrent(run)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
 	vcsSnapshot, err := vcs.InspectRefresh(ctx, vcs.Options{Root: opts.Root, Env: opts.Env, Time: opts.Time})
 	if err != nil {
@@ -85,7 +85,7 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 	}
 	snapshot, err := configsnapshot.BuildRefresh(project, run.Status.Workflow, current.Version+1, source, vcsSnapshot, opts.Time)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
 	manifestHash := configsnapshot.ManifestHash(snapshot.Manifest)
 	refresh, err := store.RefreshConfigSnapshotContext(ctx, opts.RunID, runstore.RefreshConfigSnapshotRequest{
@@ -100,12 +100,12 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 		}
 		lockedOld, err := configsnapshot.LoadCurrent(lockedRun)
 		if err != nil {
-			return err
+			return fmt.Errorf("refresh: %w", err)
 		}
 		return validateCompatibility(lockedRun, lockedOld.Project, project)
 	})
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
 	return Result{
 		RunID:                 opts.RunID,

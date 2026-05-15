@@ -32,7 +32,7 @@ func Record(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, stableerr.New("context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("record: %w", err)
 	}
 	if opts.Root == "" {
 		return Result{}, stableerr.New("project root is required")
@@ -45,7 +45,7 @@ func Record(ctx context.Context, opts Options) (Result, error) {
 	}
 	store, err := runstore.Open(opts.Root)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("record: %w", err)
 	}
 	content, err := os.ReadFile(opts.File) // #nosec G304 -- caller-provided summary file is the command input being snapshotted.
 	if err != nil {
@@ -64,7 +64,7 @@ func Record(ctx context.Context, opts Options) (Result, error) {
 		if errors.As(err, &stateErr) {
 			return Result{}, fmt.Errorf("%w to record final summary; use summary-context for inspection", err)
 		}
-		return Result{}, err
+		return Result{}, fmt.Errorf("record: %w", err)
 	}
 	return Result{RunID: opts.RunID, SummaryRef: ref}, nil
 }

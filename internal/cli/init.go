@@ -41,25 +41,25 @@ func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 func executeInit(opts initconfig.Options, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("execute init: %w", err)
 	}
 	opts.Root = root
 	if err := initconfig.Run(opts); err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s init: %v\n", appName, err); writeErr != nil {
-			return writeErr
+			return fmt.Errorf("execute init: %w", writeErr)
 		}
-		return err
+		return fmt.Errorf("execute init: %w", err)
 	}
 	return nil
 }
 
 func initFlagError(cmd *cobra.Command, stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s init: %v\n\n", appName, err); writeErr != nil {
-		return writeErr
+		return fmt.Errorf("init flag error: %w", writeErr)
 	}
 	cmd.SetOut(stderr)
 	if usageErr := cmd.Usage(); usageErr != nil {
-		return usageErr
+		return fmt.Errorf("init flag error: %w", usageErr)
 	}
 	return fmt.Errorf("%s init: %w", appName, err)
 }

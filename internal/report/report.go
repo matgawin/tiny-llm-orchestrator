@@ -48,7 +48,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 		return Result{}, stableerr.New("context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("submit: %w", err)
 	}
 	if opts.Root == "" {
 		return Result{}, stableerr.New("project root is required")
@@ -62,14 +62,14 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 	}
 	store, err := runstore.Open(opts.Root)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("submit: %w", err)
 	}
 	run, err := store.LoadContext(ctx, payload.RunID)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("submit: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("submit: %w", err)
 	}
 	targetErr := validateCurrentTarget(run.Status.ActiveAttempt, payload)
 	if targetErr != nil {
@@ -153,7 +153,7 @@ func recordValidReport(ctx context.Context, store *runstore.Store, report runsto
 		if result, ignoreErr, ignored := recordTargetRaceResult(ctx, store, report, at, err); ignored {
 			return result, ignoreErr
 		}
-		return Result{}, err
+		return Result{}, fmt.Errorf("record valid report: %w", err)
 	}
 	return Result{RunID: report.RunID, Attempt: attempt, Event: event, ReportRef: attempt.ReportRef}, nil
 }
@@ -175,7 +175,7 @@ func recordTargetRaceResult(ctx context.Context, store *runstore.Store, report r
 func loadWorkflowConfig(run *runstore.Run) (config.Workflow, error) {
 	snapshot, err := configsnapshot.LoadCurrent(run)
 	if err != nil {
-		return config.Workflow{}, err
+		return config.Workflow{}, fmt.Errorf("load workflow config: %w", err)
 	}
 	workflowConfig, ok := snapshot.Project.Workflows[run.Status.Workflow]
 	if !ok {
@@ -281,7 +281,7 @@ func decodeFirstReportLenient(content []byte) (runstore.Report, error) {
 	var report runstore.Report
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&report); err != nil {
-		return runstore.Report{}, err
+		return runstore.Report{}, fmt.Errorf("decode first report lenient: %w", err)
 	}
 	return report, nil
 }
@@ -290,7 +290,7 @@ func decodeFirstReportIdentity(content []byte) (runstore.Report, error) {
 	var raw map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&raw); err != nil {
-		return runstore.Report{}, err
+		return runstore.Report{}, fmt.Errorf("decode first report identity: %w", err)
 	}
 	return reportIdentityFromRaw(raw), nil
 }
@@ -475,17 +475,21 @@ func readRegularFile(path string) ([]byte, error) {
 	}
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- caller-provided report path is intentionally read after symlink refusal.
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read regular file: %w", err)
 	}
 	defer func() {
 		_ = file.Close()
 	}()
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read regular file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, stableerr.Errorf("%s is not a regular file", path)
 	}
-	return io.ReadAll(file)
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("read report file %s: %w", path, err)
+	}
+	return content, nil
 }

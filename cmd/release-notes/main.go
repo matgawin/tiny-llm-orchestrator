@@ -27,7 +27,7 @@ func run(args []string) error {
 	flags.SetOutput(os.Stderr)
 	repositoryURL := flags.String("repository-url", "", "optional GitHub repository URL used for commit links")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return fmt.Errorf("run: %w", err)
 	}
 	if flags.NArg() != 1 {
 		return stableerr.New("usage: release-notes [--repository-url URL] <previous_tag..selected_commit>")

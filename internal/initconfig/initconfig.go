@@ -55,7 +55,7 @@ func Run(opts Options) error {
 
 	root, err := filepath.Abs(opts.Root)
 	if err != nil {
-		return err
+		return fmt.Errorf("run: %w", err)
 	}
 	realRoot, err := resolveProjectRoot(root)
 	if err != nil {
@@ -84,7 +84,7 @@ type runner struct {
 func (r runner) run() error {
 	if r.dryRun {
 		if _, err := fmt.Fprintln(r.stdout, "orc init dry-run:"); err != nil {
-			return err
+			return fmt.Errorf("run: %w", err)
 		}
 	}
 
@@ -187,7 +187,7 @@ func (r runner) planFile(item scaffoldFile) (plannedAction, error) {
 		}
 		return createdAction(item.path, func() error {
 			if err := os.MkdirAll(filepath.Dir(target.path), 0o750); err != nil {
-				return err
+				return fmt.Errorf("plan file: %w", err)
 			}
 			return writeNewFile(target.path, item.content)
 		}), nil
@@ -254,7 +254,7 @@ func (r runner) planRuntimeDir() (plannedAction, error) {
 			return noopAction("would create", runsDirPath), nil
 		}
 	default:
-		return plannedAction{}, err
+		return plannedAction{}, fmt.Errorf("plan runtime dir: %w", err)
 	}
 	return createdAction(runsDirPath, func() error {
 		return os.MkdirAll(path, 0o750)
@@ -335,33 +335,39 @@ func writeNewFile(path string, content []byte) error {
 		if errors.Is(err, os.ErrExist) {
 			return stableerr.Errorf("%s changed during init; rerun init", path)
 		}
-		return err
+		return fmt.Errorf("write new file: %w", err)
 	}
 	if _, err := file.Write(content); err != nil {
 		_ = file.Close()
-		return err
+		return fmt.Errorf("write new file: %w", err)
 	}
-	return file.Close()
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("write new file: %w", err)
+	}
+	return nil
 }
 
 func writeFileIfUnchanged(path string, expected, next []byte) error {
 	current, err := os.ReadFile(path) // #nosec G304 -- path is resolved under the selected project root.
 	if err != nil {
-		return err
+		return fmt.Errorf("write file if unchanged: %w", err)
 	}
 	if !bytes.Equal(current, expected) {
 		return stableerr.Errorf("%s changed during init; rerun init", path)
 	}
-	return os.WriteFile(path, next, 0o600) // #nosec G703 -- path is resolved under the selected project root.
+	if err := os.WriteFile(path, next, 0o600); err != nil { // #nosec G703 -- path is resolved under the selected project root.
+		return fmt.Errorf("write file if unchanged: %w", err)
+	}
+	return nil
 }
 
 func (r runner) confirm(prompt string) (bool, error) {
 	if _, err := fmt.Fprintf(r.stdout, "%s [y/N] ", prompt); err != nil {
-		return false, err
+		return false, fmt.Errorf("confirm: %w", err)
 	}
 	answer, err := r.prompts.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
+		return false, fmt.Errorf("confirm: %w", err)
 	}
 	normalized := strings.ToLower(strings.TrimSpace(answer))
 	return normalized == "y" || normalized == "yes", nil
@@ -369,7 +375,10 @@ func (r runner) confirm(prompt string) (bool, error) {
 
 func (r runner) report(action, target string) error {
 	_, err := fmt.Fprintf(r.stdout, "%s %s\n", action, target)
-	return err
+	if err != nil {
+		return fmt.Errorf("report: %w", err)
+	}
+	return nil
 }
 
 func noopAction(action, target string) plannedAction {
@@ -451,11 +460,11 @@ func validateExistingTarget(relPath, containmentRoot, target string) error {
 		return nil
 	}
 	if lstatErr != nil {
-		return lstatErr
+		return fmt.Errorf("validate existing target: %w", lstatErr)
 	}
 	realTarget, err := filepath.EvalSymlinks(target)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate existing target: %w", err)
 	}
 	if err := validateUnderRoot(containmentRoot, realTarget); err != nil {
 		return fmt.Errorf("%s: %w", relPath, err)
@@ -487,7 +496,7 @@ func validateExistingAncestor(realRoot, containmentRoot, target string) error {
 		if _, err := os.Stat(ancestor); err == nil {
 			realAncestor, err := filepath.EvalSymlinks(ancestor)
 			if err != nil {
-				return err
+				return fmt.Errorf("validate existing ancestor: %w", err)
 			}
 			if err := validateUnderRoot(realRoot, realAncestor); err != nil {
 				return err
@@ -500,11 +509,11 @@ func validateExistingAncestor(realRoot, containmentRoot, target string) error {
 				return nil
 			}
 			if err != nil {
-				return err
+				return fmt.Errorf("validate existing ancestor: %w", err)
 			}
 			return validateUnderRoot(resolvedContainmentRoot, realAncestor)
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
+			return fmt.Errorf("validate existing ancestor: %w", err)
 		}
 		next := filepath.Dir(ancestor)
 		if next == ancestor {

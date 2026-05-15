@@ -93,7 +93,11 @@ func (e workerSandboxRootMismatchError) Error() string {
 func canonicalPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve absolute path %s: %w", path, err)
 	}
-	return filepath.EvalSymlinks(abs)
+	realPath, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve symlinks for %s: %w", abs, err)
+	}
+	return realPath, nil
 }

@@ -41,7 +41,7 @@ func Skip(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, stableerr.New("context is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("skip: %w", err)
 	}
 	if opts.Root == "" {
 		return Result{}, stableerr.New("project root is required")
@@ -59,10 +59,10 @@ func Skip(ctx context.Context, opts Options) (Result, error) {
 	}
 	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("skip: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("skip: %w", err)
 	}
 	status, event, err := loaded.Store.RecordStepSkipContext(ctx, opts.RunID, runstore.RecordStepSkipRequest{
 		StepID: opts.StepID,
@@ -73,7 +73,7 @@ func Skip(ctx context.Context, opts Options) (Result, error) {
 		return validateSkip(loaded.Workflow, status, opts.StepID)
 	})
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("skip: %w", err)
 	}
 	return Result{RunID: opts.RunID, StepID: opts.StepID, Status: status, Event: event}, nil
 }

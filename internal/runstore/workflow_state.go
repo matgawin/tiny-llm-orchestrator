@@ -31,7 +31,7 @@ func (s *Store) RecordWorkflowLoopSoftCapContext(ctx context.Context, runID stri
 	var event Event
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("record workflow loop soft cap context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -83,7 +83,7 @@ func (s *Store) BlockWorkflowLoopHardCapContext(ctx context.Context, runID strin
 	var event Event
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("block workflow loop hard cap context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -210,7 +210,7 @@ func (s *Store) RecordStepSkipContext(ctx context.Context, runID string, req Rec
 	var event Event
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("record step skip context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {

@@ -68,33 +68,36 @@ func noReportFlagsChanged(cmd *cobra.Command) bool {
 func executeReport(opts report.Options, stdout, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("execute report: %w", err)
 	}
 	opts.Root = root
 	result, err := report.Submit(context.Background(), opts)
 	if err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s report: %v\n", appName, err); writeErr != nil {
-			return writeErr
+			return fmt.Errorf("execute report: %w", writeErr)
 		}
-		return err
+		return fmt.Errorf("execute report: %w", err)
 	}
 	if result.Ignored {
 		_, err = fmt.Fprintf(stdout, "ignored report for run %s\n", result.RunID)
-		return err
+		if err != nil {
+			return fmt.Errorf("execute report: %w", err)
+		}
+		return nil
 	}
 	if _, err := fmt.Fprintf(stdout, "recorded report for run %s attempt %s\n", result.RunID, result.Attempt.AttemptID); err != nil {
-		return err
+		return fmt.Errorf("execute report: %w", err)
 	}
 	return nil
 }
 
 func reportFlagError(cmd *cobra.Command, stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s report: %v\n\n", appName, err); writeErr != nil {
-		return writeErr
+		return fmt.Errorf("report flag error: %w", writeErr)
 	}
 	cmd.SetOut(stderr)
 	if helpErr := cmd.Usage(); helpErr != nil {
-		return helpErr
+		return fmt.Errorf("report flag error: %w", helpErr)
 	}
 	return fmt.Errorf("%s report: %w", appName, err)
 }

@@ -411,7 +411,7 @@ func resolveExistingProjectPath(projectRoot, path string) (string, string, error
 	}
 	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("resolve existing project path: %w", err)
 	}
 	return realRoot, realPath, nil
 }

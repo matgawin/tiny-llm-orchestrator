@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"tiny-llm-orchestrator/orc/internal/stableerr"
@@ -13,7 +14,7 @@ func Open(projectRoot string) (*Store, error) {
 	}
 	root, err := filepath.Abs(projectRoot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open: %w", err)
 	}
 	return &Store{
 		orcDir:  filepath.Join(root, orcDirName),

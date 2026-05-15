@@ -31,7 +31,10 @@ func newProgressCommand(stdout, stderr io.Writer) *cobra.Command {
 func executeProgress(cmd *cobra.Command, args []string, stdout, stderr io.Writer) error {
 	message, help, err := parseProgressMessage(args)
 	if help {
-		return cmd.Help()
+		if err := cmd.Help(); err != nil {
+			return fmt.Errorf("execute progress: %w", err)
+		}
+		return nil
 	}
 	if err != nil {
 		return progressFlagError(cmd, stderr, err)
@@ -42,7 +45,10 @@ func executeProgress(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 	socketPath := os.Getenv("ORC_PROGRESS_SOCKET")
 	if socketPath == "" {
 		_, err := fmt.Fprintln(stderr, "orc progress: live progress channel unavailable: ORC_PROGRESS_SOCKET is not set")
-		return err
+		if err != nil {
+			return fmt.Errorf("execute progress: %w", err)
+		}
+		return nil
 	}
 	req := progress.Request{
 		RunID:     os.Getenv("ORC_RUN_ID"),
@@ -58,7 +64,10 @@ func executeProgress(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 	if err != nil {
 		if errors.Is(err, progress.ErrUnavailable) {
 			_, writeErr := fmt.Fprintf(stderr, "orc progress: live progress channel unavailable: %v\n", err)
-			return writeErr
+			if writeErr != nil {
+				return fmt.Errorf("execute progress: %w", writeErr)
+			}
+			return nil
 		}
 		return progressFlagError(cmd, stderr, err)
 	}
@@ -67,7 +76,10 @@ func executeProgress(cmd *cobra.Command, args []string, stdout, stderr io.Writer
 		return nil
 	case progress.StatusDropped:
 		_, err := fmt.Fprintln(stderr, "orc progress: live progress update was rate-limited and dropped")
-		return err
+		if err != nil {
+			return fmt.Errorf("execute progress: %w", err)
+		}
+		return nil
 	case progress.StatusRejected:
 		if resp.Error == "" {
 			resp.Error = "progress listener rejected the update"
@@ -105,11 +117,11 @@ func parseProgressMessage(args []string) (message string, help bool, err error) 
 
 func progressFlagError(cmd *cobra.Command, stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s progress: %v\n\n", appName, err); writeErr != nil {
-		return writeErr
+		return fmt.Errorf("progress flag error: %w", writeErr)
 	}
 	cmd.SetOut(stderr)
 	if helpErr := cmd.Usage(); helpErr != nil {
-		return helpErr
+		return fmt.Errorf("progress flag error: %w", helpErr)
 	}
 	return fmt.Errorf("%s progress: %w", appName, err)
 }

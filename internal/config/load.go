@@ -17,7 +17,7 @@ func Load(projectRoot string) (*Project, error) {
 	}
 	absRoot, err := filepath.Abs(projectRoot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load: %w", err)
 	}
 	orcDir := filepath.Join(absRoot, configDirName)
 	realOrcDir, err := filepath.EvalSymlinks(orcDir)

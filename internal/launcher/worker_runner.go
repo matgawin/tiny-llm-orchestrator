@@ -481,7 +481,10 @@ func (r *workerRunner) recordAttemptWarning(ctx context.Context, attempt runstor
 		Message:   message,
 		Time:      at,
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("record attempt warning: %w", err)
+	}
+	return nil
 }
 
 func (r *workerRunner) waitWithTimeoutAndReport(ctx context.Context) waitResult {
@@ -517,7 +520,10 @@ func (r *workerRunner) finishWaitOutcome(ctx context.Context, waitResult waitRes
 		return finishAttemptWithCleanupContext(ctx, r.loaded.Store, r.loaded.Run.ID, finishReq)
 	}
 	finished, _, err := r.loaded.Store.FinishAttemptContext(ctx, r.loaded.Run.ID, finishReq)
-	return finished, err
+	if err != nil {
+		return finished, fmt.Errorf("finish wait outcome: %w", err)
+	}
+	return finished, nil
 }
 
 func (r *workerRunner) finishPreStartContext(ctx context.Context, exitState string, logRef runstore.ArtifactRef, causes ...error) (runstore.Attempt, error) {
@@ -640,7 +646,7 @@ func openStreamingLog(ctx context.Context, store *runstore.Store, run *runstore.
 		Time:    at,
 	})
 	if err != nil {
-		return runstore.ArtifactRef{}, nil, err
+		return runstore.ArtifactRef{}, nil, fmt.Errorf("open streaming log: %w", err)
 	}
 	_, _, err = store.RecordAttemptLogContext(ctx, run.ID, runstore.AttemptLogRequest{
 		AttemptID: attempt.AttemptID,
@@ -648,11 +654,11 @@ func openStreamingLog(ctx context.Context, store *runstore.Store, run *runstore.
 		Time:      at,
 	})
 	if err != nil {
-		return ref, nil, err
+		return ref, nil, fmt.Errorf("open streaming log: %w", err)
 	}
 	file, err := store.OpenArtifactAppendContext(ctx, run.ID, ref)
 	if err != nil {
-		return ref, nil, err
+		return ref, nil, fmt.Errorf("open streaming log: %w", err)
 	}
 	return ref, file, nil
 }
@@ -705,13 +711,16 @@ func recoverActiveAttempt(ctx context.Context, store *runstore.Store, run *runst
 			zap.String("exit_state", exitState),
 		)
 	}
-	return recovered, err
+	if err != nil {
+		return recovered, fmt.Errorf("recover active attempt: %w", err)
+	}
+	return recovered, nil
 }
 
 func loadAttemptByID(ctx context.Context, store *runstore.Store, runID, attemptID string, match func(runstore.Attempt) bool) (runstore.Attempt, bool, error) {
 	run, err := store.LoadContext(ctx, runID)
 	if err != nil {
-		return runstore.Attempt{}, false, err
+		return runstore.Attempt{}, false, fmt.Errorf("load attempt by ID: %w", err)
 	}
 	for i := len(run.Status.Attempts) - 1; i >= 0; i-- {
 		attempt := run.Status.Attempts[i]

@@ -79,7 +79,7 @@ func Config(ctx context.Context, opts Options) error {
 	}
 	snapshot, err := configsnapshot.InspectCurrent(run)
 	if err != nil {
-		return err
+		return fmt.Errorf("config: %w", err)
 	}
 	renderConfig(out, run, snapshot)
 	return nil
@@ -163,7 +163,7 @@ func loadProjectRun(ctx context.Context, opts Options) (config.Workflow, *runsto
 		if errors.Is(err, os.ErrNotExist) {
 			return config.Workflow{}, nil, nil, stableerr.Errorf("run %q not found", opts.RunID)
 		}
-		return config.Workflow{}, nil, nil, err
+		return config.Workflow{}, nil, nil, fmt.Errorf("load project run: %w", err)
 	}
 	return loaded.Workflow, loaded.Store, loaded.Run, nil
 }
@@ -177,14 +177,14 @@ func loadRun(ctx context.Context, opts Options) (*runstore.Store, *runstore.Run,
 	}
 	store, err := runstore.Open(opts.Root)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("load run: %w", err)
 	}
 	run, err := store.LoadContext(ctx, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, nil, stableerr.Errorf("run %q not found", opts.RunID)
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("load run: %w", err)
 	}
 	out := opts.Stdout
 	if out == nil {
@@ -415,7 +415,7 @@ func printSelectedStep(w io.Writer, workflowConfig config.Workflow, stepID strin
 
 func renderSummaryContext(ctx context.Context, inspection inspection) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return fmt.Errorf("render summary context: %w", err)
 	}
 	run := inspection.run
 	w := inspection.stdout

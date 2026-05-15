@@ -24,7 +24,7 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 		return Attempt{}, Event{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return Attempt{}, Event{}, err
+		return Attempt{}, Event{}, fmt.Errorf("start attempt context: %w", err)
 	}
 	req.Time = normalizeTime(req.Time)
 	attempt, err := newStartedAttempt(runID, req)
@@ -35,7 +35,7 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 	var event Event
 	err = s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("start attempt context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -57,7 +57,7 @@ func (s *Store) StartAttemptContext(ctx context.Context, runID string, req Start
 			return fmt.Errorf("run %q %w", runID, err)
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("start attempt context: %w", err)
 		}
 		var workflowEntry *WorkflowStateEntry
 		if req.WorkflowStateEntry.State != "" {
@@ -227,7 +227,7 @@ func (s *Store) RecordAttemptWarningContext(ctx context.Context, runID string, w
 	var status Status
 	err = s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("record attempt warning context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -263,7 +263,7 @@ func (s *Store) terminalizeAttempt(ctx context.Context, runID string, req Finish
 		return Attempt{}, Event{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return Attempt{}, Event{}, err
+		return Attempt{}, Event{}, fmt.Errorf("terminalize attempt: %w", err)
 	}
 	outcome := terminalOutcomeFromFinishRequest(req, recovered)
 	return s.updateActiveAttemptContext(ctx, runID, req.AttemptID, req.Time, eventType, func(status Status, attempt *Attempt) (any, error) {
@@ -457,7 +457,7 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 		return Attempt{}, Event{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return Attempt{}, Event{}, err
+		return Attempt{}, Event{}, fmt.Errorf("update active attempt context: %w", err)
 	}
 	at = normalizeTime(at)
 	if attemptID == "" {
@@ -467,7 +467,7 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 	var event Event
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("update active attempt context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -485,7 +485,7 @@ func (s *Store) updateActiveAttemptContext(ctx context.Context, runID, attemptID
 			return err
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("update active attempt context: %w", err)
 		}
 		content, err := marshalPayload(payload)
 		if err != nil {

@@ -91,12 +91,16 @@ func WriteSnapshot(ctx context.Context, store *runstore.Store, runID, name strin
 		return runstore.ArtifactRef{}, fmt.Errorf("marshal VCS snapshot: %w", err)
 	}
 	content = append(content, '\n')
-	return store.WriteArtifactContext(ctx, runID, runstore.Artifact{
+	ref, err := store.WriteArtifactContext(ctx, runID, runstore.Artifact{
 		Kind:    runstore.KindSnapshot,
 		Name:    name,
 		Content: content,
 		Time:    at,
 	})
+	if err != nil {
+		return runstore.ArtifactRef{}, fmt.Errorf("write VCS snapshot artifact %s: %w", name, err)
+	}
+	return ref, nil
 }
 
 func inspect(ctx context.Context, opts Options, phase string) (Snapshot, error) {

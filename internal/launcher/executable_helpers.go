@@ -28,7 +28,7 @@ func resolveRepoRelativeDir(root, rel string) (string, error) {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve repo relative dir: %w", err)
 	}
 	if !info.IsDir() {
 		return "", stableerr.Errorf("cwd %q is not a directory", rel)
@@ -43,7 +43,7 @@ func resolveRepoRelativeExecutable(root, rel string) (string, error) {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve repo relative executable: %w", err)
 	}
 	if info.IsDir() {
 		return "", stableerr.Errorf("script %q is a directory", rel)
@@ -64,16 +64,16 @@ func resolveRepoRelative(root, rel string) (string, error) {
 	}
 	rootReal, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve repo relative: %w", err)
 	}
 	candidate := filepath.Join(root, clean)
 	realPath, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve repo relative: %w", err)
 	}
 	relToRoot, err := filepath.Rel(rootReal, realPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve repo relative: %w", err)
 	}
 	if relToRoot == "." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) || relToRoot == ".." || filepath.IsAbs(relToRoot) {
 		return "", stableerr.Errorf("path %q escapes repository root", rel)
@@ -119,7 +119,7 @@ func newWorkerCommand(ctx context.Context, command, env []string, dir string) (*
 	helperArgs := append([]string{execHelperArg, helperToken, execPath}, command[1:]...)
 	readFile, writeFile, err := os.Pipe()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("new worker command: %w", err)
 	}
 	released := false
 	release := func(start bool) error {
@@ -157,7 +157,7 @@ func resolveWorkerExecutable(name string, env []string, cwd string) (string, err
 		}
 		info, err := os.Stat(statPath)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("resolve worker executable: %w", err)
 		}
 		if info.IsDir() {
 			return "", stableerr.Errorf("%s is a directory", execPath)
@@ -230,7 +230,7 @@ func readExecHelperToken(reader io.Reader) (string, error) {
 	var buf [33]byte
 	n, err := io.ReadFull(reader, buf[:])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read exec helper token: %w", err)
 	}
 	if n != len(buf) || buf[len(buf)-1] != '\n' {
 		return "", stableerr.New("invalid exec helper token")

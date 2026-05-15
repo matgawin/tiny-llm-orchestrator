@@ -213,12 +213,16 @@ func sourceHash(entries []sourceFileEntry) string {
 func readRegularSnapshotFile(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read regular snapshot file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, stableerr.Errorf("not a regular file")
 	}
-	return os.ReadFile(path) // #nosec G304 -- path is derived from a validated run directory.
+	content, err := os.ReadFile(path) // #nosec G304 -- path is derived from a validated run directory.
+	if err != nil {
+		return nil, fmt.Errorf("read config snapshot file %s: %w", path, err)
+	}
+	return content, nil
 }
 
 func validateVersionDirName(name string) error {

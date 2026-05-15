@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -624,7 +625,10 @@ func recordReadyLauncherReport(store *runstore.Store, run *runstore.Run, attempt
 		},
 		Time: fixedLauncherTime().Add(time.Second),
 	})
-	return err
+	if err != nil {
+		return fmt.Errorf("record ready launcher report: %w", err)
+	}
+	return nil
 }
 
 func assertLauncherWarning(t *testing.T, run *runstore.Run, attemptID, kind string) runstore.AttemptWarning {

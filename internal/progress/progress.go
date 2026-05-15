@@ -88,19 +88,20 @@ func NewListenerContext(ctx context.Context) (*Listener, error) {
 	}
 	dir, err := os.MkdirTemp("", "orc-progress-*")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new listener context: %w", err)
 	}
+
 	// #nosec G302 -- the progress socket directory must be traversable by the
 	// current user while excluding group and other users.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		_ = os.RemoveAll(dir)
-		return nil, err
+		return nil, fmt.Errorf("new listener context: %w", err)
 	}
 	path := filepath.Join(dir, socketName)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", path)
 	if err != nil {
 		_ = os.RemoveAll(dir)
-		return nil, err
+		return nil, fmt.Errorf("new listener context: %w", err)
 	}
 	l := &Listener{
 		listener: ln,
@@ -118,7 +119,7 @@ func NewListenerContext(ctx context.Context) (*Listener, error) {
 func GenerateToken() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
+		return "", fmt.Errorf("generate token: %w", err)
 	}
 	return hex.EncodeToString(b[:]), nil
 }
@@ -141,14 +142,14 @@ func Send(socketPath string, req Request) (Response, error) {
 		_ = conn.Close()
 	}()
 	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("send: %w", err)
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("send: %w", err)
 	}
 	var resp Response
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("send: %w", err)
 	}
 	return resp, nil
 }

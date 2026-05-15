@@ -207,7 +207,7 @@ func collectSourceFiles(project *config.Project) ([]sourceFileEntry, error) {
 func hashFile(path string) (string, error) {
 	content, err := os.ReadFile(path) // #nosec G304 -- config loader already resolved source files under validated .orc paths.
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("hash file: %w", err)
 	}
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:]), nil

@@ -96,7 +96,7 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 	var refresh ConfigSnapshotRefresh
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("refresh config snapshot context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -175,7 +175,7 @@ func (s *Store) writeConfigSnapshot(ctx context.Context, runID string, snapshot 
 	}
 	return s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("write config snapshot: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -204,7 +204,7 @@ func (s *Store) writeConfigSnapshotLocked(run *Run, snapshot ConfigSnapshot) err
 		VersionDir:    versionDir,
 	}, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("write config snapshot locked: %w", err)
 	}
 	currentContent = append(currentContent, '\n')
 	configDir := filepath.Join(run.Path, configDirName)
@@ -233,7 +233,7 @@ func readConfigCurrentFile(path string) (configCurrent, error) {
 	}
 	content, err := os.ReadFile(path) // #nosec G304 -- path is derived from a validated run directory.
 	if err != nil {
-		return configCurrent{}, err
+		return configCurrent{}, fmt.Errorf("read config current file: %w", err)
 	}
 	var current configCurrent
 	if err := json.Unmarshal(content, &current); err != nil {
@@ -272,10 +272,13 @@ func ensureConfigSnapshotDir(configDir, versionPath string) error {
 	}
 	info, err := os.Lstat(versionPath)
 	if os.IsNotExist(err) {
-		return os.Mkdir(versionPath, 0o750) // #nosec G301,G703 -- versionPath is scoped under a validated run directory.
+		if err := os.Mkdir(versionPath, 0o750); err != nil { // #nosec G301 -- versionPath is scoped under a validated run directory.
+			return fmt.Errorf("ensure config snapshot dir: %w", err)
+		}
+		info, err = os.Lstat(versionPath)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("ensure config snapshot dir: %w", err)
 	}
 	return validateDirInfo(versionPath, info)
 }
@@ -284,7 +287,7 @@ func writeNewRegularFile(path string, content []byte) error {
 	if _, err := os.Lstat(path); err == nil {
 		return stableerr.Errorf("%s already exists", filepath.Base(path))
 	} else if !os.IsNotExist(err) {
-		return err
+		return fmt.Errorf("write new regular file: %w", err)
 	}
 	return writeAtomic(path, content)
 }

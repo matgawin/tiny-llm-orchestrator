@@ -39,12 +39,12 @@ func newWorkerLaunchNextCommand(stdout, stderr io.Writer) *cobra.Command {
 			}
 			if len(args) == 0 || args[0] == "" {
 				if _, err := fmt.Fprintf(stderr, "%s worker launch-next: requires <run-id>\n", appName); err != nil {
-					return err
+					return fmt.Errorf("new worker launch next command: %w", err)
 				}
 				return stableerr.Errorf("worker launch-next requires run id")
 			}
 			if _, err := fmt.Fprintf(stderr, "%s worker launch-next: accepts exactly one <run-id>\n", appName); err != nil {
-				return err
+				return fmt.Errorf("new worker launch next command: %w", err)
 			}
 			return stableerr.Errorf("worker launch-next accepts exactly one run id")
 		},
@@ -57,7 +57,7 @@ func newWorkerLaunchNextCommand(stdout, stderr io.Writer) *cobra.Command {
 func executeWorkerLaunchNext(runID string, stdout, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("execute worker launch next: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -69,9 +69,9 @@ func executeWorkerLaunchNext(runID string, stdout, stderr io.Writer) error {
 		Stdout: stdout,
 	}); err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s worker launch-next: %v\n", appName, err); writeErr != nil {
-			return writeErr
+			return fmt.Errorf("execute worker launch next: %w", writeErr)
 		}
-		return err
+		return fmt.Errorf("execute worker launch next: %w", err)
 	}
 	return nil
 }

@@ -18,7 +18,7 @@ func readEvents(path, runID string) ([]Event, error) {
 	}
 	file, err := os.Open(path) // #nosec G304,G703 -- path is scoped to the run directory.
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read events: %w", err)
 	}
 	defer func() {
 		_ = file.Close()
@@ -33,7 +33,7 @@ func readEvents(path, runID string) ([]Event, error) {
 			break
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
+			return nil, fmt.Errorf("read events: %w", err)
 		}
 		if errors.Is(err, io.EOF) {
 			return nil, stableerr.Errorf("line %d: missing trailing newline", line+1)

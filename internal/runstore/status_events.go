@@ -70,7 +70,7 @@ func (s *Store) UpdateStatusContext(ctx context.Context, runID string, update St
 	var status Status
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fmt.Errorf("update status context: %w", err)
 		}
 		run, err := s.load(runID)
 		if err != nil {
@@ -180,13 +180,16 @@ func writeInitialEventLog(path string, event Event) error {
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- path is scoped to the run directory.
 	if err != nil {
-		return err
+		return fmt.Errorf("write initial event log: %w", err)
 	}
 	if _, err := file.Write(content); err != nil {
 		_ = file.Close()
-		return err
+		return fmt.Errorf("write initial event log: %w", err)
 	}
-	return file.Close()
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("write initial event log: %w", err)
+	}
+	return nil
 }
 
 func appendEvent(path string, event Event) error {
@@ -199,7 +202,7 @@ func appendEvent(path string, event Event) error {
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304,G703 -- path is scoped to the run directory.
 	if err != nil {
-		return err
+		return fmt.Errorf("append event: %w", err)
 	}
 	return writeEventContent(path, file, content)
 }
@@ -218,7 +221,7 @@ func writeEventContent(path string, writer io.WriteCloser, content []byte) error
 func marshalEventLine(event Event) ([]byte, error) {
 	content, err := json.Marshal(event)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal event line: %w", err)
 	}
 	return append(content, '\n'), nil
 }
@@ -231,7 +234,7 @@ func eventAppendPossiblyCommitted(err error) bool {
 func writeStatus(path string, status Status) error {
 	content, err := json.MarshalIndent(status, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("write status: %w", err)
 	}
 	content = append(content, '\n')
 	return writeAtomic(path, content)
@@ -243,11 +246,11 @@ func readStatus(path string) (Status, error) {
 	}
 	content, err := os.ReadFile(path) // #nosec G304,G703 -- path is scoped to the run directory.
 	if err != nil {
-		return Status{}, err
+		return Status{}, fmt.Errorf("read status: %w", err)
 	}
 	var status Status
 	if err := json.Unmarshal(content, &status); err != nil {
-		return Status{}, err
+		return Status{}, fmt.Errorf("read status: %w", err)
 	}
 	if status.SchemaVersion != schemaVersion {
 		return Status{}, stableerr.Errorf("unsupported schema_version %d", status.SchemaVersion)

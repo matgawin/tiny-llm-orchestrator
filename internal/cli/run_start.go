@@ -24,18 +24,18 @@ func runstartOptions(workflow, bead, fallbackTaskFile, taskFile, task string, ta
 func executeRunStart(opts runstart.Options, stdout, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
-		return err
+		return fmt.Errorf("execute run start: %w", err)
 	}
 	opts.Root = root
 	result, err := runstart.Start(context.Background(), opts)
 	if err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s run start: %v\n", appName, err); writeErr != nil {
-			return writeErr
+			return fmt.Errorf("execute run start: %w", writeErr)
 		}
-		return err
+		return fmt.Errorf("execute run start: %w", err)
 	}
 	if _, err := fmt.Fprintf(stdout, "started run %s\n", result.RunID); err != nil {
-		return err
+		return fmt.Errorf("execute run start: %w", err)
 	}
 	return nil
 }
