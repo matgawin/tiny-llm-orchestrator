@@ -140,9 +140,10 @@ func validateSkip(workflowConfig config.Workflow, status runstore.Status, stepID
 				TriggerResult: config.SystemSkipResult,
 			},
 		}, nil
-	default:
+	case workflow.DecisionRetryStep, workflow.DecisionWaitActiveAttempt:
 		return runstore.StepSkipTransition{}, fmt.Errorf("step %q %s transition produced %s; skip cannot be retried or wait", stepID, config.SystemSkipPair, skipDecision.Kind)
 	}
+	return runstore.StepSkipTransition{}, fmt.Errorf("step %q %s transition produced %s; skip cannot be retried or wait", stepID, config.SystemSkipPair, skipDecision.Kind)
 }
 
 func declaresSkipOutcome(step config.Step) bool {

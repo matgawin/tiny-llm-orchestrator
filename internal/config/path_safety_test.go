@@ -123,31 +123,32 @@ func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
 	if sandbox == nil {
 		t.Fatal("sandbox config was nil")
 	}
-	if got := sandbox.CWD; got != "tools" {
+	sandboxConfig := *sandbox
+	if got := sandboxConfig.CWD; got != "tools" {
 		t.Fatalf("sandbox cwd = %q, want tools", got)
 	}
-	if !sandbox.Bubblewrap.Enabled {
+	if !sandboxConfig.Bubblewrap.Enabled {
 		t.Fatal("sandbox bubblewrap enabled = false, want true")
 	}
-	if !sandbox.RequireForWorkers {
+	if !sandboxConfig.RequireForWorkers {
 		t.Fatal("sandbox require_for_workers = false, want true")
 	}
-	if got := sandbox.Home.Mode; got != SandboxHomeModeHostPath {
+	if got := sandboxConfig.Home.Mode; got != SandboxHomeModeHostPath {
 		t.Fatalf("sandbox home mode = %q, want host_path", got)
 	}
-	if got := sandbox.Path.Mode; got != SandboxPathModeHostEntries {
+	if got := sandboxConfig.Path.Mode; got != SandboxPathModeHostEntries {
 		t.Fatalf("sandbox path mode = %q, want host_entries", got)
 	}
-	if got := sandbox.Bubblewrap.Network; !got.Set || got.Value {
+	if got := sandboxConfig.Bubblewrap.Network; !got.Set || got.Value {
 		t.Fatalf("sandbox bubblewrap network = %+v, want explicit false", got)
 	}
-	if got := sandbox.Bubblewrap.Mounts.Beads; got != "auto" {
+	if got := sandboxConfig.Bubblewrap.Mounts.Beads; got != "auto" {
 		t.Fatalf("sandbox beads mount = %q, want auto", got)
 	}
-	if got := sandbox.Env.Pass; !slices.Equal(got, []string{"TERM"}) {
+	if got := sandboxConfig.Env.Pass; !slices.Equal(got, []string{"TERM"}) {
 		t.Fatalf("sandbox env pass = %v, want TERM", got)
 	}
-	if got := sandbox.Env.Set["ORC_SANDBOX"]; got != "1" {
+	if got := sandboxConfig.Env.Set["ORC_SANDBOX"]; got != "1" {
 		t.Fatalf("sandbox env set ORC_SANDBOX = %q, want 1", got)
 	}
 	if got := len(sandbox.Mounts); got != 2 {

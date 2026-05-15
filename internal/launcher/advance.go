@@ -142,6 +142,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 
 		capDecision := loopcap.Evaluate(eval.workflowName, eval.loopCaps, eval.status, eval.decision, eval.workflowOutcome, eval.hasWorkflowOutcome)
 		switch capDecision.Kind {
+		case loopcap.DecisionNone:
 		case loopcap.DecisionHard:
 			launchResult, err := LaunchNext(ctx, launchOptions(opts))
 			result.FinalStatus = workflow.RunStatusBlockedForHuman

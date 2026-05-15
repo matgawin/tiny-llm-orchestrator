@@ -294,6 +294,7 @@ func validateArtifactWriteAllowed(existing []ArtifactRef, kind ArtifactKind, pat
 				return fmt.Errorf("artifact %s for kind %q has already been written", path, kind)
 			}
 		}
+	case KindReport, KindPrompt, KindLog, KindSnapshot, KindSummary, KindFollowup:
 	}
 	return nil
 }

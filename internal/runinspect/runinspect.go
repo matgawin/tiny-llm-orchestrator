@@ -392,6 +392,7 @@ func printLoopCapPreview(w io.Writer, workflowConfig config.Workflow, run *runst
 	latest, hasLatest := runstore.LatestConsumableOutcome(run.Status)
 	capDecision := loopcap.Evaluate(workflowConfig.Name, workflowConfig.LoopCaps, run.Status, decision, latest, hasLatest)
 	switch capDecision.Kind {
+	case loopcap.DecisionNone:
 	case loopcap.DecisionSoft:
 		_, _ = fmt.Fprintf(w, "warning: workflow loop soft cap will be reached for state %s at count %d (soft %d, hard %d)\n", capDecision.State, capDecision.ProspectiveCount, capDecision.Soft, capDecision.Hard)
 	case loopcap.DecisionHard:
@@ -644,6 +645,7 @@ func latestConsumableOutcome(run *runstore.Run) (runstore.Attempt, bool) {
 
 func printDecisionOutcomeDetails(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
 	switch decision.Kind {
+	case workflow.DecisionSelectStep, workflow.DecisionWaitActiveAttempt:
 	case workflow.DecisionRetryStep:
 		printRetryDecision(w, workflowConfig, run, decision)
 	case workflow.DecisionTerminal:

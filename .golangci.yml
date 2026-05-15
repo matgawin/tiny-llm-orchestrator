@@ -32,6 +32,7 @@ linters:
     - dupword         # Finds duplicate words
     - musttag         # Enforce tags on JSON marshaled structs
     - dupl            # Detect duplicate code blocks
+    - exhaustive      # Check enum-like switch statements cover all values
 
   settings:
     errcheck:

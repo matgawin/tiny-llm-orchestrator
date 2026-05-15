@@ -189,9 +189,10 @@ func (r runner) planFile(item scaffoldFile) (plannedAction, error) {
 			}
 			return writeNewFile(target.path, item.content)
 		}), nil
-	default:
+	case targetReadError:
 		return plannedAction{}, target.err
 	}
+	return plannedAction{}, target.err
 }
 
 func (r runner) planGitignore() (plannedAction, error) {
@@ -228,9 +229,10 @@ func (r runner) planGitignore() (plannedAction, error) {
 		return createdAction(gitignoreName, func() error {
 			return writeNewFile(target.path, []byte(runsIgnoreEntry+"\n"))
 		}), nil
-	default:
+	case targetReadError:
 		return plannedAction{}, target.err
 	}
+	return plannedAction{}, target.err
 }
 
 func (r runner) planRuntimeDir() (plannedAction, error) {
@@ -273,9 +275,10 @@ func (r runner) planInstructions() (plannedAction, error) {
 			return writeNewFile(target.path, []byte(instructionsContent()))
 		})
 		return r.planInstructionChange("would prompt before creating", instructionsName+" creation", "Create AGENTS.md with Tiny Orc guidance?", action)
-	default:
+	case targetReadError:
 		return plannedAction{}, target.err
 	}
+	return plannedAction{}, target.err
 }
 
 func (r runner) planInstructionChange(dryRunAction, skipTarget, prompt string, action plannedAction) (plannedAction, error) {

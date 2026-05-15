@@ -141,6 +141,7 @@ func TestLaunchNextConsumesWorkflowLoopHardCapOverride(t *testing.T) {
 	if override == nil {
 		t.Fatal("pending override is nil")
 	}
+	countAfterOverride := override.CountAfterOverride
 
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
@@ -155,8 +156,8 @@ func TestLaunchNextConsumesWorkflowLoopHardCapOverride(t *testing.T) {
 		t.Fatalf("result = %+v, want launched through one-shot override", result)
 	}
 	loaded := loadLauncherRun(t, root, runID)
-	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != override.CountAfterOverride {
-		t.Fatalf("plan count = %d, want override count %d", got, override.CountAfterOverride)
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != countAfterOverride {
+		t.Fatalf("plan count = %d, want override count %d", got, countAfterOverride)
 	}
 	if loaded.Status.WorkflowLoop.PendingHardCapOverride != nil {
 		t.Fatalf("pending override = %+v, want consumed", loaded.Status.WorkflowLoop.PendingHardCapOverride)

@@ -161,7 +161,7 @@ func (s *Store) writeConfigSnapshot(runID string, snapshot ConfigSnapshot, initi
 			currentPath := filepath.Join(run.Path, configDirName, configCurrentName)
 			if _, err := os.Lstat(currentPath); err == nil {
 				return fmt.Errorf("run %q config snapshot current.json already exists", runID)
-			} else if err != nil && !os.IsNotExist(err) {
+			} else if !os.IsNotExist(err) {
 				return fmt.Errorf("run %q config snapshot current.json: %w", runID, err)
 			}
 		}
@@ -259,7 +259,7 @@ func ensureConfigSnapshotDir(configDir, versionPath string) error {
 func writeNewRegularFile(path string, content []byte) error {
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("%s already exists", filepath.Base(path))
-	} else if err != nil && !os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 	return writeAtomic(path, content)

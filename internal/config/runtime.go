@@ -531,6 +531,8 @@ func validateRuntimePlaceholders(name string, index int, arg string, runtime Run
 
 func placeholderContextName(ctx placeholderContext) string {
 	switch ctx {
+	case placeholderContextCommand, placeholderContextModel:
+		return "command or model args"
 	case placeholderContextReasoning:
 		return "reasoning.args"
 	case placeholderContextDirectories:
