@@ -27,10 +27,12 @@ func TestExecuteRunAddFollowupAppendsFollowup(t *testing.T) {
 		"Recorded-At:",
 		"Mention the follow-up recorder.",
 	})
+
 	loaded, err := openCLIStore(t, root).Load(result.runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if got := loaded.Events[len(loaded.Events)-1].Type; got != "artifact.written" {
 		t.Fatalf("last event type = %q, want artifact.written", got)
 	}
@@ -42,13 +44,16 @@ func TestExecuteRunAddFollowupRequiresTitle(t *testing.T) {
 	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 
 	var stdout, stderr bytes.Buffer
+
 	err := Execute([]string{"run", "add-followup", result.runID, "--details", "No title."}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want missing title failure")
 	}
+
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
+
 	if got := stderr.String(); !strings.Contains(got, "--title is required") {
 		t.Fatalf("stderr = %q, want missing title", got)
 	}
@@ -76,15 +81,18 @@ func TestExecuteRunAddFollowupOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 func TestRunRecordSummaryOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
+
 	result := startCLIBeadBackedRunThenBlockBD(t, root)
 	if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
+
 	summaryPath := filepath.Join(root, "final-summary.md")
 	writeCLIFile(t, summaryPath, "# Final Summary\n\nSuggested bead note for the human.\n")
 
 	output := executeCLICommand(t, []string{"run", "record-summary", result.runID, "--file=" + summaryPath})
 	assertCLIOutputContainsAll(t, output, []string{"recorded final summary for run " + result.runID, "summaries/"})
+
 	_, content := latestCLIArtifactContent(t, root, result.runID, runstore.KindSummary)
 	if !strings.Contains(content, "Suggested bead note for the human.") {
 		t.Fatalf("summary content = %q, want bead note suggestion preserved", content)
@@ -109,6 +117,7 @@ func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) 
 	if !strings.Contains(summaryContent, "review checklist") {
 		t.Fatalf("summary content = %q, want copied final handoff content", summaryContent)
 	}
+
 	statusOutput := executeCLICommand(t, []string{"run", "status", run.runID})
 	assertCLIOutputContainsAll(t, statusOutput, []string{"state: ready_for_human", "summary: " + summaryRef.Path})
 
@@ -116,6 +125,7 @@ func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) 
 	if err := Execute([]string{"worker", "launch-next", run.runID}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want terminal no-launch error after summary")
 	}
+
 	afterLaunch := loadCLIRun(t, run.root, run.runID)
 	if got := len(afterLaunch.Status.Attempts); got != attemptsBeforeApprovalTerminal+1 {
 		t.Fatalf("attempt history len = %d, want no worker launch after summary", got)
@@ -127,21 +137,26 @@ func TestRunRecordSummaryRejectsNotReadyRuns(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIProject(t, root, "optional", true)
+
 			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 			if state != "running" {
 				if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: state}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			}
+
 			summaryPath := filepath.Join(root, "final-summary.md")
 			writeCLIFile(t, summaryPath, "# Final Summary\n")
 
 			var stdout, stderr bytes.Buffer
+
 			err := Execute([]string{"run", "record-summary", result.runID, "--file", summaryPath}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want rejection")
 			}
+
 			assertCLIOutputContainsAll(t, stderr.String(), []string{`want "ready_for_human"`, "use summary-context"})
+
 			loaded := loadCLIRun(t, root, result.runID)
 			for _, ref := range loaded.Status.Artifacts {
 				if ref.Kind == runstore.KindSummary {

@@ -43,12 +43,15 @@ func TestBuildSpecCreatesHomeDirsBeforeRepoBind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	repoBind := indexSequence(spec.Args, "--bind", root, root)
 	homeDir := indexSequence(spec.Args, "--dir", "/home")
+
 	userHomeDir := indexSequence(spec.Args, "--dir", "/home/tester")
 	if repoBind < 0 || homeDir < 0 || userHomeDir < 0 {
 		t.Fatalf("bwrap args = %#v, want /home setup dirs and repo bind", spec.Args)
 	}
+
 	if homeDir > repoBind || userHomeDir > repoBind {
 		t.Fatalf("bwrap args = %#v, want /home setup dirs before repo bind", spec.Args)
 	}
@@ -77,6 +80,7 @@ func TestBuildSpecNetworkFalseAddsUnshareNet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsArg(spec.Args, "--unshare-net") {
 		t.Fatalf("bwrap args = %#v, want --unshare-net", spec.Args)
 	}
@@ -100,6 +104,7 @@ func TestBuildSpecSkipsMissingOptionalBeadsDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if containsSequence(spec.Args, "--bind", filepath.Clean(filepath.Join(root, "..", ".beads")), filepath.Clean(filepath.Join(root, "..", ".beads"))) {
 		t.Fatalf("bwrap args = %#v, want missing beads dir skipped", spec.Args)
 	}
@@ -112,6 +117,7 @@ func TestBuildSpecCreatesDefaultCodexHomeUnderSyntheticHome(t *testing.T) {
 		CWD:        ".",
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
+
 	var created string
 
 	spec, err := BuildSpec(project, Options{
@@ -127,13 +133,16 @@ func TestBuildSpecCreatesDefaultCodexHomeUnderSyntheticHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	hostCodex := filepath.Join(root, ".codex")
 	if created != hostCodex {
 		t.Fatalf("created codex home = %q, want %q", created, hostCodex)
 	}
+
 	if !containsSequence(spec.Args, "--bind", hostCodex, "/home/orc/.codex") {
 		t.Fatalf("bwrap args = %#v, want default codex home mounted into synthetic home", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "HOME=/home/orc")
 	assertEnvContains(t, spec.Env, "CODEX_HOME=/home/orc/.codex")
 }
@@ -158,9 +167,11 @@ func TestBuildSpecExplicitSyntheticHomePreservesDefaultCodexHomeTarget(t *testin
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsSequence(spec.Args, "--bind", filepath.Join(root, ".codex"), "/home/orc/.codex") {
 		t.Fatalf("bwrap args = %#v, want default codex home mounted into synthetic home", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "HOME=/home/orc")
 	assertEnvContains(t, spec.Env, "CODEX_HOME=/home/orc/.codex")
 }
@@ -187,15 +198,19 @@ func TestBuildSpecHostPathHomeUsesHostHomeEnvAndSamePathDefaultCodexHome(t *test
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsSequence(spec.Args, "--dir", filepath.Dir(home)) || !containsSequence(spec.Args, "--dir", home) {
 		t.Fatalf("bwrap args = %#v, want host HOME setup dirs", spec.Args)
 	}
+
 	if containsSequence(spec.Args, "--bind", home, home) {
 		t.Fatalf("bwrap args = %#v, must not bind whole host HOME", spec.Args)
 	}
+
 	if !containsSequence(spec.Args, "--bind", codexHome, codexHome) {
 		t.Fatalf("bwrap args = %#v, want default codex home mounted at same host path", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "HOME="+home)
 	assertEnvContains(t, spec.Env, "CODEX_HOME="+codexHome)
 }
@@ -227,6 +242,7 @@ func TestBuildSpecHostPathHomeFallsBackToUserHomeDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertEnvContains(t, spec.Env, "HOME="+home)
 	assertEnvContains(t, spec.Env, "CODEX_HOME="+codexHome)
 }
@@ -284,9 +300,11 @@ func TestBuildSpecExplicitCodexHomeUsesSamePathInBothHomeModes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildSpec returned error: %v", err)
 			}
+
 			if !containsSequence(spec.Args, "--bind", codexHome, codexHome) {
 				t.Fatalf("bwrap args = %#v, want explicit codex home same-path bind", spec.Args)
 			}
+
 			assertEnvContains(t, spec.Env, "HOME="+tt.wantHome)
 			assertEnvContains(t, spec.Env, "CODEX_HOME="+codexHome)
 		})
@@ -316,9 +334,11 @@ func TestBuildSpecRelativeCodexHomeFallsBackToHostHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsSequence(spec.Args, "--bind", codexHome, "/home/orc/.codex") {
 		t.Fatalf("bwrap args = %#v, want fallback codex home mounted into synthetic home", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "CODEX_HOME=/home/orc/.codex")
 }
 
@@ -352,6 +372,7 @@ func TestBuildSpecManagedHomeAndCodexHomeOverrideSandboxEnvSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertEnvContains(t, spec.Env, "HOME="+home)
 	assertEnvContains(t, spec.Env, "CODEX_HOME="+codexHome)
 	assertEnvMissing(t, spec.Env, "HOME=/wrong/home")
@@ -388,9 +409,11 @@ func TestBuildSpecNonCodexRuntimeDoesNotAddCodexMountOrEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if containsSequence(spec.Args, "--bind", codexHome, "/home/orc/.codex") || containsSequence(spec.Args, "--bind", codexHome, codexHome) {
 		t.Fatalf("bwrap args = %#v, want no Codex mount for non-Codex runtime", spec.Args)
 	}
+
 	assertEnvMissing(t, spec.Env, "CODEX_HOME=")
 }
 
@@ -417,6 +440,7 @@ func TestBuildSpecHostPathHomeAllowsExplicitSubpathMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsSequence(spec.Args, "--bind", hostBun, "/home/user/.bun") {
 		t.Fatalf("bwrap args = %#v, want explicit home subpath mount", spec.Args)
 	}
@@ -481,9 +505,11 @@ func TestBuildSpecDefaultPathModeDoesNotAddAutomaticPathMounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if containsSequence(spec.Args, "--ro-bind", "/opt/tool/bin", "/opt/tool/bin") {
 		t.Fatalf("bwrap args = %#v, want no automatic PATH mount in default none mode", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "PATH=/opt/tool/bin")
 }
 
@@ -541,6 +567,7 @@ func TestBuildSpecPathHostEntriesMountsEffectivePathEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertEnvContains(t, spec.Env, "PATH="+pathValue)
 	assertPathMount(t, spec.Args, "/opt/tool/bin", "/opt/tool/bin")
 	assertPathMount(t, spec.Args, "/nix/store/profile-bin", "/profile/bin")
@@ -580,7 +607,9 @@ func TestBuildSpecPathHostEntriesWorksInHostPathHomeMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertPathMount(t, spec.Args, "/home/user/.bun/bin", "/home/user/.bun/bin")
+
 	if containsSequence(spec.Args, "--bind", testHomePath, testHomePath) {
 		t.Fatalf("bwrap args = %#v, must not bind whole host HOME for PATH mount", spec.Args)
 	}
@@ -616,6 +645,7 @@ func TestBuildSpecPathHostEntriesUsesSandboxEnvSetPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertEnvContains(t, spec.Env, "PATH=/custom/bin::relative")
 	assertPathMount(t, spec.Args, "/custom/bin", "/custom/bin")
 	assertNoPathMount(t, spec.Args, "/host/bin", "/host/bin")
@@ -695,6 +725,7 @@ func TestBuildSpecPathHostEntriesSkipsPathsAlreadyUnderSystemMounts(t *testing.T
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertNoPathMount(t, spec.Args, "/etc/profiles/per-user/matt/bin", "/etc/profiles/per-user/matt/bin")
 	assertNoPathMount(t, spec.Args, "/usr/bin", "/usr/bin")
 	assertPathMount(t, spec.Args, "/external/bin", "/external/bin")
@@ -729,6 +760,7 @@ func TestBuildSpecPathHostEntriesSkipsPathsAlreadyUnderMountedTrees(t *testing.T
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertNoPathMount(t, spec.Args, "/repo/project/.direnv/bin", "/repo/project/.direnv/bin")
 	assertNoPathMount(t, spec.Args, "/repo/.beads/bin", "/repo/.beads/bin")
 	assertPathMount(t, spec.Args, "/external/bin", "/external/bin")
@@ -788,7 +820,9 @@ func TestBuildSpecPathHostEntriesEmitsAutomaticMountsBeforeExplicitMounts(t *tes
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	pathMount := indexSequence(spec.Args, "--ro-bind", "/opt/tool/bin", "/opt/tool/bin")
+
 	explicitMount := indexSequence(spec.Args, "--ro-bind", "/elsewhere/bin", "/tools/bin")
 	if pathMount < 0 || explicitMount < 0 || pathMount > explicitMount {
 		t.Fatalf("bwrap args = %#v, want automatic PATH mount before explicit mount", spec.Args)
@@ -815,6 +849,7 @@ func TestBuildSpecSkipsMissingOptionalExtraMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if containsSequence(spec.Args, "--bind", filepath.Join(root, "missing"), "/workspace/missing") {
 		t.Fatalf("bwrap args = %#v, want optional missing mount skipped", spec.Args)
 	}
@@ -846,10 +881,12 @@ func TestBuildSpecProtectedHostHomeRequiresResolvedHostHome(t *testing.T) {
 func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
 	t.Run("conflicting explicit mount fails", func(t *testing.T) {
 		root := t.TempDir()
+
 		secret := filepath.Join(root, "host-home", ".ssh")
 		if err := os.MkdirAll(secret, 0o755); err != nil {
 			t.Fatalf("create protected path: %v", err)
 		}
+
 		project := sandboxProject(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:            ".",
@@ -891,6 +928,7 @@ func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildSpec returned error: %v", err)
 		}
+
 		if containsSequence(spec.Args, "--ro-bind", missing, "/workspace/ssh") {
 			t.Fatalf("bwrap args = %#v, want optional protected missing mount skipped", spec.Args)
 		}
@@ -898,10 +936,12 @@ func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
 
 	t.Run("broad parent conflicts with missing protected child", func(t *testing.T) {
 		root := t.TempDir()
+
 		home := filepath.Join(root, "host-home")
 		if err := os.MkdirAll(home, 0o755); err != nil {
 			t.Fatalf("create home: %v", err)
 		}
+
 		missingSecret := filepath.Join(home, ".ssh")
 		project := sandboxProject(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
@@ -927,10 +967,12 @@ func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
 func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 	t.Run("simple runtime mount conflict fails", func(t *testing.T) {
 		root := t.TempDir()
+
 		cache := filepath.Join(root, ".orc", "cache", "custom")
 		if err := os.MkdirAll(cache, 0o755); err != nil {
 			t.Fatalf("create cache: %v", err)
 		}
+
 		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:            ".",
@@ -974,6 +1016,7 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildSpec returned error: %v", err)
 		}
+
 		if containsSequence(spec.Args, "--ro-bind", cache, "/workspace/cache") {
 			t.Fatalf("bwrap args = %#v, want optional missing runtime mount skipped", spec.Args)
 		}
@@ -981,10 +1024,12 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 
 	t.Run("env sourced runtime mount conflict fails", func(t *testing.T) {
 		root := t.TempDir()
+
 		source := filepath.Join(root, "custom-home")
 		if err := os.MkdirAll(source, 0o755); err != nil {
 			t.Fatalf("create source: %v", err)
 		}
+
 		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:            ".",
@@ -1023,6 +1068,7 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), source) || !strings.Contains(err.Error(), "conflicts with sandbox.protected_paths") {
 			t.Fatalf("BuildSpec error = %v, want create protected source conflict", err)
 		}
+
 		if _, statErr := os.Stat(source); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("created source stat error = %v, want not exist", statErr)
 		}
@@ -1031,22 +1077,28 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 
 func TestBuildSpecProtectedPathsPathHostEntriesSkipsWithWarning(t *testing.T) {
 	root := t.TempDir()
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get cwd: %v", err)
 	}
+
 	hostRoot, err := os.MkdirTemp(cwd, ".sandbox-path-test-")
 	if err != nil {
 		t.Fatalf("create host path root: %v", err)
 	}
+
 	t.Cleanup(func() { _ = os.RemoveAll(hostRoot) })
+
 	protectedBin := filepath.Join(hostRoot, "secret", "bin")
+
 	openBin := filepath.Join(hostRoot, "open", "bin")
 	for _, dir := range []string{protectedBin, openBin} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("create path entry: %v", err)
 		}
 	}
+
 	pathValue := protectedBin + string(os.PathListSeparator) + openBin
 	stderr := &bytes.Buffer{}
 	project := sandboxProject(root, config.SandboxConfig{
@@ -1068,15 +1120,19 @@ func TestBuildSpecProtectedPathsPathHostEntriesSkipsWithWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertEnvContains(t, spec.Env, "PATH="+pathValue)
 	assertNoPathMount(t, spec.Args, protectedBin, protectedBin)
 	assertPathMount(t, spec.Args, openBin, openBin)
+
 	if got := stderr.String(); !strings.Contains(got, "protected_paths") || !strings.Contains(got, protectedBin) {
 		t.Fatalf("stderr warning = %q, want protected_paths warning naming PATH entry", got)
 	}
+
 	if count := strings.Count(stderr.String(), "protected_paths"); count != 1 {
 		t.Fatalf("stderr warning count = %d, want deduplicated warning", count)
 	}
+
 	for _, entry := range spec.Env {
 		if strings.HasPrefix(entry, RuntimeDirCoverageEnv+"=") && strings.Contains(entry, protectedBin) {
 			t.Fatalf("coverage env = %q, want skipped PATH mount excluded", entry)
@@ -1107,16 +1163,20 @@ func TestBuildSpecProtectedPathsSymlinkBehavior(t *testing.T) {
 	t.Run("existing symlink protects resolved target", func(t *testing.T) {
 		root := t.TempDir()
 		realSecret := filepath.Join(root, "real-secret")
+
 		protectedLink := filepath.Join(root, "home", ".ssh")
 		if err := os.MkdirAll(filepath.Dir(protectedLink), 0o755); err != nil {
 			t.Fatalf("create home: %v", err)
 		}
+
 		if err := os.MkdirAll(realSecret, 0o755); err != nil {
 			t.Fatalf("create real secret: %v", err)
 		}
+
 		if err := os.Symlink(realSecret, protectedLink); err != nil {
 			t.Fatalf("create protected symlink: %v", err)
 		}
+
 		project := sandboxProject(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:            ".",
@@ -1139,13 +1199,16 @@ func TestBuildSpecProtectedPathsSymlinkBehavior(t *testing.T) {
 
 	t.Run("existing protected path symlink resolution failure fails", func(t *testing.T) {
 		root := t.TempDir()
+
 		loop := filepath.Join(root, "home", ".ssh")
 		if err := os.MkdirAll(filepath.Dir(loop), 0o755); err != nil {
 			t.Fatalf("create home: %v", err)
 		}
+
 		if err := os.Symlink(loop, loop); err != nil {
 			t.Fatalf("create symlink loop: %v", err)
 		}
+
 		project := sandboxProject(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:            ".",
@@ -1213,9 +1276,11 @@ func TestBuildSpecIncludesSelectedRuntimeSandboxRequirements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsSequence(spec.Args, "--bind", runtimeCache, "/workspace/.orc/cache/custom") {
 		t.Fatalf("bwrap args = %#v, want runtime-required mount", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "CUSTOM_TOKEN=secret")
 	assertEnvContains(t, spec.Env, "ORC_RUNTIME=custom")
 }
@@ -1387,9 +1452,11 @@ func TestBuildSpecResolvesEnvSourcedRuntimeSandboxMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsSequence(spec.Args, "--bind", source, source) {
 		t.Fatalf("bwrap args = %#v, want env-sourced mount at same target", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+source)
 	assertEnvContains(t, spec.Env, RuntimeDirCoverageEnv+"="+runtimeDirCoverageValue(root, []resolvedMount{{target: source}}))
 }
@@ -1419,9 +1486,11 @@ func TestBuildSpecAllowsEnvSourcedSamePathRuntimeSandboxMountUnderHome(t *testin
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	if !containsSequence(spec.Args, "--bind", source, source) {
 		t.Fatalf("bwrap args = %#v, want env-sourced /home mount at same target", spec.Args)
 	}
+
 	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+source)
 }
 
@@ -1511,6 +1580,7 @@ func TestBuildSpecEnvFromMountUsesRuntimeScopedMountID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+customSource)
 	assertEnvContains(t, spec.Env, "RECORDER_HOME="+recorderSource)
 }
@@ -1603,6 +1673,7 @@ func TestBuildSpecEnvFromMountResolvesDeduplicatedRuntimeMount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
+
 	assertEnvContains(t, spec.Env, "CUSTOM_HOME="+source)
 }
 
@@ -1618,15 +1689,18 @@ func TestBuildSpecRuntimeSandboxMountFallbackSources(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			home := filepath.Join(root, "home")
+
 			source := filepath.Join(home, ".custom")
 			if err := os.MkdirAll(source, 0o755); err != nil {
 				t.Fatalf("create fallback source: %v", err)
 			}
+
 			project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 				Command:    config.SandboxCommand{Argv: []string{"sh"}},
 				CWD:        ".",
 				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 			}, fallbackRuntimeRequirements(false))
+
 			env := []string{"PATH=/usr/bin", "HOME=" + home}
 			if tt.name != "unset" {
 				env = append(env, "CUSTOM_HOME="+tt.envValue)
@@ -1640,9 +1714,11 @@ func TestBuildSpecRuntimeSandboxMountFallbackSources(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildSpec returned error: %v", err)
 			}
+
 			if !containsSequence(spec.Args, "--bind", source, "/home/orc/.custom") {
 				t.Fatalf("bwrap args = %#v, want fallback source mounted under sandbox home", spec.Args)
 			}
+
 			assertEnvContains(t, spec.Env, "CUSTOM_HOME=/home/orc/.custom")
 		})
 	}
@@ -1667,9 +1743,11 @@ func TestBuildSpecRuntimeSandboxMountCreateAndMissingBehavior(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildSpec returned error: %v", err)
 		}
+
 		if info, err := os.Stat(source); err != nil || !info.IsDir() {
 			t.Fatalf("created source stat = %v, %v; want directory", info, err)
 		}
+
 		if !containsSequence(spec.Args, "--bind", source, "/home/orc/.custom") {
 			t.Fatalf("bwrap args = %#v, want created source mount", spec.Args)
 		}
@@ -1697,10 +1775,12 @@ func TestBuildSpecRuntimeSandboxMountCreateAndMissingBehavior(t *testing.T) {
 
 func TestBuildSpecRejectsRuntimeSandboxMountSourceFile(t *testing.T) {
 	root := t.TempDir()
+
 	source := filepath.Join(root, "custom-file")
 	if err := os.WriteFile(source, []byte("not a dir"), 0o644); err != nil {
 		t.Fatalf("write source file: %v", err)
 	}
+
 	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
@@ -1731,10 +1811,12 @@ func TestBuildSpecRuntimeSandboxMountFallbackTargetsByHomeMode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			home := filepath.Join(root, "home")
+
 			source := filepath.Join(home, ".custom")
 			if err := os.MkdirAll(source, 0o755); err != nil {
 				t.Fatalf("create fallback source: %v", err)
 			}
+
 			project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 				Command:    config.SandboxCommand{Argv: []string{"sh"}},
 				CWD:        ".",
@@ -1750,6 +1832,7 @@ func TestBuildSpecRuntimeSandboxMountFallbackTargetsByHomeMode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildSpec returned error: %v", err)
 			}
+
 			if !containsSequence(spec.Args, "--bind", source, tt.wantHome(home)) {
 				t.Fatalf("bwrap args = %#v, want fallback target %s", spec.Args, tt.wantHome(home))
 			}
@@ -1798,11 +1881,14 @@ func TestBuildSpecRejectsRuntimeSandboxMountActiveConflicts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			home := filepath.Join(root, "home")
+
 			source := filepath.Join(home, ".custom")
 			if err := os.MkdirAll(source, 0o755); err != nil {
 				t.Fatalf("create fallback source: %v", err)
 			}
+
 			requirements := fallbackRuntimeRequirements(false)
+
 			switch tt.name {
 			case "home policy":
 				requirements.Mounts[0].Target.Fallback.SandboxHome = ".."
@@ -1810,6 +1896,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountActiveConflicts(t *testing.T) {
 			case "protected system":
 				requirements.Mounts[0].Target.Fallback.SandboxHome = "../../tmp/custom"
 			}
+
 			project := sandboxProjectWithRuntime(root, tt.sandbox, requirements)
 
 			_, err := BuildSpec(project, Options{
@@ -1886,6 +1973,7 @@ func TestBuildSpecRejectsUnsupportedPlatformBeforeBwrapLookup(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "requires Linux") {
 		t.Fatalf("BuildSpec error = %v, want unsupported platform error", err)
 	}
+
 	if called {
 		t.Fatal("LookPath was called on unsupported platform")
 	}
@@ -1916,10 +2004,12 @@ func TestRunSpecReturnsChildExitStatus(t *testing.T) {
 		CWD:  t.TempDir(),
 		Env:  os.Environ(),
 	}, Options{})
+
 	var exitErr ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("runSpec error = %T %v, want ExitError", err, err)
 	}
+
 	if exitErr.Code != 7 {
 		t.Fatalf("exit code = %d, want 7", exitErr.Code)
 	}
@@ -1932,10 +2022,12 @@ func TestRunSpecReturnsSignalExitStatus(t *testing.T) {
 		CWD:  t.TempDir(),
 		Env:  os.Environ(),
 	}, Options{})
+
 	var exitErr ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("runSpec error = %T %v, want ExitError", err, err)
 	}
+
 	if exitErr.Code != 143 {
 		t.Fatalf("exit code = %d, want 143", exitErr.Code)
 	}
@@ -1945,6 +2037,7 @@ func TestRunSpecCancelsInteractiveProcess(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
+
 	go func() {
 		done <- runSpec(ctx, BwrapSpec{
 			Path: "/bin/sh",
@@ -1953,8 +2046,10 @@ func TestRunSpecCancelsInteractiveProcess(t *testing.T) {
 			Env:  os.Environ(),
 		}, Options{})
 	}()
+
 	time.Sleep(50 * time.Millisecond)
 	cancel()
+
 	select {
 	case err := <-done:
 		if err == nil || !strings.Contains(err.Error(), context.Canceled.Error()) {
@@ -1993,6 +2088,7 @@ func sandboxProjectWithCodexRuntime(root string, sandboxConfig config.SandboxCon
 			},
 		},
 	}
+
 	return project
 }
 
@@ -2015,6 +2111,7 @@ func sandboxProjectWithRuntime(root string, sandboxConfig config.SandboxConfig, 
 			},
 		},
 	}
+
 	return project
 }
 
@@ -2150,6 +2247,7 @@ func fakePathStat(paths map[string]bool) func(string) (os.FileInfo, error) {
 		if !ok {
 			return nil, os.ErrNotExist
 		}
+
 		return fakeFileInfo{name: filepath.Base(path), dir: isDir}, nil
 	}
 }
@@ -2159,9 +2257,11 @@ func fakeEvalSymlinks(resolved map[string]string, failures map[string]error) fun
 		if err, ok := failures[path]; ok {
 			return "", err
 		}
+
 		if target, ok := resolved[path]; ok {
 			return target, nil
 		}
+
 		return path, nil
 	}
 }
@@ -2184,11 +2284,13 @@ func indexSequence(args []string, want ...string) int {
 	if len(want) == 0 || len(want) > len(args) {
 		return -1
 	}
+
 	for i := 0; i <= len(args)-len(want); i++ {
 		if slices.Equal(args[i:i+len(want)], want) {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -2197,16 +2299,19 @@ func countSequence(args []string, want ...string) int {
 	if len(want) == 0 || len(want) > len(args) {
 		return count
 	}
+
 	for i := 0; i <= len(args)-len(want); i++ {
 		if slices.Equal(args[i:i+len(want)], want) {
 			count++
 		}
 	}
+
 	return count
 }
 
 func assertPathMount(t *testing.T, args []string, host, target string) {
 	t.Helper()
+
 	if !containsSequence(args, "--ro-bind", host, target) {
 		t.Fatalf("bwrap args = %#v, want PATH ro-bind %s -> %s", args, host, target)
 	}
@@ -2214,6 +2319,7 @@ func assertPathMount(t *testing.T, args []string, host, target string) {
 
 func assertNoPathMount(t *testing.T, args []string, host, target string) {
 	t.Helper()
+
 	if containsSequence(args, "--ro-bind", host, target) {
 		t.Fatalf("bwrap args = %#v, want no PATH ro-bind %s -> %s", args, host, target)
 	}
@@ -2221,6 +2327,7 @@ func assertNoPathMount(t *testing.T, args []string, host, target string) {
 
 func assertSequenceCount(t *testing.T, args, want []string, count int) {
 	t.Helper()
+
 	if got := countSequence(args, want...); got != count {
 		t.Fatalf("sequence %v count = %d in %#v, want %d", want, got, args, count)
 	}
@@ -2228,14 +2335,17 @@ func assertSequenceCount(t *testing.T, args, want []string, count int) {
 
 func assertEnvContains(t *testing.T, env []string, want string) {
 	t.Helper()
+
 	if slices.Contains(env, want) {
 		return
 	}
+
 	t.Fatalf("env missing %q: %#v", want, env)
 }
 
 func assertEnvMissing(t *testing.T, env []string, prefix string) {
 	t.Helper()
+
 	for _, entry := range env {
 		if strings.HasPrefix(entry, prefix) {
 			t.Fatalf("env contains %q with prefix %q: %#v", entry, prefix, env)

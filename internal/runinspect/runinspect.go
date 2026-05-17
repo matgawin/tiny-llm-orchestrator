@@ -27,8 +27,9 @@ import (
 )
 
 const (
-	notAvailable = "not available"
-	none         = "none"
+	notAvailable     = "not available"
+	none             = "none"
+	minTableColWidth = 3
 
 	outcomeReasonLimit  = 400
 	summaryExcerptLimit = 4000
@@ -47,7 +48,9 @@ func Status(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+
 	renderStatus(inspection.stdout, inspection.workflow, inspection.run, inspection.decision)
+
 	return nil
 }
 
@@ -57,7 +60,9 @@ func Next(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+
 	renderNext(inspection.stdout, inspection.workflow, inspection.run, inspection.decision)
+
 	return nil
 }
 
@@ -67,6 +72,7 @@ func SummaryContext(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+
 	return renderSummaryContext(ctx, inspection)
 }
 
@@ -77,11 +83,14 @@ func Config(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+
 	snapshot, err := configsnapshot.InspectCurrent(run)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+
 	renderConfig(out, run, snapshot)
+
 	return nil
 }
 
@@ -134,14 +143,17 @@ func inspect(ctx context.Context, opts Options) (inspection, error) {
 	if err != nil {
 		return inspection{}, err
 	}
+
 	decision, err := evaluate(workflowConfig, run)
 	if err != nil {
 		return inspection{}, err
 	}
+
 	out := opts.Stdout
 	if out == nil {
 		out = io.Discard
 	}
+
 	return inspection{
 		stdout:   out,
 		store:    store,
@@ -155,16 +167,20 @@ func loadProjectRun(ctx context.Context, opts Options) (config.Workflow, *runsto
 	if opts.Root == "" {
 		return config.Workflow{}, nil, nil, stableerr.New("project root is required")
 	}
+
 	if opts.RunID == "" {
 		return config.Workflow{}, nil, nil, stableerr.New("run id is required")
 	}
+
 	loaded, err := runcontext.LoadContext(ctx, opts.Root, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return config.Workflow{}, nil, nil, stableerr.Errorf("run %q not found", opts.RunID)
 		}
+
 		return config.Workflow{}, nil, nil, fmt.Errorf("load project run: %w", err)
 	}
+
 	return loaded.Workflow, loaded.Store, loaded.Run, nil
 }
 
@@ -172,24 +188,30 @@ func loadRun(ctx context.Context, opts Options) (*runstore.Store, *runstore.Run,
 	if opts.Root == "" {
 		return nil, nil, nil, stableerr.New("project root is required")
 	}
+
 	if opts.RunID == "" {
 		return nil, nil, nil, stableerr.New("run id is required")
 	}
+
 	store, err := runstore.Open(opts.Root)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("load run: %w", err)
 	}
+
 	run, err := store.LoadContext(ctx, opts.RunID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, nil, stableerr.Errorf("run %q not found", opts.RunID)
 		}
+
 		return nil, nil, nil, fmt.Errorf("load run: %w", err)
 	}
+
 	out := opts.Stdout
 	if out == nil {
 		out = io.Discard
 	}
+
 	return store, run, out, nil
 }
 
@@ -198,6 +220,7 @@ func evaluate(workflowConfig config.Workflow, run *runstore.Run) (workflow.Decis
 	if err != nil {
 		return workflow.Decision{}, fmt.Errorf("evaluate run %q: %w", run.ID, err)
 	}
+
 	return decision, nil
 }
 
@@ -247,18 +270,22 @@ type configRefreshEvent struct {
 func printConfigRefreshHistory(w io.Writer, events []runstore.Event) {
 	_, _ = fmt.Fprintln(w, "refresh_history:")
 	count := 0
+
 	for _, event := range events {
 		if event.Type != runstore.EventConfigSnapshotRefreshed {
 			continue
 		}
+
 		var payload configRefreshEvent
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			_, _ = fmt.Fprintf(w, "  - sequence: %d\n", event.Sequence)
 			_, _ = fmt.Fprintf(w, "    time: %s\n", formatTime(event.Time))
 			_, _ = fmt.Fprintf(w, "    payload_error: %s\n", quoteScalar(err.Error()))
 			count++
+
 			continue
 		}
+
 		_, _ = fmt.Fprintf(w, "  - sequence: %d\n", event.Sequence)
 		_, _ = fmt.Fprintf(w, "    time: %s\n", formatTime(event.Time))
 		_, _ = fmt.Fprintf(w, "    version: %s -> %s\n", payload.OldVersionDir, payload.NewVersionDir)
@@ -266,6 +293,7 @@ func printConfigRefreshHistory(w io.Writer, events []runstore.Event) {
 		_, _ = fmt.Fprintf(w, "    source: %s\n", quoteScalar(payload.Source))
 		count++
 	}
+
 	if count == 0 {
 		_, _ = fmt.Fprintln(w, "  none")
 	}
@@ -273,31 +301,38 @@ func printConfigRefreshHistory(w io.Writer, events []runstore.Event) {
 
 func printWorkflowLoopStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run) {
 	_, _ = fmt.Fprintln(w, "workflow_loop:")
+
 	states := workflowLoopStates(workflowConfig, run.Status.WorkflowLoop)
 	if len(states) == 0 {
 		_, _ = fmt.Fprintln(w, "  states: none")
 		return
 	}
+
 	_, _ = fmt.Fprintln(w, "  states:")
+
 	for _, state := range states {
 		count := run.Status.WorkflowLoop.Counts[state]
 		softReached := workflowLoopSoftReached(run.Status.WorkflowLoop, state, workflowConfig.LoopCaps.Soft)
 		hardBlocking := false
 		blockedProspective := 0
+
 		if block := run.Status.WorkflowLoop.HardCapBlock; block != nil && block.BlockedState == state {
 			hardBlocking = true
 			blockedProspective = block.ProspectiveCount
 		}
+
 		_, _ = fmt.Fprintf(w, "    %s:\n", state)
 		_, _ = fmt.Fprintf(w, "      current_count: %d\n", count)
 		_, _ = fmt.Fprintf(w, "      soft_threshold: %d\n", workflowConfig.LoopCaps.Soft)
 		_, _ = fmt.Fprintf(w, "      hard_threshold: %d\n", workflowConfig.LoopCaps.Hard)
 		_, _ = fmt.Fprintf(w, "      soft_reached: %t\n", softReached)
+
 		_, _ = fmt.Fprintf(w, "      hard_blocking: %t\n", hardBlocking)
 		if hardBlocking {
 			_, _ = fmt.Fprintf(w, "      blocked_target_state: %s\n", state)
 			_, _ = fmt.Fprintf(w, "      blocked_prospective_count: %d\n", blockedProspective)
 		}
+
 		if override := run.Status.WorkflowLoop.PendingHardCapOverride; override != nil && override.TargetState == state {
 			_, _ = fmt.Fprintf(w, "      pending_override: %s\n", override.HumanAction)
 			_, _ = fmt.Fprintf(w, "      pending_override_count_after: %d\n", override.CountAfterOverride)
@@ -311,12 +346,14 @@ func printSkippedSteps(w io.Writer, skipped []runstore.SkippedStep) {
 		_, _ = fmt.Fprintln(w, "  none")
 		return
 	}
+
 	for _, step := range skipped {
 		_, _ = fmt.Fprintf(w, "  - step_id: %s\n", step.StepID)
 		_, _ = fmt.Fprintf(w, "    status: %s\n", step.Status)
 		_, _ = fmt.Fprintf(w, "    result: %s\n", step.Result)
 		_, _ = fmt.Fprintf(w, "    reason: %s\n", quoteScalar(step.Reason))
 		_, _ = fmt.Fprintf(w, "    event_sequence: %d\n", step.EventSequence)
+
 		_, _ = fmt.Fprintf(w, "    timestamp: %s\n", formatTime(step.Time))
 		if step.Source != "" {
 			_, _ = fmt.Fprintf(w, "    source: %s\n", quoteScalar(step.Source))
@@ -326,25 +363,32 @@ func printSkippedSteps(w io.Writer, skipped []runstore.SkippedStep) {
 
 func workflowLoopStates(workflowConfig config.Workflow, loop runstore.WorkflowLoop) []string {
 	seen := map[string]bool{}
+
 	var states []string
+
 	for state := range workflowConfig.Steps {
 		seen[state] = true
 		states = append(states, state)
 	}
+
 	for state := range loop.Counts {
 		if !seen[state] {
 			seen[state] = true
 			states = append(states, state)
 		}
 	}
+
 	if block := loop.HardCapBlock; block != nil && !seen[block.BlockedState] {
 		seen[block.BlockedState] = true
 		states = append(states, block.BlockedState)
 	}
+
 	if override := loop.PendingHardCapOverride; override != nil && !seen[override.TargetState] {
 		states = append(states, override.TargetState)
 	}
+
 	slices.Sort(states)
+
 	return states
 }
 
@@ -352,9 +396,11 @@ func workflowLoopSoftReached(loop runstore.WorkflowLoop, state string, soft int)
 	if soft <= 0 {
 		return false
 	}
+
 	if loop.Counts[state] > soft {
 		return true
 	}
+
 	return slices.ContainsFunc(loop.SoftCapWarnings, func(warning runstore.WorkflowLoopSoftCap) bool {
 		return warning.State == state
 	})
@@ -362,6 +408,7 @@ func workflowLoopSoftReached(loop runstore.WorkflowLoop, state string, soft int)
 
 func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
 	printRunHeader(w, run, decision)
+
 	_, _ = fmt.Fprintf(w, "decision: %s\n", decision.Kind)
 	switch decision.Kind {
 	case workflow.DecisionSelectStep:
@@ -378,6 +425,7 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 			_, _ = fmt.Fprintf(w, "selected_step: %s\n", run.Status.ActiveAttempt.StepID)
 			_, _ = fmt.Fprintf(w, "agent: %s\n", run.Status.ActiveAttempt.AgentID)
 		}
+
 		_, _ = fmt.Fprintln(w, "launch: already active")
 	case workflow.DecisionTerminal:
 		_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", terminalReason(decision))
@@ -391,6 +439,7 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 
 func printLoopCapPreview(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
 	latest, hasLatest := runstore.LatestConsumableOutcome(run.Status)
+
 	capDecision := loopcap.Evaluate(workflowConfig.Name, workflowConfig.LoopCaps, run.Status, decision, latest, hasLatest)
 	switch capDecision.Kind {
 	case loopcap.DecisionNone:
@@ -405,11 +454,13 @@ func printLoopCapPreview(w io.Writer, workflowConfig config.Workflow, run *runst
 func printSelectedStep(w io.Writer, workflowConfig config.Workflow, stepID string) {
 	step := workflowConfig.Steps[stepID]
 	_, _ = fmt.Fprintf(w, "selected_step: %s\n", stepID)
+
 	_, _ = fmt.Fprintf(w, "kind: %s\n", step.EffectiveKind())
 	if step.EffectiveKind() == config.StepKindAgent {
 		_, _ = fmt.Fprintf(w, "agent: %s\n", step.Agent)
 		return
 	}
+
 	_, _ = fmt.Fprintln(w, "note: deterministic step selected; orc run next did not execute it")
 }
 
@@ -417,6 +468,7 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("render summary context: %w", err)
 	}
+
 	run := inspection.run
 	w := inspection.stdout
 	state := effectiveRunState(run, inspection.decision)
@@ -435,6 +487,7 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 	if err != nil {
 		return err
 	}
+
 	_, _ = fmt.Fprintln(w, "## Task Context")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, fencedMarkdown(excerptText(taskContext, summaryExcerptLimit)))
@@ -442,34 +495,43 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 
 	stepOrder := workflowStepOrder(inspection.workflow)
 	_, _ = fmt.Fprintln(w, "## Workflow Path")
+
 	for _, stepID := range stepOrder {
 		step := inspection.workflow.Steps[stepID]
 		_, _ = fmt.Fprintln(w, "- step:")
 		printIndentedStringField(w, "id", stepID)
+
 		if step.EffectiveKind() == config.StepKindAgent {
 			printIndentedStringField(w, "agent", step.Agent)
 		} else {
 			printIndentedStringField(w, "kind", step.EffectiveKind())
 		}
+
 		_, _ = fmt.Fprintf(w, "  attempts: %d\n", countStepAttempts(run.Status.Attempts, stepID))
 	}
+
 	renderSkippedSteps(w, run.Status.SkippedSteps)
 	printStringField(w, "decision", string(inspection.decision.Kind))
+
 	if inspection.decision.Kind == workflow.DecisionSelectStep {
 		printStringField(w, "selected_step", inspection.decision.Step)
 	}
+
 	if inspection.decision.Kind == workflow.DecisionTerminal {
 		printStringField(w, "terminal_reason", terminalReason(inspection.decision))
 	}
+
 	if state == workflow.RunStatusBlockedForHuman {
 		printStringField(w, "human_attention", workflow.RunStatusBlockedForHuman)
 	}
+
 	_, _ = fmt.Fprintln(w)
 
 	inputs, err := buildSummaryInputs(ctx, inspection.store, run, stepOrder)
 	if err != nil {
 		return err
 	}
+
 	renderWorkerReports(w, inputs.reported)
 	renderChanges(w, inputs.reportFields, inputs.vcsPaths, inputs.combinedChangedPaths)
 	renderCommandsAndTests(w, inputs.reportFields)
@@ -477,6 +539,7 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 	renderFollowups(w, inputs.reportFields.followups, inputs.recordedFollowups)
 	renderVCS(w, inputs.latestPreRunVCS, inputs.latestPostRunVCS)
 	renderHumanReviewFocus(w, state, inputs.reportFields, strings.TrimSpace(inputs.recordedFollowups) != "", inputs.latestPostRunVCS != nil)
+
 	return nil
 }
 
@@ -485,8 +548,10 @@ func renderWorkerReports(w io.Writer, attempts []runstore.Attempt) {
 	if len(attempts) == 0 {
 		_, _ = fmt.Fprintln(w, "- none")
 		_, _ = fmt.Fprintln(w)
+
 		return
 	}
+
 	for _, attempt := range attempts {
 		report := attempt.Report
 		_, _ = fmt.Fprintln(w, "### Report")
@@ -498,6 +563,7 @@ func renderWorkerReports(w io.Writer, attempts []runstore.Attempt) {
 		printStringField(w, "summary", report.Summary)
 		printOptionalStringField(w, "report_artifact", attempt.ReportRef)
 	}
+
 	_, _ = fmt.Fprintln(w)
 }
 
@@ -533,37 +599,46 @@ func renderRisks(w io.Writer, state string, fields reportFields) {
 	if len(fields.risks) == 0 && state != workflow.RunStatusBlockedForHuman {
 		_, _ = fmt.Fprintln(w, "- none")
 		_, _ = fmt.Fprintln(w)
+
 		return
 	}
+
 	for _, risk := range fields.risks {
 		_, _ = fmt.Fprintf(w, "- %s\n", quoteScalar(risk))
 	}
+
 	if state == workflow.RunStatusBlockedForHuman {
 		_, _ = fmt.Fprintln(w, "- blocked_for_human requires human attention")
 	}
+
 	_, _ = fmt.Fprintln(w)
 }
 
 func renderFollowups(w io.Writer, structured []runstore.Followup, recorded string) {
 	_, _ = fmt.Fprintln(w, "## Follow-Ups")
+
 	_, _ = fmt.Fprintln(w, "### Structured Report Follow-Ups")
 	if len(structured) == 0 {
 		_, _ = fmt.Fprintln(w, "- none")
 	} else {
 		for _, followup := range structured {
 			printStringField(w, "title", followup.Title)
+
 			if followup.Details != "" {
 				printIndentedStringField(w, "details", followup.Details)
 			}
 		}
 	}
+
 	_, _ = fmt.Fprintln(w)
+
 	_, _ = fmt.Fprintln(w, "### Recorded Follow-Ups")
 	if strings.TrimSpace(recorded) == "" {
 		_, _ = fmt.Fprintln(w, "- none")
 	} else {
 		_, _ = fmt.Fprintln(w, fencedMarkdown(excerptText(recorded, summaryExcerptLimit)))
 	}
+
 	_, _ = fmt.Fprintln(w)
 }
 
@@ -576,25 +651,32 @@ func renderVCS(w io.Writer, preRun, postRun *vcsSnapshotRef) {
 
 func renderHumanReviewFocus(w io.Writer, state string, fields reportFields, hasRecordedFollowups, postRunVCS bool) {
 	_, _ = fmt.Fprintln(w, "## Suggested Human Review Focus")
+
 	var bullets []string
 	if state == workflow.RunStatusBlockedForHuman {
 		bullets = append(bullets, "Resolve the blocked_for_human terminal state before treating the run as ready.")
 	}
+
 	if len(fields.risks) > 0 {
 		bullets = append(bullets, "Review reported risks and caveats.")
 	}
+
 	if len(fields.tests) == 0 {
 		bullets = append(bullets, "Confirm verification because no worker-reported tests are recorded.")
 	}
+
 	if len(fields.followups) > 0 || hasRecordedFollowups {
 		bullets = append(bullets, "Review recorded follow-ups before final handoff.")
 	}
+
 	if !postRunVCS {
 		bullets = append(bullets, "Post-run VCS snapshot is not recorded.")
 	}
+
 	if len(bullets) == 0 && state == workflow.RunStatusReadyForHuman {
 		bullets = append(bullets, "Confirm the changes, tests, and VCS summary before final handoff.")
 	}
+
 	if len(bullets) == 0 {
 		_, _ = fmt.Fprintln(w, "- none")
 	} else {
@@ -608,6 +690,7 @@ func activeAttemptValue(attempt *runstore.Attempt) string {
 	if attempt == nil {
 		return none
 	}
+
 	return attempt.AttemptID
 }
 
@@ -620,6 +703,7 @@ func effectiveRunState(run *runstore.Run, decision workflow.Decision) string {
 	if decision.Kind == workflow.DecisionTerminal && isTerminalHumanState(decision.RunStatus) {
 		return decision.RunStatus
 	}
+
 	return run.Status.State
 }
 
@@ -627,6 +711,7 @@ func selectedStep(decision workflow.Decision) string {
 	if decision.Kind == workflow.DecisionSelectStep || decision.Kind == workflow.DecisionRetryStep {
 		return decision.Step
 	}
+
 	return none
 }
 
@@ -634,6 +719,7 @@ func terminalReason(decision workflow.Decision) string {
 	if decision.Kind != workflow.DecisionTerminal {
 		return none
 	}
+
 	return decision.RunStatus
 }
 
@@ -641,6 +727,7 @@ func latestConsumableOutcome(run *runstore.Run) (runstore.Attempt, bool) {
 	if run == nil {
 		return runstore.Attempt{}, false
 	}
+
 	return runstore.LatestConsumableOutcome(run.Status)
 }
 
@@ -659,6 +746,7 @@ func printRetryDecision(w io.Writer, workflowConfig config.Workflow, run *runsto
 	if !hasOutcome {
 		return
 	}
+
 	pair := outcomePair(outcome)
 	_, _ = fmt.Fprintf(w, "retrying_after: %s\n", pair)
 	_, _ = fmt.Fprintf(w, "retry_count: %s\n", retryCountText(workflowConfig, pair, decision.Retry.Counts[pair]))
@@ -670,16 +758,20 @@ func printTerminalOutcome(w io.Writer, workflowConfig config.Workflow, run *runs
 	if !hasOutcome {
 		return
 	}
+
 	pair := outcomePair(outcome)
 	_, _ = fmt.Fprintf(w, "last_outcome: %s\n", pair)
+
 	_, _ = fmt.Fprintf(w, "last_attempt: %s\n", outcome.AttemptID)
 	if reason, ok := invalidReportReason(outcome); ok {
 		_, _ = fmt.Fprintf(w, "invalid_report_reason: %s\n", reason)
 	}
+
 	if outcome.Status == "failed" {
 		_, _ = fmt.Fprintf(w, "retry_exhausted: %s\n", pair)
 		_, _ = fmt.Fprintf(w, "retry_count: %s\n", retryCountText(workflowConfig, pair, retryCountConsumedByRun(run, outcome, pair)))
 	}
+
 	_, _ = fmt.Fprintf(w, "transition: %s -> %s\n", pair, decision.RunStatus)
 }
 
@@ -691,6 +783,7 @@ func retryCountConsumedByRun(run *runstore.Run, outcome runstore.Attempt, pair s
 	if run.Status.RetryLineage != nil && run.Status.RetryLineage.StepID == outcome.StepID {
 		return run.Status.RetryLineage.Counts[pair]
 	}
+
 	return 0
 }
 
@@ -698,7 +791,9 @@ func invalidReportReason(attempt runstore.Attempt) (string, bool) {
 	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Report == nil || attempt.Report.Summary == "" {
 		return "", false
 	}
+
 	reason := strings.NewReplacer("\r", " ", "\n", " ").Replace(excerptText(attempt.Report.Summary, outcomeReasonLimit))
+
 	return strings.TrimSpace(reason), true
 }
 
@@ -712,6 +807,7 @@ func printReportPaths(w io.Writer, reports []string) {
 		_, _ = fmt.Fprintln(w, "  none")
 		return
 	}
+
 	for _, path := range reports {
 		_, _ = fmt.Fprintf(w, "  - %s\n", path)
 	}
@@ -719,11 +815,13 @@ func printReportPaths(w io.Writer, reports []string) {
 
 func reportPaths(refs []runstore.ArtifactRef) []string {
 	var paths []string
+
 	for _, ref := range refs {
 		if ref.Kind == runstore.KindReport {
 			paths = append(paths, ref.Path)
 		}
 	}
+
 	return paths
 }
 
@@ -733,8 +831,10 @@ func printArtifacts(w io.Writer, refs []runstore.ArtifactRef) {
 		_, _ = fmt.Fprintln(w, "  none")
 		return
 	}
+
 	sorted := slices.Clone(refs)
 	slices.SortFunc(sorted, compareArtifactRefs)
+
 	for _, ref := range sorted {
 		_, _ = fmt.Fprintf(w, "  - %s: %s\n", ref.Kind, ref.Path)
 	}
@@ -744,9 +844,11 @@ func compareArtifactRefs(a, b runstore.ArtifactRef) int {
 	if bySequence := cmp.Compare(a.EventSequence, b.EventSequence); bySequence != 0 {
 		return bySequence
 	}
+
 	if byKind := cmp.Compare(a.Kind, b.Kind); byKind != 0 {
 		return byKind
 	}
+
 	return cmp.Compare(a.Path, b.Path)
 }
 
@@ -760,6 +862,7 @@ func printTerminalHumanState(w io.Writer, run *runstore.Run, decision workflow.D
 	if !isTerminalHumanState(state) {
 		return
 	}
+
 	printHumanStateDetail(w, state, len(reports) > 0)
 	printHumanReviewPaths(w, run)
 }
@@ -771,6 +874,7 @@ func printHumanStateDetail(w io.Writer, state string, hasReport bool) {
 			_, _ = fmt.Fprintln(w, "human_attention: blocked_for_human; see recent_reports")
 			return
 		}
+
 		_, _ = fmt.Fprintf(w, "human_attention: %s; report details %s\n", state, notAvailable)
 	case workflow.RunStatusReadyForHuman:
 		_, _ = fmt.Fprintln(w, "review_state: ready_for_human; no more workers should launch")
@@ -785,6 +889,7 @@ func summaryTerminalState(state string) string {
 	if isTerminalHumanState(state) || state == workflow.RunStatusCancelled {
 		return state
 	}
+
 	return none
 }
 
@@ -792,65 +897,85 @@ func workflowStepOrder(workflowConfig config.Workflow) []string {
 	if len(workflowConfig.StepOrder) > 0 {
 		return slices.Clone(workflowConfig.StepOrder)
 	}
+
 	steps := make([]string, 0, len(workflowConfig.Steps))
 	for stepID := range workflowConfig.Steps {
 		steps = append(steps, stepID)
 	}
+
 	slices.Sort(steps)
+
 	return steps
 }
 
 func countStepAttempts(attempts []runstore.Attempt, stepID string) int {
 	count := 0
+
 	for _, attempt := range attempts {
 		if attempt.StepID == stepID {
 			count++
 		}
 	}
+
 	return count
 }
 
 func reportedAttemptsByWorkflowOrder(attempts []runstore.Attempt, stepOrder []string) []runstore.Attempt {
 	byStep := map[string][]runstore.Attempt{}
+
 	for _, attempt := range attempts {
 		if attempt.Report == nil {
 			continue
 		}
+
 		byStep[attempt.StepID] = append(byStep[attempt.StepID], attempt)
 	}
+
 	var ordered []runstore.Attempt
+
 	seen := map[string]struct{}{}
+
 	for _, stepID := range stepOrder {
 		ordered = append(ordered, byStep[stepID]...)
 		seen[stepID] = struct{}{}
 	}
+
 	var rest []string
+
 	for stepID := range byStep {
 		if _, ok := seen[stepID]; !ok {
 			rest = append(rest, stepID)
 		}
 	}
+
 	slices.Sort(rest)
+
 	for _, stepID := range rest {
 		ordered = append(ordered, byStep[stepID]...)
 	}
+
 	return ordered
 }
 
 func buildSummaryInputs(ctx context.Context, store *runstore.Store, run *runstore.Run, stepOrder []string) (summaryInputs, error) {
 	reported := reportedAttemptsByWorkflowOrder(run.Status.Attempts, stepOrder)
+
 	vcsSnapshots, err := readVCSSnapshots(ctx, store, run)
 	if err != nil {
 		return summaryInputs{}, err
 	}
+
 	latestPreRunVCS := latestVCSSnapshot(vcsSnapshots, vcs.PhasePreRun)
 	latestPostRunVCS := latestVCSSnapshot(vcsSnapshots, vcs.PhasePostRun)
+
 	recordedFollowups, err := readOptionalArtifactText(ctx, store, run, runstore.KindFollowup)
 	if err != nil {
 		return summaryInputs{}, err
 	}
+
 	reportFields := collectReportFields(reported)
 	vcsPaths := summarizeVCSPaths(latestPreRunVCS, latestPostRunVCS)
+
 	return summaryInputs{
 		reported:             reported,
 		reportFields:         reportFields,
@@ -864,6 +989,7 @@ func buildSummaryInputs(ctx context.Context, store *runstore.Store, run *runstor
 
 func collectReportFields(attempts []runstore.Attempt) reportFields {
 	var fields reportFields
+
 	for _, attempt := range attempts {
 		report := attempt.Report
 		fields.changedPaths = append(fields.changedPaths, report.ChangedPaths...)
@@ -872,10 +998,12 @@ func collectReportFields(attempts []runstore.Attempt) reportFields {
 		fields.risks = append(fields.risks, report.Risks...)
 		fields.followups = append(fields.followups, report.Followups...)
 	}
+
 	fields.changedPaths = uniqueStrings(fields.changedPaths)
 	fields.commands = uniqueStrings(fields.commands)
 	fields.tests = uniqueStrings(fields.tests)
 	fields.risks = uniqueStrings(fields.risks)
+
 	return fields
 }
 
@@ -884,9 +1012,11 @@ func readRequiredArtifactText(ctx context.Context, store *runstore.Store, run *r
 	if err != nil {
 		return "", err
 	}
+
 	if !found {
 		return "", stableerr.Errorf("run %q has no %s artifact", run.ID, kind)
 	}
+
 	return content, nil
 }
 
@@ -900,31 +1030,39 @@ func readArtifactText(ctx context.Context, store *runstore.Store, run *runstore.
 		if ref.Kind != kind {
 			continue
 		}
+
 		content, err := store.ReadArtifactContext(ctx, run.ID, ref)
 		if err != nil {
 			return "", false, fmt.Errorf("read %s artifact %s: %w", kind, ref.Path, err)
 		}
+
 		return string(content), true, nil
 	}
+
 	return "", false, nil
 }
 
 func readVCSSnapshots(ctx context.Context, store *runstore.Store, run *runstore.Run) ([]vcsSnapshotRef, error) {
 	var snapshots []vcsSnapshotRef
+
 	for _, ref := range run.Status.Artifacts {
 		if !isVCSSnapshotRef(ref) {
 			continue
 		}
+
 		content, err := store.ReadArtifactContext(ctx, run.ID, ref)
 		if err != nil {
 			return nil, fmt.Errorf("read VCS snapshot %s: %w", ref.Path, err)
 		}
+
 		var snapshot vcs.Snapshot
 		if err := json.Unmarshal(content, &snapshot); err != nil {
 			return nil, fmt.Errorf("decode VCS snapshot %s: %w", ref.Path, err)
 		}
+
 		snapshots = append(snapshots, vcsSnapshotRef{ref: ref, snapshot: snapshot})
 	}
+
 	return snapshots, nil
 }
 
@@ -932,19 +1070,23 @@ func isVCSSnapshotRef(ref runstore.ArtifactRef) bool {
 	if ref.Kind != runstore.KindSnapshot {
 		return false
 	}
+
 	return strings.HasSuffix(ref.Path, "-vcs-pre-run.json") || strings.HasSuffix(ref.Path, "-vcs-post-run.json")
 }
 
 func latestVCSSnapshot(snapshots []vcsSnapshotRef, phase string) *vcsSnapshotRef {
 	var latest *vcsSnapshotRef
+
 	for i := range snapshots {
 		if snapshots[i].snapshot.Phase != phase {
 			continue
 		}
+
 		if latest == nil || compareArtifactRefs(latest.ref, snapshots[i].ref) < 0 {
 			latest = &snapshots[i]
 		}
 	}
+
 	return latest
 }
 
@@ -954,6 +1096,7 @@ func printVCSSnapshot(w io.Writer, label string, snapshotRef *vcsSnapshotRef) {
 		_, _ = fmt.Fprintln(w, "- not recorded")
 		return
 	}
+
 	snapshot := snapshotRef.snapshot
 	printStringField(w, "artifact", snapshotRef.ref.Path)
 	printStringField(w, "kind", snapshot.Kind)
@@ -967,18 +1110,24 @@ func summarizeVCSPaths(pre, post *vcsSnapshotRef) vcsPathSummary {
 	if post == nil {
 		return vcsPathSummary{}
 	}
+
 	postChangedPaths := uniqueStrings(post.snapshot.ChangedPaths)
+
 	summary := vcsPathSummary{}
 	if pre == nil {
 		summary.postRun = postChangedPaths
 		summary.newlyObserved = summary.postRun
+
 		return summary
 	}
+
 	preChangedPaths := uniqueStrings(pre.snapshot.ChangedPaths)
+
 	postPaths := map[string]struct{}{}
 	for _, path := range postChangedPaths {
 		postPaths[path] = struct{}{}
 	}
+
 	prePaths := map[string]struct{}{}
 	for _, path := range preChangedPaths {
 		prePaths[path] = struct{}{}
@@ -986,31 +1135,41 @@ func summarizeVCSPaths(pre, post *vcsSnapshotRef) vcsPathSummary {
 			summary.preExisting = append(summary.preExisting, path)
 		}
 	}
+
 	for _, path := range postChangedPaths {
 		if _, existedBeforeRun := prePaths[path]; existedBeforeRun {
 			continue
 		}
+
 		summary.newlyObserved = append(summary.newlyObserved, path)
 	}
+
 	summary.postRun = postChangedPaths
+
 	return summary
 }
 
 func uniqueStrings(values []string) []string {
 	seen := map[string]struct{}{}
+
 	var out []string
+
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
+
 		if _, ok := seen[value]; ok {
 			continue
 		}
+
 		seen[value] = struct{}{}
 		out = append(out, value)
 	}
+
 	slices.Sort(out)
+
 	return out
 }
 
@@ -1024,6 +1183,7 @@ func printStringListAtLevel(w io.Writer, label string, values []string, level he
 		_, _ = fmt.Fprintln(w, "- none")
 		return
 	}
+
 	for _, value := range values {
 		_, _ = fmt.Fprintf(w, "- %s\n", quoteScalar(value))
 	}
@@ -1046,6 +1206,7 @@ func printOptionalStringField(w io.Writer, label string, ref *runstore.ArtifactR
 		_, _ = fmt.Fprintf(w, "- %s: %s\n", label, none)
 		return
 	}
+
 	printStringField(w, label, ref.Path)
 }
 
@@ -1054,6 +1215,7 @@ func quoteScalar(value string) string {
 	if err != nil {
 		return strconv.Quote(value)
 	}
+
 	return string(encoded)
 }
 
@@ -1065,21 +1227,26 @@ func fencedMarkdown(content string) string {
 func markdownFence(content string) string {
 	longest := 0
 	current := 0
+
 	for _, r := range content {
 		if r == '`' {
 			current++
 			if current > longest {
 				longest = current
 			}
+
 			continue
 		}
+
 		current = 0
 	}
-	if longest < 3 {
-		longest = 3
+
+	if longest < minTableColWidth {
+		longest = minTableColWidth
 	} else {
 		longest++
 	}
+
 	return strings.Repeat("`", longest)
 }
 
@@ -1088,10 +1255,12 @@ func excerptText(content string, limit int) string {
 	if text == "" {
 		return "(empty)"
 	}
+
 	runes := []rune(text)
 	if len(runes) <= limit {
 		return text
 	}
+
 	return strings.TrimSpace(string(runes[:limit])) + "\n\n[excerpt truncated]"
 }
 
@@ -1099,5 +1268,6 @@ func formatTime(value time.Time) string {
 	if value.IsZero() {
 		return "unknown"
 	}
+
 	return value.UTC().Format(time.RFC3339)
 }

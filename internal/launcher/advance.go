@@ -19,6 +19,12 @@ import (
 const DefaultAdvanceMaxSteps = 20
 
 const (
+	advanceExitOK      = 0
+	advanceExitError   = 1
+	advanceExitBlocked = 2
+)
+
+const (
 	StopReasonReadyForHuman       = "ready_for_human"
 	StopReasonBlockedForHuman     = "blocked_for_human"
 	StopReasonWorkerBlocked       = "worker_blocked"
@@ -71,18 +77,23 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 	if ctx == nil {
 		return advanceError(opts.RunID, "", "", StopReasonError, 1, stableerr.New("context is required"))
 	}
+
 	if opts.MaxSteps == 0 {
 		opts.MaxSteps = DefaultAdvanceMaxSteps
 	}
+
 	if opts.MaxSteps < 1 {
 		return advanceError(opts.RunID, "", "", StopReasonError, 1, stableerr.Errorf("max steps must be positive, got %d", opts.MaxSteps))
 	}
+
 	if opts.Root == "" {
 		return advanceError(opts.RunID, "", "", StopReasonError, 1, stableerr.New("project root is required"))
 	}
+
 	if opts.RunID == "" {
 		return advanceError("", "", "", StopReasonError, 1, stableerr.New("run id is required"))
 	}
+
 	if err := ctx.Err(); err != nil {
 		return advanceError(opts.RunID, "", "", StopReasonError, 1, err)
 	}
@@ -93,6 +104,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 		if err != nil {
 			return result.withError(StopReasonError, 1, err), err
 		}
+
 		result.FinalStatus = eval.status.State
 		result.FinalDecision = string(eval.decision.Kind)
 
@@ -102,6 +114,7 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 		case workflow.DecisionWaitActiveAttempt:
 			result.StopReason = StopReasonActiveAttemptExists
 			result.ExitCode = 1
+
 			return result, stableerr.Errorf("run %q has an active attempt", opts.RunID)
 		case workflow.DecisionSelectStep, workflow.DecisionRetryStep:
 		default:
@@ -114,19 +127,23 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 		}
 
 		capDecision := loopcap.Evaluate(eval.workflowName, eval.loopCaps, eval.status, eval.decision, eval.workflowOutcome, eval.hasWorkflowOutcome)
+
 		capResult, handled, err := handleAdvanceLoopCap(ctx, opts, eval, capDecision, result)
 		if handled || err != nil {
 			return capResult, err
 		}
 
 		launchResult, err := launchAdvanceAttempt(ctx, opts, eval)
+
 		result = recordAdvanceLaunch(result, launchResult)
 		if err != nil {
 			return result.withError(StopReasonError, 1, err), err
 		}
+
 		if opts.Once {
 			return finishAdvanceOnce(ctx, opts, result)
 		}
+
 		stopResult, stopped, err := stopAdvanceForWorkerOutcome(ctx, opts, result, launchResult.Attempt)
 		if stopped || err != nil {
 			return stopResult, err
@@ -139,15 +156,17 @@ func finishTerminalAdvance(ctx context.Context, opts AdvanceOptions, eval advanc
 	case workflow.RunStatusReadyForHuman:
 		result, err := terminalizeAdvanceIfNeeded(ctx, opts, eval, result)
 		if err != nil {
-			return result.withError(StopReasonError, 1, err), err
+			return result.withError(StopReasonError, advanceExitError, err), err
 		}
-		return stopAdvance(result, StopReasonReadyForHuman, 0), nil
+
+		return stopAdvance(result, StopReasonReadyForHuman, advanceExitOK), nil
 	case workflow.RunStatusBlockedForHuman:
 		result, err := terminalizeAdvanceIfNeeded(ctx, opts, eval, result)
 		if err != nil {
-			return result.withError(StopReasonError, 1, err), err
+			return result.withError(StopReasonError, advanceExitError, err), err
 		}
-		return stopAdvance(result, StopReasonBlockedForHuman, 2), nil
+
+		return stopAdvance(result, StopReasonBlockedForHuman, advanceExitBlocked), nil
 	default:
 		result.StopReason = eval.decision.RunStatus
 		return result, nil
@@ -158,11 +177,14 @@ func terminalizeAdvanceIfNeeded(ctx context.Context, opts AdvanceOptions, eval a
 	if !eval.hasOutcome || eval.status.State != workflow.RunStatusRunning {
 		return result, nil
 	}
+
 	status, err := terminalizeAdvanceOutcome(ctx, eval, normalizeTime(opts.Time))
 	if err != nil {
 		return result, err
 	}
+
 	result.FinalStatus = status.State
+
 	return result, nil
 }
 
@@ -177,13 +199,15 @@ func handleAdvanceLoopCap(ctx context.Context, opts AdvanceOptions, eval advance
 		result.FinalDecision = string(eval.decision.Kind)
 		result.StopReason = StopReasonLoopHardCap
 		result.ExitCode = 2
+
 		return result, true, err
 	case loopcap.DecisionSoft:
 		loopCap := capDecision.SoftCap()
 		if _, _, err := eval.store.RecordWorkflowLoopSoftCapContext(ctx, opts.RunID, loopCap, normalizeTime(opts.Time)); err != nil {
-			return result.withError(StopReasonError, 1, err), true, err
+			return result.withError(StopReasonError, advanceExitError, err), true, err
 		}
-		return stopAdvance(result, StopReasonLoopSoftCap, 2), true, nil
+
+		return stopAdvance(result, StopReasonLoopSoftCap, advanceExitBlocked), true, nil
 	default:
 		return result, false, nil
 	}
@@ -193,6 +217,7 @@ func launchAdvanceAttempt(ctx context.Context, opts AdvanceOptions, eval advance
 	if opts.Progress != nil {
 		_, _ = fmt.Fprintf(opts.Progress, "advancing run %s: launching %s (%s)\n", opts.RunID, eval.decision.Step, eval.decision.Kind)
 	}
+
 	return LaunchNext(ctx, launchOptions(opts))
 }
 
@@ -201,19 +226,23 @@ func stopAdvanceForWorkerOutcome(ctx context.Context, opts AdvanceOptions, resul
 	case workflow.ReportStatusBlocked:
 		eval, err := evaluateAdvance(ctx, opts.Root, opts.RunID)
 		if err != nil {
-			return result.withError(StopReasonError, 1, err), true, err
+			return result.withError(StopReasonError, advanceExitError, err), true, err
 		}
+
 		result.FinalStatus = eval.status.State
 		result.FinalDecision = string(eval.decision.Kind)
-		return stopAdvance(result, StopReasonWorkerBlocked, 2), true, nil
+
+		return stopAdvance(result, StopReasonWorkerBlocked, advanceExitBlocked), true, nil
 	case workflow.ReportStatusFailed:
 		eval, err := evaluateAdvance(ctx, opts.Root, opts.RunID)
 		if err != nil {
 			return result.withError(StopReasonError, 1, err), true, err
 		}
+
 		stopErr := stableerr.Errorf("worker attempt %s failed with %s/%s", attempt.AttemptID, attempt.Status, attempt.Result)
 		result.FinalStatus = eval.status.State
 		result.FinalDecision = string(eval.decision.Kind)
+
 		return result.withError(StopReasonWorkerFailed, 1, stopErr), true, stopErr
 	default:
 		return result, false, nil
@@ -225,8 +254,10 @@ func finishAdvanceOnce(ctx context.Context, opts AdvanceOptions, result AdvanceR
 	if err != nil {
 		return result.withError(StopReasonError, 1, err), err
 	}
+
 	result.FinalStatus = eval.status.State
 	result.FinalDecision = string(eval.decision.Kind)
+
 	return stopAdvance(result, "once", 0), nil
 }
 
@@ -234,12 +265,14 @@ func recordAdvanceLaunch(result AdvanceResult, launchResult Result) AdvanceResul
 	if launchResult.Attempt.AttemptID != "" && launchResult.Launched {
 		result.LaunchedAttempts = append(result.LaunchedAttempts, advanceAttempt(launchResult.Attempt))
 	}
+
 	return result
 }
 
 func stopAdvance(result AdvanceResult, reason string, exitCode int) AdvanceResult {
 	result.StopReason = reason
 	result.ExitCode = exitCode
+
 	return result
 }
 
@@ -260,16 +293,21 @@ func evaluateAdvance(ctx context.Context, root, runID string) (advanceEvaluation
 	if err != nil {
 		return advanceEvaluation{}, err
 	}
+
 	if err := enforceWorkerSandboxGuard(loaded.Project.Root, loaded.Project.Config.Sandbox); err != nil {
 		return advanceEvaluation{}, err
 	}
+
 	state := runstate.WorkflowState(loaded.Run.Status)
+
 	decision, err := workflow.Evaluate(loaded.Workflow, state)
 	if err != nil {
 		return advanceEvaluation{}, fmt.Errorf("evaluate run %q: %w", runID, err)
 	}
+
 	latestOutcome, hasOutcome := runstore.LatestConsumableOutcome(loaded.Run.Status)
 	workflowOutcome, hasWorkflowOutcome := workflowEntryOutcome(loaded.Run.Status, latestOutcome, hasOutcome)
+
 	return advanceEvaluation{
 		store:              loaded.Store,
 		status:             loaded.Run.Status,
@@ -297,6 +335,7 @@ func terminalizeAdvanceOutcome(ctx context.Context, eval advanceEvaluation, at t
 	if err != nil {
 		return status, fmt.Errorf("terminalize advance outcome: %w", err)
 	}
+
 	return status, nil
 }
 
@@ -332,5 +371,6 @@ func (r AdvanceResult) withError(reason string, code int, err error) AdvanceResu
 	r.StopReason = reason
 	r.ExitCode = code
 	r.Error = err.Error()
+
 	return r
 }

@@ -25,6 +25,7 @@ func TestExecuteHelp(t *testing.T) {
 					t.Fatalf("help output missing %q:\n%s", want, output)
 				}
 			}
+
 			if stderr.Len() != 0 {
 				t.Fatalf("stderr = %q, want empty", stderr.String())
 			}
@@ -34,6 +35,7 @@ func TestExecuteHelp(t *testing.T) {
 
 func TestRootCommandUsesInjectedStreams(t *testing.T) {
 	var stdout, stderr bytes.Buffer
+
 	root := newRootCommand(strings.NewReader(""), &stdout, &stderr)
 	root.SetArgs([]string{"help"})
 
@@ -44,6 +46,7 @@ func TestRootCommandUsesInjectedStreams(t *testing.T) {
 	if output := stdout.String(); !strings.Contains(output, "Usage:") || !strings.Contains(output, "Available Commands:") {
 		t.Fatalf("stdout missing Cobra help:\n%s", output)
 	}
+
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
@@ -59,6 +62,7 @@ func TestExecuteRootNoArgsShowsHelp(t *testing.T) {
 	if output := stdout.String(); !strings.Contains(output, "Usage:") {
 		t.Fatalf("stdout missing help:\n%s", output)
 	}
+
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
@@ -66,8 +70,10 @@ func TestExecuteRootNoArgsShowsHelp(t *testing.T) {
 
 func TestExecuteVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
+
 	oldVersion := version
 	version = defaultVersion
+
 	t.Cleanup(func() {
 		version = oldVersion
 	})
@@ -79,6 +85,7 @@ func TestExecuteVersion(t *testing.T) {
 	if got, want := stdout.String(), "orc dev\n"; got != want {
 		t.Fatalf("version output = %q, want %q", got, want)
 	}
+
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
@@ -97,9 +104,11 @@ func TestExecuteCompletionBash(t *testing.T) {
 			t.Fatalf("completion output missing %q:\n%s", want, output)
 		}
 	}
+
 	if strings.Contains(output, "unsupported shell") {
 		t.Fatalf("stdout contains diagnostic:\n%s", output)
 	}
+
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
@@ -115,6 +124,7 @@ func TestExecuteCompletionUnsupportedShell(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
+
 	for _, want := range []string{`unsupported shell "nu"`, "Usage:", "completion <shell>"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
@@ -132,6 +142,7 @@ func TestExecuteCompletionHelpDocumentsSupportedShells(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+
 	for _, want := range []string{"Supported shells", "bash", "zsh", "fish", "powershell"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -149,6 +160,7 @@ func TestExecuteCompletionMissingShell(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
+
 	for _, want := range []string{"requires <shell>", "Usage:", "completion <shell>"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
@@ -163,6 +175,7 @@ func TestExecuteUnknownCommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute returned nil error, want error")
 	}
+
 	if ExitCode(err) == 0 {
 		t.Fatalf("ExitCode(%v) = 0, want nonzero", err)
 	}
@@ -170,6 +183,7 @@ func TestExecuteUnknownCommand(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
+
 	if got := stderr.String(); !strings.Contains(got, `unknown command "nope"`) {
 		t.Fatalf("stderr = %q, want unknown command message", got)
 	}

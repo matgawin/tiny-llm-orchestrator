@@ -14,17 +14,21 @@ func loadAgent(realOrcDir, path string) (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
+
 	frontmatter, body, err := splitFrontmatter(string(content))
 	if err != nil {
 		return Agent{}, err
 	}
+
 	var meta agentFrontmatter
 	if err := yaml.Unmarshal([]byte(frontmatter), &meta); err != nil {
 		return Agent{}, fmt.Errorf("parse frontmatter: %w", err)
 	}
+
 	meta.ID = strings.TrimSpace(meta.ID)
 	meta.Role = strings.TrimSpace(meta.Role)
 	meta.Description = strings.TrimSpace(meta.Description)
+
 	body = strings.TrimSpace(body)
 	switch {
 	case meta.ID == "":
@@ -36,6 +40,7 @@ func loadAgent(realOrcDir, path string) (Agent, error) {
 	case body == "":
 		return Agent{}, stableerr.New("descriptor body is required")
 	}
+
 	return Agent{
 		ID:          meta.ID,
 		Role:        meta.Role,
@@ -50,10 +55,13 @@ func splitFrontmatter(content string) (string, string, error) {
 	if !strings.HasPrefix(normalized, "---\n") {
 		return "", "", stableerr.New("frontmatter must start with ---")
 	}
+
 	rest := strings.TrimPrefix(normalized, "---\n")
+
 	before, after, ok := strings.Cut(rest, "\n---\n")
 	if !ok {
 		return "", "", stableerr.New("frontmatter must end with ---")
 	}
+
 	return before, after, nil
 }

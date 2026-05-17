@@ -103,12 +103,16 @@ func (r *WorkflowReference) UnmarshalYAML(data []byte) error {
 		r.Path = path
 		return nil
 	}
+
 	type workflowReference WorkflowReference
+
 	var expanded workflowReference
 	if err := yaml.Unmarshal(data, &expanded); err != nil {
 		return fmt.Errorf("unmarshal workflow reference YAML: %w", err)
 	}
+
 	*r = WorkflowReference(expanded)
+
 	return nil
 }
 
@@ -161,6 +165,7 @@ type SandboxProtectedPath struct { //nolint:recvcheck // YAML requires pointer u
 // entries that set neither or both supported forms.
 func (p *SandboxProtectedPath) UnmarshalYAML(data []byte) error {
 	*p = SandboxProtectedPath{}
+
 	var scalar string
 	if err := yaml.Unmarshal(data, &scalar); err == nil {
 		p.decodeError = "must be an object with exactly one of host_home or absolute"
@@ -171,34 +176,42 @@ func (p *SandboxProtectedPath) UnmarshalYAML(data []byte) error {
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("unmarshal sandbox protected path YAML: %w", err)
 	}
+
 	for _, item := range raw {
 		key, ok := item.Key.(string)
 		if !ok {
 			p.decodeError = "must use string keys"
 			continue
 		}
+
 		switch key {
 		case "host_home":
 			p.HostHomeSet = true
+
 			value, ok := item.Value.(string)
 			if !ok {
 				p.decodeError = "host_home must be a string"
 				continue
 			}
+
 			p.HostHome = value
 		case "absolute":
 			p.AbsoluteSet = true
+
 			value, ok := item.Value.(string)
 			if !ok {
 				p.decodeError = "absolute must be a string"
 				continue
 			}
+
 			p.Absolute = value
 		default:
 			p.unknownKeys = append(p.unknownKeys, key)
 		}
 	}
+
 	slices.Sort(p.unknownKeys)
+
 	return nil
 }
 
@@ -208,12 +221,15 @@ func (p SandboxProtectedPath) MarshalYAML() (any, error) {
 	if p.HostHomeSet {
 		out["host_home"] = p.HostHome
 	}
+
 	if p.AbsoluteSet {
 		out["absolute"] = p.Absolute
 	}
+
 	if len(out) == 0 {
 		return nil, nil //nolint:nilnil // nil tells the YAML marshaler to omit absent protected path forms.
 	}
+
 	return out, nil
 }
 
@@ -237,12 +253,16 @@ func (c *SandboxCommand) UnmarshalYAML(data []byte) error {
 	if err := yaml.Unmarshal(data, &shellCommand); err == nil {
 		return stableerr.New("sandbox.command must use argv; shell-string commands are not supported")
 	}
+
 	type sandboxCommand SandboxCommand
+
 	var decoded sandboxCommand
 	if err := yaml.Unmarshal(data, &decoded); err != nil {
 		return fmt.Errorf("unmarshal sandbox command YAML: %w", err)
 	}
+
 	*c = SandboxCommand(decoded)
+
 	return nil
 }
 
@@ -391,12 +411,16 @@ func (t *RuntimeSandboxMountTarget) UnmarshalYAML(data []byte) error {
 		t.Path = path
 		return nil
 	}
+
 	type target RuntimeSandboxMountTarget
+
 	var decoded target
 	if err := yaml.Unmarshal(data, &decoded); err != nil {
 		return fmt.Errorf("unmarshal runtime sandbox mount target YAML: %w", err)
 	}
+
 	*t = RuntimeSandboxMountTarget(decoded)
+
 	return nil
 }
 
@@ -449,6 +473,7 @@ func (p VCSPolicy) EffectiveDirtyStart() string {
 	if p.DirtyStart == "" {
 		return VCSDirtyStartBlock
 	}
+
 	return p.DirtyStart
 }
 
@@ -457,6 +482,7 @@ func (p VCSPolicy) EffectiveNoVCS() string {
 	if p.NoVCS == "" {
 		return VCSNoVCSAllow
 	}
+
 	return p.NoVCS
 }
 
@@ -476,6 +502,7 @@ func (w Workflow) EffectiveRuntime(step Step) string {
 	if step.Runtime != "" {
 		return step.Runtime
 	}
+
 	return w.Defaults.Runtime
 }
 
@@ -484,9 +511,11 @@ func (w Workflow) EffectiveModel(step Step, runtime Runtime) string {
 	if step.Model != "" {
 		return step.Model
 	}
+
 	if w.Defaults.Model != "" {
 		return w.Defaults.Model
 	}
+
 	return runtime.Model.Default
 }
 
@@ -495,9 +524,11 @@ func (w Workflow) EffectiveReasoning(step Step, runtime Runtime) string {
 	if step.Reasoning != "" {
 		return step.Reasoning
 	}
+
 	if w.Defaults.Reasoning != "" {
 		return w.Defaults.Reasoning
 	}
+
 	return runtime.Reasoning.Default
 }
 
@@ -507,6 +538,7 @@ func (w Workflow) EffectiveRuntimeDirs(step Step) []string {
 	dirs := make([]string, 0, len(w.Defaults.RuntimeDirs)+len(step.RuntimeDirs))
 	dirs = append(dirs, w.Defaults.RuntimeDirs...)
 	dirs = append(dirs, step.RuntimeDirs...)
+
 	return dirs
 }
 
@@ -519,19 +551,24 @@ type Duration struct {
 // UnmarshalYAML parses Go duration strings from YAML scalars.
 func (d *Duration) UnmarshalYAML(data []byte) error {
 	d.Set = true
+
 	var raw string
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("unmarshal duration YAML: %w", err)
 	}
+
 	if raw == "" {
 		d.Duration = 0
 		return nil
 	}
+
 	parsed, err := time.ParseDuration(raw)
 	if err != nil {
 		return fmt.Errorf("parse duration %q: %w", raw, err)
 	}
+
 	d.Duration = parsed
+
 	return nil
 }
 
@@ -541,6 +578,7 @@ func (d Duration) MarshalYAML() (any, error) {
 	if !d.Set {
 		return nil, nil //nolint:nilnil // nil tells the YAML marshaler to omit unset optional durations.
 	}
+
 	return d.String(), nil
 }
 
@@ -556,6 +594,7 @@ func (b *RequiredBool) UnmarshalYAML(data []byte) error {
 	if err := yaml.Unmarshal(data, &b.Value); err != nil {
 		return fmt.Errorf("unmarshal YAML bool: %w", err)
 	}
+
 	return nil
 }
 
@@ -565,6 +604,7 @@ func (b RequiredBool) MarshalYAML() (any, error) {
 	if !b.Set {
 		return nil, nil //nolint:nilnil // nil tells the YAML marshaler to omit unset required booleans.
 	}
+
 	return b.Value, nil
 }
 
@@ -580,6 +620,7 @@ func (i *OptionalInt) UnmarshalYAML(data []byte) error {
 	if err := yaml.Unmarshal(data, &i.Value); err != nil {
 		return fmt.Errorf("unmarshal YAML integer: %w", err)
 	}
+
 	return nil
 }
 
@@ -589,6 +630,7 @@ func (i OptionalInt) MarshalYAML() (any, error) {
 	if !i.Set {
 		return nil, nil //nolint:nilnil // nil tells the YAML marshaler to omit unset optional integers.
 	}
+
 	return i.Value, nil
 }
 
@@ -614,6 +656,7 @@ func (s Step) EffectiveKind() string {
 	if s.Kind == "" {
 		return StepKindAgent
 	}
+
 	return s.Kind
 }
 
@@ -622,6 +665,7 @@ func (s Step) EffectiveAgentID() string {
 	if s.Agent != "" {
 		return s.Agent
 	}
+
 	return s.EffectiveKind()
 }
 

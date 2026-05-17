@@ -18,15 +18,18 @@ func startRoutingForDecision(decision workflow.Decision, attempt runstore.Attemp
 	if !ok {
 		return startRouting{}
 	}
+
 	routing := startRouting{consumeAttemptID: attempt.AttemptID}
 	if decision.Kind != workflow.DecisionRetryStep {
 		return routing
 	}
+
 	routing.retryLineage = &runstore.RetryLineage{
 		StepID: decision.Retry.Step,
 		Counts: maps.Clone(decision.Retry.Counts),
 	}
 	routing.supersedeReason = attempt.Status + "/" + attempt.Result
+
 	return routing
 }
 
@@ -34,6 +37,7 @@ func workflowStateEntryForDecision(decision workflow.Decision, attempt runstore.
 	if decision.Kind != workflow.DecisionSelectStep || !ok {
 		return runstore.WorkflowStateEntryRequest{}
 	}
+
 	return runstore.WorkflowStateEntryRequest{
 		State:         decision.Step,
 		PreviousState: attempt.StepID,
@@ -46,6 +50,7 @@ func workflowEntryOutcome(status runstore.Status, latestOutcome runstore.Attempt
 	if hasOutcome {
 		return latestOutcome, true
 	}
+
 	return runstore.ResolvedHumanBlockOutcome(status)
 }
 
@@ -53,6 +58,7 @@ func workflowLoopHardCapOverrideMatches(override *runstore.WorkflowLoopHardCapOv
 	if override == nil {
 		return false
 	}
+
 	return override.Workflow == decision.Workflow &&
 		override.TargetState == decision.State &&
 		override.CountBeforeOverride == decision.CurrentCount &&

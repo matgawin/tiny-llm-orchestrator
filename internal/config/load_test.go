@@ -16,6 +16,7 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	for _, name := range []string{
 		"implementation",
 		"bugfix",
@@ -31,6 +32,7 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 			t.Fatalf("workflow %q was not loaded", name)
 		}
 	}
+
 	for _, name := range []string{
 		"planner",
 		"coder",
@@ -53,30 +55,39 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	if workflow.Name != "implementation" {
 		t.Fatalf("workflow name = %q, want implementation", workflow.Name)
 	}
+
 	if workflow.Start != "plan" {
 		t.Fatalf("workflow start = %q, want plan", workflow.Start)
 	}
+
 	if workflow.Execution.Mode != "sequential" {
 		t.Fatalf("execution mode = %q, want sequential", workflow.Execution.Mode)
 	}
+
 	if !workflow.TaskContext.MarkdownFallback.Value {
 		t.Fatal("markdown_fallback = false, want true")
 	}
+
 	if got := workflow.VCS.EffectiveDirtyStart(); got != VCSDirtyStartBlock {
 		t.Fatalf("vcs dirty_start = %q, want %q", got, VCSDirtyStartBlock)
 	}
+
 	if got := workflow.VCS.EffectiveNoVCS(); got != VCSNoVCSAllow {
 		t.Fatalf("vcs no_vcs = %q, want %q", got, VCSNoVCSAllow)
 	}
+
 	if got, want := workflow.Defaults.Timeout.Duration, 30*time.Minute; got != want {
 		t.Fatalf("timeout = %s, want %s", got, want)
 	}
+
 	if got, want := workflow.LoopCaps, (EffectiveLoopCaps{Enabled: true, Soft: 2, Hard: 4}); got != want {
 		t.Fatalf("loop caps = %+v, want %+v", got, want)
 	}
+
 	if got := project.Agents["planner"].Role; got != "planner" {
 		t.Fatalf("planner role = %q, want planner", got)
 	}
+
 	if got := workflow.ReferencedAgents["planner"].Path; got != "agents/planner.md" {
 		t.Fatalf("planner workflow agent path = %q, want agents/planner.md", got)
 	}
@@ -91,14 +102,17 @@ func TestLoadCurrentRepositoryConfigUsesExplicitCodexRuntime(t *testing.T) {
 	if got := project.Config.Runtimes[testRuntimeCodex]; got != "runtimes/codex.yaml" {
 		t.Fatalf("config runtimes.codex = %q, want runtimes/codex.yaml", got)
 	}
+
 	codex, ok := project.Runtimes[testRuntimeCodex]
 	if !ok {
 		t.Fatal("runtime codex was not loaded")
 	}
+
 	wantArgs := []string{"exec", "--skip-git-repo-check", "-"}
 	if !slices.Equal(codex.Command.Args, wantArgs) {
 		t.Fatalf("codex command args = %#v, want %#v", codex.Command.Args, wantArgs)
 	}
+
 	for name, workflow := range project.Workflows {
 		if got := workflow.Defaults.Runtime; got != testRuntimeCodex {
 			t.Fatalf("workflow %s defaults.runtime = %q, want codex", name, got)
@@ -268,10 +282,12 @@ agents:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeMinimalProject(t, projectFixture{config: tt.config})
+
 			project, err := Load(root)
 			if err != nil {
 				t.Fatalf("Load returned error: %v", err)
 			}
+
 			if got := project.Workflows["implementation"].LoopCaps; got != tt.want {
 				t.Fatalf("loop caps = %+v, want %+v", got, tt.want)
 			}
@@ -374,9 +390,11 @@ func assertSkippableStep(t *testing.T, step Step, target string) {
 	if !step.Skippable {
 		t.Fatalf("step skippable = false, want true")
 	}
+
 	if !slices.Contains(step.AllowedResults[SystemSkipStatus], SystemSkipResult) {
 		t.Fatalf("step allowed %s results = %v, want %s", SystemSkipStatus, step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 	}
+
 	if got := step.On[SystemSkipPair]; got != target {
 		t.Fatalf("step %s transition = %q, want %q", SystemSkipPair, got, target)
 	}
@@ -388,9 +406,11 @@ func assertNotSkippableStep(t *testing.T, step Step) {
 	if step.Skippable {
 		t.Fatal("step skippable = true, want false")
 	}
+
 	if slices.Contains(step.AllowedResults[SystemSkipStatus], SystemSkipResult) {
 		t.Fatalf("step allowed %s results = %v, want no %s", SystemSkipStatus, step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 	}
+
 	if _, ok := step.On[SystemSkipPair]; ok {
 		t.Fatalf("step declares %s transition, want none", SystemSkipPair)
 	}

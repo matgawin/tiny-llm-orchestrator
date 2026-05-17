@@ -22,14 +22,17 @@ func TestLoadAcceptsCommandAndScriptSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	check := project.Workflows["implementation"].Steps["check"]
 	if check.EffectiveKind() != StepKindCommand || !slices.Equal(check.Command.Argv, []string{"task", "check"}) {
 		t.Fatalf("check step = %+v, want command argv", check)
 	}
+
 	verify := project.Workflows["implementation"].Steps["verify"]
 	if verify.EffectiveKind() != StepKindScript || verify.Script.Path != "scripts/verify.sh" {
 		t.Fatalf("verify step = %+v, want script path", verify)
 	}
+
 	if len(project.Workflows["implementation"].ReferencedAgents) != 0 {
 		t.Fatalf("referenced agents = %+v, want none for deterministic-only workflow", project.Workflows["implementation"].ReferencedAgents)
 	}
@@ -43,6 +46,7 @@ func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}),
 	})
@@ -51,13 +55,16 @@ func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	step := project.Workflows["implementation"].Steps["plan"]
 	if !step.Skippable {
 		t.Fatal("plan skippable = false, want true")
 	}
+
 	if !slices.Contains(step.AllowedResults[SystemSkipStatus], SystemSkipResult) {
 		t.Fatalf("plan allowed %s results = %v, want %s", SystemSkipStatus, step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 	}
+
 	if got := step.On[SystemSkipPair]; got != testTerminalReadyForHuman {
 		t.Fatalf("plan %s transition = %q, want %s", SystemSkipPair, got, testTerminalReadyForHuman)
 	}
@@ -84,6 +91,7 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 				step.Reasoning = testReasoningHigh
 				step.RuntimeDirs = []string{"/tmp/external-worktree"}
 				workflow.Steps["plan"] = step
+
 				return workflow
 			}),
 		})
@@ -92,20 +100,26 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load returned error: %v", err)
 		}
+
 		workflow := project.Workflows["implementation"]
+
 		step := workflow.Steps["plan"]
 		if got := workflow.EffectiveRuntime(step); got != testRuntimeFileAI {
 			t.Fatalf("effective runtime = %q, want fileai", got)
 		}
+
 		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeFileAI]); got != "model-b" {
 			t.Fatalf("effective model = %q, want model-b", got)
 		}
+
 		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeFileAI]); got != testReasoningHigh {
 			t.Fatalf("effective reasoning = %q, want high", got)
 		}
+
 		if got, want := workflow.EffectiveRuntimeDirs(step), []string{"shared", "/tmp/external-worktree"}; !slices.Equal(got, want) {
 			t.Fatalf("effective runtime dirs = %v, want %v", got, want)
 		}
+
 		if got := step.EffectiveAgentID(); got != "planner" {
 			t.Fatalf("effective agent id = %q, want planner", got)
 		}
@@ -118,6 +132,7 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 				workflow.Defaults.Model = testModelGPT5
 				workflow.Defaults.Reasoning = testReasoningHigh
 				workflow.Defaults.RuntimeDirs = []string{"src"}
+
 				return workflow
 			}),
 		})
@@ -126,14 +141,18 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load returned error: %v", err)
 		}
+
 		workflow := project.Workflows["implementation"]
+
 		step := workflow.Steps["plan"]
 		if got := workflow.EffectiveRuntime(step); got != testRuntimeCodex {
 			t.Fatalf("effective runtime = %q, want codex", got)
 		}
+
 		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeCodex]); got != testModelGPT5 {
 			t.Fatalf("effective model = %q, want gpt-5", got)
 		}
+
 		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeCodex]); got != testReasoningHigh {
 			t.Fatalf("effective reasoning = %q, want high", got)
 		}
@@ -151,7 +170,9 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load returned error: %v", err)
 		}
+
 		workflow := project.Workflows["implementation"]
+
 		step := workflow.Steps["plan"]
 		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeCodex]); got != testReasoningMed {
 			t.Fatalf("effective reasoning = %q, want medium", got)
@@ -166,6 +187,7 @@ func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 			step.Skippable = true
 			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" is skippable`, `allowed_results.done including skipped`),
 		generatedWorkflowCase(t, "skippable missing transition", func(workflow Workflow) Workflow {
@@ -173,6 +195,7 @@ func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 			step.Skippable = true
 			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" is skippable`, `on transition for done/skipped`),
 		generatedWorkflowCase(t, "non skippable allowed result", func(workflow Workflow) Workflow {
@@ -180,12 +203,14 @@ func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" declares reserved system outcome done/skipped but is not skippable`),
 		generatedWorkflowCase(t, "non skippable transition", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
 			step.On[SystemSkipPair] = testTerminalReadyForHuman
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" declares reserved system transition done/skipped but is not skippable`),
 	}
@@ -217,11 +242,13 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			step := workflow.Steps["plan"]
 			step.Model = testModelGPT5
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" model requires runtime "nomodel" model.supported=true`),
 		generatedWorkflowCase(t, "default model unsupported", func(workflow Workflow) Workflow {
 			workflow.Defaults.Runtime = "nomodel"
 			workflow.Defaults.Model = testModelGPT5
+
 			return workflow
 		}, `step "plan" defaults.model requires runtime "nomodel" model.supported=true`),
 		generatedWorkflowCase(t, "allowlist rejects step model", func(workflow Workflow) Workflow {
@@ -229,11 +256,13 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			step := workflow.Steps["plan"]
 			step.Model = "model-z"
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" model "model-z" is not allowed by runtime "fileai" model.allowed`),
 		generatedWorkflowCase(t, "allowlist rejects default model", func(workflow Workflow) Workflow {
 			workflow.Defaults.Runtime = testRuntimeFileAI
 			workflow.Defaults.Model = "model-z"
+
 			return workflow
 		}, `step "plan" defaults.model "model-z" is not allowed by runtime "fileai" model.allowed`),
 		generatedWorkflowCase(t, "runtime dirs unsupported", func(workflow Workflow) Workflow {
@@ -241,6 +270,7 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			step := workflow.Steps["plan"]
 			step.RuntimeDirs = []string{"extra"}
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" runtime_dirs require runtime "nodirs" directories.supported=true`),
 		generatedWorkflowCase(t, "missing required reasoning", func(workflow Workflow) Workflow {
@@ -252,11 +282,13 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			step := workflow.Steps["plan"]
 			step.Reasoning = testReasoningMed
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" reasoning requires runtime "noreasoning" reasoning.supported=true`),
 		generatedWorkflowCase(t, "default reasoning unsupported", func(workflow Workflow) Workflow {
 			workflow.Defaults.Runtime = "noreasoning"
 			workflow.Defaults.Reasoning = testReasoningMed
+
 			return workflow
 		}, `step "plan" defaults.reasoning requires runtime "noreasoning" reasoning.supported=true`),
 		generatedWorkflowCase(t, "allowlist rejects step reasoning", func(workflow Workflow) Workflow {
@@ -264,11 +296,13 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			step := workflow.Steps["plan"]
 			step.Reasoning = "extreme"
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" reasoning "extreme" is not allowed by runtime "fileai" reasoning.allowed`),
 		generatedWorkflowCase(t, "allowlist rejects default reasoning", func(workflow Workflow) Workflow {
 			workflow.Defaults.Runtime = testRuntimeFileAI
 			workflow.Defaults.Reasoning = "extreme"
+
 			return workflow
 		}, `step "plan" defaults.reasoning "extreme" is not allowed by runtime "fileai" reasoning.allowed`),
 		generatedWorkflowCase(t, "empty default runtime dir", func(workflow Workflow) Workflow {
@@ -287,6 +321,7 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			step := workflow.Steps["plan"]
 			step.RuntimeDirs = []string{"../outside"}
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `step "plan" runtime_dirs[0] "../outside" must be repo-relative or absolute and stay under repository root`),
 	}
@@ -458,6 +493,7 @@ func TestLoadRejectsGeneratedWorkflowConfig(t *testing.T) {
 		generatedWorkflowCase(t, "invalid transition pair includes allowed values", func(workflow Workflow) Workflow {
 			delete(workflow.Steps["plan"].On, "done/ready")
 			workflow.Steps["plan"].On["done/unknown"] = "ready_for_human"
+
 			return workflow
 		}, `transition "done/unknown" is not declared`, `allowed pairs: done/ready`),
 		generatedWorkflowCase(t, "missing transition for allowed pair", func(workflow Workflow) Workflow {
@@ -497,11 +533,13 @@ func TestLoadRejectsGeneratedWorkflowConfig(t *testing.T) {
 			step.AllowedResults = map[string][]string{"waiting": {"ready"}}
 			step.On = map[string]string{"waiting/ready": "ready_for_human"}
 			workflow.Steps["plan"] = step
+
 			return workflow
 		}, `invalid status "waiting"; allowed: blocked, done, failed`),
 		generatedWorkflowCase(t, "missing start step", func(workflow Workflow) Workflow {
 			workflow.Steps["code"] = workflow.Steps["plan"]
 			delete(workflow.Steps, "plan")
+
 			return workflow
 		}, `start step "plan" is not declared`),
 		generatedWorkflowCase(t, "unsupported execution mode", func(workflow Workflow) Workflow {
@@ -562,6 +600,7 @@ type invalidWorkflowCase struct {
 
 func generatedWorkflowCase(t *testing.T, name string, mutate func(Workflow) Workflow, contains ...string) invalidWorkflowCase {
 	t.Helper()
+
 	return invalidWorkflowCase{
 		name:     name,
 		workflow: workflowYAML(t, mutate),
@@ -590,16 +629,19 @@ defaults:
 steps:
   plan:
 `)
+
 	for line := range strings.SplitSeq(strings.TrimRight(stepYAML, "\n"), "\n") {
 		b.WriteString("    ")
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
+
 	b.WriteString(`    allowed_results:
       done: [passed]
     on:
       done/passed: ready_for_human
 `)
+
 	return b.String()
 }
 

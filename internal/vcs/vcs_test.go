@@ -39,15 +39,19 @@ exit 9
 	if err != nil {
 		t.Fatalf("InspectPreRun returned error: %v", err)
 	}
+
 	if snapshot.Kind != KindJJ {
 		t.Fatalf("kind = %q, want %q", snapshot.Kind, KindJJ)
 	}
+
 	if snapshot.Dirty {
 		t.Fatalf("dirty = true, want false")
 	}
+
 	if !strings.Contains(snapshot.Summary, "The working copy has no changes.") {
 		t.Fatalf("summary = %q, want clean jj status output", snapshot.Summary)
 	}
+
 	if got := snapshot.Commands[len(snapshot.Commands)-1]; strings.Join(got, " ") != wantJJStatusCommand {
 		t.Fatalf("last command = %v, want jj status", got)
 	}
@@ -61,6 +65,7 @@ sleep 5
 `,
 	})
 	t.Setenv("PATH", path)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -91,11 +96,14 @@ esac
 	if err != nil {
 		t.Fatalf("InspectPreRun returned error: %v", err)
 	}
+
 	if snapshot.Kind != KindGit || !snapshot.Dirty {
 		t.Fatalf("snapshot kind/dirty = %s/%t, want git/true", snapshot.Kind, snapshot.Dirty)
 	}
+
 	want := []string{"docs/features/run-start.md", "docs/space path.md", "internal/runstart/runstart.go", "new.md", "old.md"}
 	assertStrings(t, snapshot.ChangedPaths, want)
+
 	if snapshot.Summary != "Git working copy has 5 changed paths." {
 		t.Fatalf("summary = %q, want git changed-path count", snapshot.Summary)
 	}
@@ -115,6 +123,7 @@ exit 1
 	if err == nil {
 		t.Fatal("InspectPreRun returned nil error, want broken probe failure")
 	}
+
 	if !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("InspectPreRun error = %v, want probe failure details", err)
 	}
@@ -138,6 +147,7 @@ exit 1
 	if err == nil {
 		t.Fatal("InspectPreRun returned nil error, want broken git probe failure")
 	}
+
 	if !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("InspectPreRun error = %v, want git probe failure details", err)
 	}
@@ -161,9 +171,11 @@ exit 1
 	if err != nil {
 		t.Fatalf("InspectPreRun returned error: %v", err)
 	}
+
 	if snapshot.Kind != KindNone || snapshot.Dirty {
 		t.Fatalf("snapshot kind/dirty = %s/%t, want none/false", snapshot.Kind, snapshot.Dirty)
 	}
+
 	if snapshot.Summary != "No supported VCS detected." {
 		t.Fatalf("summary = %q, want no-VCS summary", snapshot.Summary)
 	}
@@ -171,14 +183,17 @@ exit 1
 
 func TestRecordPostRunWritesSnapshotArtifact(t *testing.T) {
 	root := t.TempDir()
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	run, err := store.Create(runstore.CreateRunRequest{RunID: "post-run", Workflow: "implementation"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	path := fakeVCSPath(t, map[string]string{
 		"jj": `#!/bin/sh
 case "$1" in
@@ -198,37 +213,47 @@ esac
 	if err != nil {
 		t.Fatalf("RecordPostRun returned error: %v", err)
 	}
+
 	if ref.Kind != runstore.KindSnapshot || !strings.Contains(ref.Path, "vcs-post-run.json") {
 		t.Fatalf("artifact ref = %+v, want post-run snapshot", ref)
 	}
+
 	if snapshot.Phase != PhasePostRun {
 		t.Fatalf("phase = %q, want %q", snapshot.Phase, PhasePostRun)
 	}
+
 	assertJJDirtySnapshot(t, snapshot)
+
 	content, err := os.ReadFile(filepath.Join(run.Path, filepath.FromSlash(ref.Path)))
 	if err != nil {
 		t.Fatalf("read snapshot artifact: %v", err)
 	}
+
 	var persisted Snapshot
 	if err := json.Unmarshal(content, &persisted); err != nil {
 		t.Fatalf("unmarshal persisted snapshot: %v", err)
 	}
+
 	assertJJDirtySnapshot(t, persisted)
 }
 
 func assertJJDirtySnapshot(t *testing.T, snapshot Snapshot) {
 	t.Helper()
+
 	if snapshot.Kind != KindJJ || !snapshot.Dirty {
 		t.Fatalf("snapshot kind/dirty = %s/%t, want jj/true", snapshot.Kind, snapshot.Dirty)
 	}
+
 	if !strings.Contains(snapshot.Summary, "Working copy changes:") {
 		t.Fatalf("summary = %q, want jj status output", snapshot.Summary)
 	}
+
 	if len(snapshot.Commands) != 2 ||
 		strings.Join(snapshot.Commands[0], " ") != wantJJRootCommand ||
 		strings.Join(snapshot.Commands[1], " ") != wantJJStatusCommand {
 		t.Fatalf("commands = %+v, want jj root and jj status", snapshot.Commands)
 	}
+
 	assertStrings(t, snapshot.ChangedPaths, []string{"internal/vcs/vcs.go"})
 }
 
@@ -239,6 +264,7 @@ func TestParseJJChangedPathsDoesNotTrimPathCharacters(t *testing.T) {
 
 func fakeVCSPath(t *testing.T, scripts map[string]string) string {
 	t.Helper()
+
 	dir := t.TempDir()
 	for name, content := range scripts {
 		path := filepath.Join(dir, name)
@@ -246,14 +272,17 @@ func fakeVCSPath(t *testing.T, scripts map[string]string) string {
 			t.Fatalf("write fake %s: %v", name, err)
 		}
 	}
+
 	return dir
 }
 
 func assertStrings(t *testing.T, got, want []string) {
 	t.Helper()
+
 	if len(got) != len(want) {
 		t.Fatalf("strings = %+v, want %+v", got, want)
 	}
+
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("strings = %+v, want %+v", got, want)

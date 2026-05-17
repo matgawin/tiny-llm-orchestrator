@@ -23,27 +23,35 @@ sandbox:
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if project.Config.Sandbox == nil {
 		t.Fatal("sandbox config was nil")
 	}
+
 	if got, want := project.Config.Sandbox.Command.Argv, []string{"codex"}; !slices.Equal(got, want) {
 		t.Fatalf("sandbox command argv = %v, want %v", got, want)
 	}
+
 	if got := project.Config.Sandbox.CWD; got != "." {
 		t.Fatalf("sandbox cwd = %q, want .", got)
 	}
+
 	if got := project.Config.Sandbox.Bubblewrap.Network; !got.Set || !got.Value {
 		t.Fatalf("sandbox bubblewrap network = %+v, want default true", got)
 	}
+
 	if project.Config.Sandbox.RequireForWorkers {
 		t.Fatal("sandbox require_for_workers = true, want default false")
 	}
+
 	if got := project.Config.Sandbox.Home.Mode; got != SandboxHomeModeSynthetic {
 		t.Fatalf("sandbox home mode = %q, want %q", got, SandboxHomeModeSynthetic)
 	}
+
 	if got := project.Config.Sandbox.Path.Mode; got != SandboxPathModeNone {
 		t.Fatalf("sandbox path mode = %q, want %q", got, SandboxPathModeNone)
 	}
+
 	if got := project.Config.Sandbox.ProtectedPaths; len(got) != 0 {
 		t.Fatalf("sandbox protected paths = %v, want empty default", got)
 	}
@@ -92,10 +100,12 @@ sandbox:
 			if err != nil {
 				t.Fatalf("Load returned error: %v", err)
 			}
+
 			got := project.Config.Sandbox.ProtectedPaths
 			if len(got) != len(tt.want) {
 				t.Fatalf("protected paths length = %d, want %d: %#v", len(got), len(tt.want), got)
 			}
+
 			for i := range tt.want {
 				if got[i].HostHome != tt.want[i].HostHome || got[i].HostHomeSet != tt.want[i].HostHomeSet ||
 					got[i].Absolute != tt.want[i].Absolute || got[i].AbsoluteSet != tt.want[i].AbsoluteSet {
@@ -111,6 +121,7 @@ func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "tools"), 0o755); err != nil {
 		t.Fatalf("create tools dir: %v", err)
 	}
+
 	if err := os.Mkdir(filepath.Join(root, "data"), 0o755); err != nil {
 		t.Fatalf("create data dir: %v", err)
 	}
@@ -119,38 +130,49 @@ func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	sandbox := project.Config.Sandbox
 	if sandbox == nil {
 		t.Fatal("sandbox config was nil")
 	}
+
 	sandboxConfig := *sandbox
 	if got := sandboxConfig.CWD; got != "tools" {
 		t.Fatalf("sandbox cwd = %q, want tools", got)
 	}
+
 	if !sandboxConfig.Bubblewrap.Enabled {
 		t.Fatal("sandbox bubblewrap enabled = false, want true")
 	}
+
 	if !sandboxConfig.RequireForWorkers {
 		t.Fatal("sandbox require_for_workers = false, want true")
 	}
+
 	if got := sandboxConfig.Home.Mode; got != SandboxHomeModeHostPath {
 		t.Fatalf("sandbox home mode = %q, want host_path", got)
 	}
+
 	if got := sandboxConfig.Path.Mode; got != SandboxPathModeHostEntries {
 		t.Fatalf("sandbox path mode = %q, want host_entries", got)
 	}
+
 	if got := sandboxConfig.Bubblewrap.Network; !got.Set || got.Value {
 		t.Fatalf("sandbox bubblewrap network = %+v, want explicit false", got)
 	}
+
 	if got := sandboxConfig.Bubblewrap.Mounts.Beads; got != "auto" {
 		t.Fatalf("sandbox beads mount = %q, want auto", got)
 	}
+
 	if got := sandboxConfig.Env.Pass; !slices.Equal(got, []string{"TERM"}) {
 		t.Fatalf("sandbox env pass = %v, want TERM", got)
 	}
+
 	if got := sandboxConfig.Env.Set["ORC_SANDBOX"]; got != "1" {
 		t.Fatalf("sandbox env set ORC_SANDBOX = %q, want 1", got)
 	}
+
 	if got := len(sandbox.Mounts); got != 2 {
 		t.Fatalf("sandbox mounts length = %d, want 2", got)
 	}
@@ -392,6 +414,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
   cwd: linked-outside`,
 			prepare: func(t *testing.T, root string) {
 				t.Helper()
+
 				outside := t.TempDir()
 				if err := os.Symlink(outside, filepath.Join(root, "linked-outside")); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
@@ -442,6 +465,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       mode: rw`,
 			prepare: func(t *testing.T, root string) {
 				t.Helper()
+
 				if err := os.Mkdir(filepath.Join(root, "..", "outside"), 0o755); err != nil {
 					t.Fatalf("create outside dir: %v", err)
 				}
@@ -460,6 +484,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       optional: true`,
 			prepare: func(t *testing.T, root string) {
 				t.Helper()
+
 				if err := os.Mkdir(filepath.Join(root, "..", "outside"), 0o755); err != nil {
 					t.Fatalf("create outside dir: %v", err)
 				}
@@ -489,6 +514,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       mode: rw`,
 			prepare: func(t *testing.T, root string) {
 				t.Helper()
+
 				outside := t.TempDir()
 				if err := os.Symlink(outside, filepath.Join(root, "linked-outside")); err != nil {
 					t.Skipf("symlink unavailable: %v", err)
@@ -631,11 +657,14 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       mode: rw`,
 			prepare: func(t *testing.T, root string) {
 				t.Helper()
+
 				configPath := filepath.Join(root, ".orc", "config.yaml")
+
 				content, err := os.ReadFile(configPath)
 				if err != nil {
 					t.Fatalf("read config: %v", err)
 				}
+
 				content = []byte(strings.ReplaceAll(string(content), "REPO_PLACEHOLDER", root))
 				if err := os.WriteFile(configPath, content, 0o644); err != nil {
 					t.Fatalf("write config: %v", err)
@@ -654,11 +683,14 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
       mode: ro`,
 			prepare: func(t *testing.T, root string) {
 				t.Helper()
+
 				configPath := filepath.Join(root, ".orc", "config.yaml")
+
 				content, err := os.ReadFile(configPath)
 				if err != nil {
 					t.Fatalf("read config: %v", err)
 				}
+
 				content = []byte(strings.ReplaceAll(string(content), "REPO_PARENT_PLACEHOLDER", filepath.Dir(root)))
 				if err := os.WriteFile(configPath, content, 0o644); err != nil {
 					t.Fatalf("write config: %v", err)
@@ -674,6 +706,7 @@ func TestLoadRejectsInvalidSandboxConfig(t *testing.T) {
 			if tt.prepare != nil {
 				tt.prepare(t, root)
 			}
+
 			assertLoadErrorContains(t, root, tt.contains...)
 		})
 	}
@@ -758,6 +791,7 @@ description: Escapes the .orc directory.
 
 This descriptor is outside .orc.
 `)
+
 	if err := os.Symlink(outsideAgent, filepath.Join(orcDir, "agents", "planner.md")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
@@ -773,26 +807,31 @@ func documentedSandboxConfig(t *testing.T) string {
 	t.Helper()
 
 	docPath := filepath.Join("..", "..", "docs", "reference", "configuration-project.md")
+
 	content, err := os.ReadFile(docPath)
 	if err != nil {
 		t.Fatalf("read project configuration reference: %v", err)
 	}
 
 	const intro = "Project config may also declare an Orc-managed sandbox command contract:"
+
 	afterIntro, ok := cutAfter(string(content), intro)
 	if !ok {
 		t.Fatalf("project configuration reference missing sandbox sample intro %q", intro)
 	}
 
 	const fence = "```yaml\n"
+
 	afterFence, ok := cutAfter(afterIntro, fence)
 	if !ok {
 		t.Fatal("project configuration reference sandbox sample is missing opening YAML fence")
 	}
+
 	sample, _, ok := strings.Cut(afterFence, "\n```")
 	if !ok {
 		t.Fatal("project configuration reference sandbox sample is missing closing YAML fence")
 	}
+
 	return sample
 }
 
@@ -801,5 +840,6 @@ func cutAfter(s, sep string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+
 	return after, true
 }

@@ -25,6 +25,7 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
 	store := openPromptStore(t, root)
 	writeTaskContextArtifact(t, store, runID, "# Task\n\nBuild prompt rendering.\n", fixedPromptTime().Add(time.Minute))
+
 	if _, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindReport,
 		Name:    "plan",
@@ -49,10 +50,12 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 	if result.Ref.Kind != runstore.KindPrompt || result.Ref.Path != "prompts/000004-plan.md" {
 		t.Fatalf("prompt ref = %+v, want sequence 4 plan prompt", result.Ref)
 	}
+
 	persisted := readPromptFile(t, filepath.Join(root, ".orc", "runs", runID, filepath.FromSlash(result.Ref.Path)))
 	if !bytes.Equal(result.Content, persisted) {
 		t.Fatal("returned content differs from persisted prompt")
 	}
+
 	prompt := string(result.Content)
 	assertPromptContainsAll(t, prompt, []string{
 		"# Tiny Orc Worker Prompt\n",
@@ -84,6 +87,7 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"`orc report --json-file <path>`",
 		"Do not combine `--json-file` with report field flags.",
 	})
+
 	for _, reserved := range []string{"done/skipped", "failed/error", "failed/invalid_report", "failed/missing_report", "failed/timeout", "failed/process_error"} {
 		if strings.Contains(prompt, "`"+reserved+"`") {
 			t.Fatalf("prompt includes system-owned report outcome %s:\n%s", reserved, prompt)
@@ -94,12 +98,15 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if loaded.Status.LastSequence != 4 {
 		t.Fatalf("last sequence = %d, want 4", loaded.Status.LastSequence)
 	}
+
 	if got := latestArtifactKind(loaded.Status.Artifacts); got != runstore.KindPrompt {
 		t.Fatalf("latest artifact kind = %s, want prompt", got)
 	}
+
 	if got := latestEventType(t, loaded.Events); got != "artifact.written" {
 		t.Fatalf("latest event type = %s, want artifact.written", got)
 	}
@@ -131,8 +138,10 @@ LIVE MUTATED BODY
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
+
 	prompt := string(result.Content)
 	assertPromptContainsAll(t, prompt, []string{"Creates implementation plans and scope boundaries.", "Plan the work and report readiness."})
+
 	if strings.Contains(prompt, "LIVE MUTATED BODY") {
 		t.Fatalf("prompt used live mutated agent descriptor:\n%s", prompt)
 	}
@@ -156,6 +165,7 @@ func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
+
 	prompt := string(result.Content)
 	assertPromptContainsAll(t, prompt, []string{
 		"- step_id: `test`\n",
@@ -164,6 +174,7 @@ func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
 		"`done/failed`",
 		"`blocked/blocked`",
 	})
+
 	if strings.Contains(prompt, "approved") || strings.Contains(prompt, "changes_requested") {
 		t.Fatalf("tester prompt includes reviewer-only results:\n%s", prompt)
 	}
@@ -217,6 +228,7 @@ func TestRenderIncludesStructuredPriorReportWithoutReportArtifact(t *testing.T) 
 		"- follow_up: Document prompt report context",
 		"- follow_up_details: Keep docs aligned with renderer behavior.",
 	})
+
 	if strings.Contains(prompt, "### reports/") {
 		t.Fatalf("prompt includes report artifact context, want structured report only:\n%s", prompt)
 	}
@@ -226,6 +238,7 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)
 	store := openPromptStore(t, root)
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        "prompt-run",
 		Workflow:     "implementation",
@@ -235,11 +248,13 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	runID := run.ID
 	writePromptConfigSnapshot(t, root, store, runID)
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
 	recordReportedLoopPromptAttempt(t, store, runID, "attempt-1", "")
 	recordReportedLoopPromptAttempt(t, store, runID, "attempt-2", "attempt-1")
+
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
 		StepID:           "plan",
 		AgentID:          "planner",
@@ -269,6 +284,7 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
+
 	assertPromptContainsAll(t, string(result.Content), []string{
 		"## Workflow Loop Context",
 		"- workflow: `implementation`",
@@ -287,6 +303,7 @@ func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
 	store := openPromptStore(t, root)
 	writeTaskContextArtifact(t, store, runID, "# Task\n\nBuild prompt rendering.\n", fixedPromptTime().Add(time.Minute))
+
 	if _, _, err := store.RecordStepSkip(runID, runstore.RecordStepSkipRequest{
 		StepID: "plan",
 		Reason: "not worth another review",
@@ -316,6 +333,7 @@ func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
+
 	prompt := string(result.Content)
 	assertPromptContainsAll(t, prompt, []string{
 		"### step plan skipped\n",
@@ -358,6 +376,7 @@ func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
 		"Report detail:",
 		"# Detail\n\nUse the focused test surface.",
 	})
+
 	if strings.Contains(prompt, "### reports/") {
 		t.Fatalf("prompt renders report artifact as a duplicate context entry:\n%s", prompt)
 	}
@@ -380,13 +399,16 @@ func TestRenderRefusesNonSelectedStepUnlessAllowed(t *testing.T) {
 	if err == nil {
 		t.Fatal("Render returned nil error, want non-selected step refusal")
 	}
+
 	if !strings.Contains(err.Error(), `step "test" is not selected`) {
 		t.Fatalf("error = %q, want non-selected step context", err)
 	}
+
 	loaded, loadErr := store.Load(runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
+
 	if got := countArtifacts(loaded.Status.Artifacts, runstore.KindPrompt); got != 0 {
 		t.Fatalf("prompt artifacts = %d, want none after refusal", got)
 	}
@@ -407,6 +429,7 @@ func TestRenderRefusesTerminalRun(t *testing.T) {
 	if err == nil {
 		t.Fatal("Render returned nil error, want terminal refusal")
 	}
+
 	if !strings.Contains(err.Error(), "has no selected runnable step") {
 		t.Fatalf("error = %q, want no selected runnable step", err)
 	}
@@ -434,6 +457,7 @@ func TestRenderHonorsCanceledContextBeforeWritingPrompt(t *testing.T) {
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
 	store := openPromptStore(t, root)
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -447,10 +471,12 @@ func TestRenderHonorsCanceledContextBeforeWritingPrompt(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Render error = %v, want context canceled", err)
 	}
+
 	loaded, loadErr := store.Load(runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
+
 	if got := countArtifacts(loaded.Status.Artifacts, runstore.KindPrompt); got != 0 {
 		t.Fatalf("prompt artifacts = %d, want none after canceled context", got)
 	}
@@ -472,13 +498,16 @@ func TestRenderReturnsCommittedPromptRefOnStatusMaterializationFailure(t *testin
 		AgentID:   "planner",
 		AttemptID: "attempt-001",
 	})
+
 	var materializationErr *runstore.StatusMaterializationError
 	if !errors.As(err, &materializationErr) {
 		t.Fatalf("Render error = %T %v, want StatusMaterializationError", err, err)
 	}
+
 	if result.Ref.Kind != runstore.KindPrompt || result.Ref.Path == "" || result.Path == "" {
 		t.Fatalf("result = %+v, want committed prompt ref despite error", result)
 	}
+
 	persisted := readPromptFile(t, filepath.Join(runPath, filepath.FromSlash(result.Ref.Path)))
 	if !bytes.Equal(result.Content, persisted) {
 		t.Fatal("returned content differs from committed prompt")
@@ -525,11 +554,14 @@ func TestRenderRejectsInvalidRequestedMetadataBeforeWritingPrompt(t *testing.T) 
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Render error = %v, want %q", err, tt.want)
 			}
+
 			store := openPromptStore(t, root)
+
 			loaded, loadErr := store.Load(runID)
 			if loadErr != nil {
 				t.Fatalf("Load returned error: %v", loadErr)
 			}
+
 			if got := countArtifacts(loaded.Status.Artifacts, runstore.KindPrompt); got != 0 {
 				t.Fatalf("prompt artifacts = %d, want none after invalid metadata", got)
 			}
@@ -563,16 +595,20 @@ func TestShellQuoteQuotesOpaqueAttemptIDs(t *testing.T) {
 
 func writePromptProject(t *testing.T, root string) {
 	t.Helper()
+
 	orcDir := filepath.Join(root, ".orc")
 	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
 		t.Fatalf("create workflows dir: %v", err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
 		t.Fatalf("create runtimes dir: %v", err)
 	}
+
 	writePromptFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
 workflows:
   implementation: workflows/implementation.yaml
@@ -614,6 +650,7 @@ Review the change and report approval or requested changes.
 func createPromptRun(t *testing.T, root, state string) string {
 	t.Helper()
 	store := openPromptStore(t, root)
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "prompt-run",
 		Workflow: "implementation",
@@ -622,25 +659,31 @@ func createPromptRun(t *testing.T, root, state string) string {
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	writePromptConfigSnapshot(t, root, store, run.ID)
+
 	if state != workflow.RunStatusRunning {
 		if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: state, Time: fixedPromptTime().Add(time.Minute)}); err != nil {
 			t.Fatalf("UpdateStatus returned error: %v", err)
 		}
 	}
+
 	return run.ID
 }
 
 func writePromptConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
 	t.Helper()
+
 	project, err := config.Load(root)
 	if err != nil {
 		t.Fatalf("Load config returned error: %v", err)
 	}
+
 	snapshot, err := configsnapshot.BuildInitial(project, "implementation", fixedPromptTime())
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
+
 	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
@@ -648,15 +691,18 @@ func writePromptConfigSnapshot(t *testing.T, root string, store *runstore.Store,
 
 func openPromptStore(t *testing.T, root string) *runstore.Store {
 	t.Helper()
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	return store
 }
 
 func writeTaskContextArtifact(t *testing.T, store *runstore.Store, runID, content string, at time.Time) {
 	t.Helper()
+
 	if _, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    "task",
@@ -681,6 +727,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 	}); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
+
 	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    report.StepID,
@@ -690,6 +737,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 	if err != nil {
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
 		AttemptID: report.AttemptID,
 		PromptRef: promptRef,
@@ -697,6 +745,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 	}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
+
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    report.StepID,
@@ -706,6 +755,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 	if err != nil {
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
 		AttemptID: report.AttemptID,
 		LogRef:    logRef,
@@ -713,6 +763,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 	}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
 		AttemptID:        report.AttemptID,
 		PID:              12345,
@@ -721,6 +772,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 	}); err != nil {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
+
 	req := runstore.RecordReportRequest{
 		State:  runstore.AttemptStateReported,
 		Report: report,
@@ -731,6 +783,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 		req.ReportContent = reportContent
 		req.ReportContentSet = true
 	}
+
 	if _, _, err := store.RecordAttemptReport(runID, req); err != nil {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
@@ -738,6 +791,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 
 func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID, attemptID, consumeAttemptID string) {
 	t.Helper()
+
 	req := runstore.StartAttemptRequest{
 		StepID:           "plan",
 		AgentID:          "planner",
@@ -755,9 +809,11 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 			TriggerResult: "ready",
 		}
 	}
+
 	if _, _, err := store.StartAttempt(runID, req); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
+
 	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    "plan",
@@ -767,6 +823,7 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 	if err != nil {
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
@@ -774,6 +831,7 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 	}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
+
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    "plan",
@@ -783,6 +841,7 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 	if err != nil {
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
 		AttemptID: attemptID,
 		LogRef:    logRef,
@@ -790,6 +849,7 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 	}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              12345,
@@ -798,6 +858,7 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 	}); err != nil {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -819,38 +880,46 @@ func latestArtifactKind(refs []runstore.ArtifactRef) runstore.ArtifactKind {
 	if len(refs) == 0 {
 		return ""
 	}
+
 	return refs[len(refs)-1].Kind
 }
 
 func latestEventType(t *testing.T, events []runstore.Event) string {
 	t.Helper()
+
 	if len(events) == 0 {
 		t.Fatal("events are empty")
 	}
+
 	var payload struct {
 		Artifact runstore.ArtifactRef `json:"artifact"`
 	}
 	if err := json.Unmarshal(events[len(events)-1].Payload, &payload); err != nil {
 		t.Fatalf("unmarshal latest payload: %v", err)
 	}
+
 	if payload.Artifact.Kind != runstore.KindPrompt {
 		t.Fatalf("latest artifact payload = %+v, want prompt", payload.Artifact)
 	}
+
 	return events[len(events)-1].Type
 }
 
 func countArtifacts(refs []runstore.ArtifactRef, kind runstore.ArtifactKind) int {
 	count := 0
+
 	for _, ref := range refs {
 		if ref.Kind == kind {
 			count++
 		}
 	}
+
 	return count
 }
 
 func assertPromptContainsAll(t *testing.T, prompt string, wants []string) {
 	t.Helper()
+
 	for _, want := range wants {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
@@ -860,24 +929,29 @@ func assertPromptContainsAll(t *testing.T, prompt string, wants []string) {
 
 func readPromptFile(t *testing.T, path string) []byte {
 	t.Helper()
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
+
 	return content
 }
 
 func readPromptTestdata(t *testing.T, name string) []byte {
 	t.Helper()
+
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve prompt testdata path")
 	}
+
 	return readPromptFile(t, filepath.Join(filepath.Dir(file), "testdata", name))
 }
 
 func writePromptFile(t *testing.T, path, content string) {
 	t.Helper()
+
 	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
@@ -885,17 +959,21 @@ func writePromptFile(t *testing.T, path, content string) {
 
 func denyStatusMaterializationOrSkip(t *testing.T, runPath string) {
 	t.Helper()
+
 	if err := os.Chmod(runPath, 0o500); err != nil {
 		t.Fatalf("chmod run dir read-only: %v", err)
 	}
+
 	t.Cleanup(func() {
 		_ = os.Chmod(runPath, 0o750)
 	})
+
 	temp, err := os.CreateTemp(runPath, ".status-probe-*.tmp")
 	if err == nil {
 		name := temp.Name()
 		_ = temp.Close()
 		_ = os.Remove(name)
+
 		t.Skip("chmod did not deny temp file creation in run directory")
 	}
 }

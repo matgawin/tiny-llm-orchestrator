@@ -15,6 +15,7 @@ func TestMarkdownGroupsConventionalCommits(t *testing.T) {
 	}
 
 	got := Markdown(commits, Options{RepositoryURL: "https://github.com/example/repo"})
+
 	want := `## Release Notes
 
 ### Features
@@ -63,6 +64,7 @@ func TestMarkdownDetectsBreakingChangesOnce(t *testing.T) {
 	}
 
 	got := Markdown(commits, Options{})
+
 	want := `## Release Notes
 
 ### Breaking Changes
@@ -82,6 +84,7 @@ Artifacts are built and uploaded by the release.published Linux x86_64 workflow 
 
 func TestMarkdownOmitsEmptySectionsButKeepsArtifactBuild(t *testing.T) {
 	got := Markdown(nil, Options{})
+
 	want := `## Release Notes
 
 ### Artifact Build

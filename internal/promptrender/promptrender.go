@@ -61,36 +61,45 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, stableerr.New("context is required")
 	}
+
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("render: %w", err)
 	}
+
 	if err := validateOptions(opts); err != nil {
 		return Result{}, err
 	}
+
 	renderCtx, err := loadRenderContext(ctx, opts)
 	if err != nil {
 		return Result{}, err
 	}
+
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("render: %w", err)
 	}
+
 	content, err := renderPrompt(ctx, renderCtx, opts)
 	if err != nil {
 		return Result{}, err
 	}
+
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("render: %w", err)
 	}
+
 	ref, err := renderCtx.store.WriteArtifactContext(ctx, opts.RunID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    opts.StepID,
 		Content: content,
 		Time:    opts.Time,
 	})
+
 	result := resultFromArtifact(renderCtx.run.Path, ref, content)
 	if err != nil {
 		return result, fmt.Errorf("render: %w", err)
 	}
+
 	return result, nil
 }
 
@@ -98,6 +107,7 @@ func resultFromArtifact(runPath string, ref runstore.ArtifactRef, content []byte
 	if ref.Path == "" {
 		return Result{Ref: ref, Content: content}
 	}
+
 	return Result{
 		Ref:     ref,
 		Path:    filepath.ToSlash(filepath.Join(runPath, filepath.FromSlash(ref.Path))),
@@ -127,27 +137,34 @@ func loadRenderContext(ctx context.Context, opts Options) (renderContext, error)
 	if err != nil {
 		return renderContext{}, fmt.Errorf("load render context: %w", err)
 	}
+
 	decision, err := renderSelectionDecision(loaded.Workflow, loaded.Run)
 	if err != nil {
 		return renderContext{}, fmt.Errorf("evaluate run %q: %w", loaded.Run.ID, err)
 	}
+
 	if decision.Kind != workflow.DecisionSelectStep {
 		return renderContext{}, stableerr.Errorf("run %q has no selected runnable step; decision is %s", loaded.Run.ID, decision.Kind)
 	}
+
 	if !opts.AllowUnselectedStep && opts.StepID != decision.Step {
 		return renderContext{}, stableerr.Errorf("step %q is not selected for run %q; selected step is %q", opts.StepID, loaded.Run.ID, decision.Step)
 	}
+
 	step, ok := loaded.Workflow.Steps[opts.StepID]
 	if !ok {
 		return renderContext{}, stableerr.Errorf("step %q is not declared in workflow %q", opts.StepID, loaded.Workflow.Name)
 	}
+
 	if step.Agent != opts.AgentID {
 		return renderContext{}, stableerr.Errorf("step %q uses agent %q, not %q", opts.StepID, step.Agent, opts.AgentID)
 	}
+
 	agent, ok := loaded.Project.Agents[opts.AgentID]
 	if !ok {
 		return renderContext{}, stableerr.Errorf("agent %q is not configured", opts.AgentID)
 	}
+
 	return renderContext{
 		store:    loaded.Store,
 		run:      loaded.Run,
@@ -161,10 +178,12 @@ func renderSelectionDecision(workflowConfig config.Workflow, run *runstore.Run) 
 	if active := run.Status.ActiveAttempt; active != nil {
 		return workflow.Decision{Kind: workflow.DecisionSelectStep, Step: active.StepID, RunStatus: run.Status.State}, nil
 	}
+
 	decision, err := workflow.Evaluate(workflowConfig, runstate.WorkflowState(run.Status))
 	if err != nil {
 		return workflow.Decision{}, fmt.Errorf("evaluate workflow for prompt rendering: %w", err)
 	}
+
 	return decision, nil
 }
 
@@ -173,10 +192,12 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	if err != nil {
 		return nil, err
 	}
+
 	reports, err := priorReportContexts(ctx, renderCtx)
 	if err != nil {
 		return nil, err
 	}
+
 	var out bytes.Buffer
 	out.WriteString(promptTitle)
 	out.WriteString("## Attempt Metadata\n\n")
@@ -199,13 +220,16 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	out.WriteString(renderPriorReports(reports))
 	out.WriteString(progressGuidance)
 	out.WriteString(reportContractIntro)
+
 	for _, pair := range allowedPairs(renderCtx.step) {
 		fmt.Fprintf(&out, "- `%s`\n", pair)
 	}
+
 	out.WriteString(reportCommandIntro)
 	fmt.Fprintf(&out, "orc report --run %s --step %s --agent %s --attempt %s --status <status> --result <result> --summary \"<summary>\"\n", shellQuote(opts.RunID), shellQuote(opts.StepID), shellQuote(opts.AgentID), shellQuote(opts.AttemptID))
 	out.WriteString("```\n")
 	out.WriteString(reportOptionalFields)
+
 	return out.Bytes(), nil
 }
 
@@ -214,10 +238,12 @@ func renderLoopContext(renderCtx renderContext, opts Options) string {
 	if !caps.Enabled {
 		return ""
 	}
+
 	count := renderCtx.run.Status.WorkflowLoop.Counts[opts.StepID]
 	if count <= caps.Soft {
 		return ""
 	}
+
 	var out strings.Builder
 	out.WriteString("## Workflow Loop Context\n\n")
 	fmt.Fprintf(&out, "- workflow: `%s`\n", renderCtx.workflow.Name)
@@ -225,28 +251,35 @@ func renderLoopContext(renderCtx renderContext, opts Options) string {
 	fmt.Fprintf(&out, "- current_count: `%d`\n", count)
 	fmt.Fprintf(&out, "- soft_cap: `%d`\n", caps.Soft)
 	fmt.Fprintf(&out, "- hard_cap: `%d`\n", caps.Hard)
+
 	statuses := priorLoopStatuses(renderCtx.run.Status.WorkflowLoop.Entries, opts.StepID)
 	if len(statuses) > 0 {
 		fmt.Fprintf(&out, "- prior_statuses: `%s`\n", strings.Join(statuses, "`, `"))
 	} else {
 		out.WriteString("- prior_statuses: not available\n")
 	}
+
 	out.WriteString("\nThis workflow state is past its soft loop cap. Use this attempt to break the loop with new information, choose a terminal/human-handoff report when blocked, or escalate clearly instead of repeating the same outcome.\n\n")
+
 	return out.String()
 }
 
 func priorLoopStatuses(entries []runstore.WorkflowStateEntry, state string) []string {
 	statuses := make([]string, 0)
+
 	for _, entry := range entries {
 		if entry.State != state || entry.TriggerStatus == "" {
 			continue
 		}
+
 		status := entry.TriggerStatus
 		if entry.TriggerResult != "" {
 			status += "/" + entry.TriggerResult
 		}
+
 		statuses = append(statuses, status)
 	}
+
 	return statuses
 }
 
@@ -292,13 +325,16 @@ For richer structured reports, you may instead write a JSON report file and use
 func renderPriorReports(reports []reportContext) string {
 	var out strings.Builder
 	out.WriteString("## Prior Report Context\n\n")
+
 	if len(reports) == 0 {
 		out.WriteString("No prior reports are recorded for this run.\n\n")
 		return out.String()
 	}
+
 	for _, report := range reports {
 		fmt.Fprintf(&out, "### %s\n\n%s\n\n", report.heading, report.excerpt)
 	}
+
 	return out.String()
 }
 
@@ -306,16 +342,20 @@ func taskContextContent(ctx context.Context, renderCtx renderContext) (string, e
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("task context content: %w", err)
 	}
+
 	for _, ref := range renderCtx.run.Status.Artifacts {
 		if ref.Kind != runstore.KindTaskContext {
 			continue
 		}
+
 		content, err := renderCtx.store.ReadArtifactContext(ctx, renderCtx.run.ID, ref)
 		if err != nil {
 			return "", fmt.Errorf("read task context %s: %w", ref.Path, err)
 		}
+
 		return string(content), nil
 	}
+
 	return "", stableerr.Errorf("run %q has no task context artifact", renderCtx.run.ID)
 }
 
@@ -332,55 +372,69 @@ func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]report
 			excerpt: fmt.Sprintf("step %s skipped by human decision: %s", skipped.StepID, skipped.Reason),
 		})
 	}
+
 	attemptReportDetailPaths := attemptReportDetailArtifactPaths(renderCtx.run.Status.Attempts)
 	attemptReportDetailByPath := make(map[string][]byte)
+
 	for _, ref := range renderCtx.run.Status.Artifacts {
 		if ref.Kind != runstore.KindReport {
 			continue
 		}
+
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("prior report contexts: %w", err)
 		}
+
 		content, err := renderCtx.store.ReadArtifactContext(ctx, renderCtx.run.ID, ref)
 		if err != nil {
 			return nil, fmt.Errorf("read prior report %s: %w", ref.Path, err)
 		}
+
 		if _, ok := attemptReportDetailPaths[ref.Path]; ok {
 			attemptReportDetailByPath[ref.Path] = content
 			continue
 		}
+
 		reports = append(reports, reportContext{
 			heading: ref.Path,
 			excerpt: excerptMarkdown(content, priorReportExcerptLimit),
 		})
 	}
+
 	for _, attempt := range renderCtx.run.Status.Attempts {
 		if attempt.Report == nil {
 			continue
 		}
+
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("prior report contexts: %w", err)
 		}
+
 		var detail []byte
 		if attempt.Report.ReportRef != nil {
 			detail = attemptReportDetailByPath[attempt.Report.ReportRef.Path]
 		}
+
 		reports = append(reports, reportContext{
 			heading: fmt.Sprintf("attempt %s (%s %s/%s)", attempt.AttemptID, attempt.StepID, attempt.Report.Status, attempt.Report.Result),
 			excerpt: excerptMarkdown([]byte(reportSummaryMarkdown(*attempt.Report, detail)), priorReportExcerptLimit),
 		})
 	}
+
 	return reports, nil
 }
 
 func attemptReportDetailArtifactPaths(attempts []runstore.Attempt) map[string]struct{} {
 	paths := make(map[string]struct{})
+
 	for _, attempt := range attempts {
 		if attempt.Report == nil || attempt.Report.ReportRef == nil || attempt.Report.ReportRef.Path == "" {
 			continue
 		}
+
 		paths[attempt.Report.ReportRef.Path] = struct{}{}
 	}
+
 	return paths
 }
 
@@ -389,22 +443,28 @@ func reportSummaryMarkdown(report runstore.Report, detail []byte) string {
 	fmt.Fprintf(&out, "- step_id: `%s`\n", report.StepID)
 	fmt.Fprintf(&out, "- agent_id: `%s`\n", report.AgentID)
 	fmt.Fprintf(&out, "- status/result: `%s/%s`\n", report.Status, report.Result)
+
 	if report.Summary != "" {
 		fmt.Fprintf(&out, "- summary: %s\n", report.Summary)
 	}
+
 	writeReportList(&out, "command", report.Commands)
 	writeReportList(&out, "test", report.Tests)
 	writeReportList(&out, "risk", report.Risks)
 	writeReportList(&out, "changed_path", report.ChangedPaths)
+
 	for _, followup := range report.Followups {
 		fmt.Fprintf(&out, "- follow_up: %s\n", followup.Title)
+
 		if followup.Details != "" {
 			fmt.Fprintf(&out, "- follow_up_details: %s\n", followup.Details)
 		}
 	}
+
 	if strings.TrimSpace(string(detail)) != "" {
 		fmt.Fprintf(&out, "\nReport detail:\n\n%s\n", strings.TrimSpace(string(detail)))
 	}
+
 	return out.String()
 }
 
@@ -419,24 +479,30 @@ func excerptMarkdown(content []byte, limit int) string {
 	if text == "" {
 		return "(empty report)"
 	}
+
 	runes := []rune(text)
 	if len(runes) <= limit {
 		return text
 	}
+
 	return strings.TrimSpace(string(runes[:limit])) + "\n\n[excerpt truncated]"
 }
 
 func allowedPairs(step config.Step) []string {
 	var pairs []string
+
 	for status, results := range step.AllowedResults {
 		for _, result := range results {
 			if !reportpkg.WorkerReportableOutcome(status, result) {
 				continue
 			}
+
 			pairs = append(pairs, status+"/"+result)
 		}
 	}
+
 	slices.Sort(pairs)
+
 	return pairs
 }
 
@@ -444,9 +510,11 @@ func shellQuote(value string) string {
 	if value == "" {
 		return "''"
 	}
+
 	if strings.IndexFunc(value, func(r rune) bool { return !shellSafeRune(r) }) == -1 {
 		return value
 	}
+
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 

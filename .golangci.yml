@@ -38,6 +38,10 @@ linters:
     - err113          # Enforce stable error values instead of dynamic construction
     - wrapcheck       # Require local context on returned boundary errors
     - gocognit        # Flag functions with high cognitive complexity
+    - mnd             # Detect magic numbers
+    - nestif          # Report deeply nested if statements
+    - prealloc        # Suggest slice preallocation where beneficial
+    - wsl_v5          # Enforce whitespace around statements
 
   settings:
     errcheck:

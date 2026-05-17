@@ -17,10 +17,12 @@ func TestExecuteRunContinueAllowsWorkflowLoopHardCapOnce(t *testing.T) {
 		"continued run " + result.runID,
 		"allowed one entry into plan at count 2",
 	})
+
 	loaded := loadCLIRun(t, root, result.runID)
 	if loaded.Status.State != cliStateRunning {
 		t.Fatalf("state = %q, want running", loaded.Status.State)
 	}
+
 	override := loaded.Status.WorkflowLoop.PendingHardCapOverride
 	if override == nil || override.TargetState != "plan" || override.CountBeforeOverride != 1 || override.CountAfterOverride != 2 || override.HumanAction != "allow_loop_cap" {
 		t.Fatalf("pending override = %+v, want plan count 2 allow_loop_cap", override)
@@ -37,12 +39,15 @@ func TestExecuteRunContinueFailsWithoutActiveWorkflowLoopHardCap(t *testing.T) {
 	if err := Execute([]string{"run", "continue", result.runID, "--allow-loop-cap"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want no-active-block failure")
 	}
+
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
+
 	if got := stderr.String(); !strings.Contains(got, "no active workflow loop hard-cap block") {
 		t.Fatalf("stderr = %q, want no-active-block message", got)
 	}
+
 	after := loadCLIRun(t, root, result.runID)
 	if after.Status.LastSequence != before.Status.LastSequence || after.Status.State != before.Status.State || after.Status.WorkflowLoop.PendingHardCapOverride != nil {
 		t.Fatalf("after status = %+v, want no mutation from %+v", after.Status, before.Status)
@@ -62,22 +67,27 @@ func TestExecuteRunContinueResolveBlockRetriesBlockedStep(t *testing.T) {
 		"after human-resolved block",
 		"retrying step test",
 	})
+
 	loaded := loadCLIRun(t, run.root, run.runID)
 	if loaded.Status.State != cliStateRunning {
 		t.Fatalf("state = %q, want running", loaded.Status.State)
 	}
+
 	if loaded.Status.Continued == nil || loaded.Status.Continued.Reason != "fixed network config" || loaded.Status.Continued.ResolvedStepID != "test" {
 		t.Fatalf("continued = %+v, want trimmed reason and test step", loaded.Status.Continued)
 	}
 
 	launchCLIWorkerReport(t, run.runID, passed("Tests passed after human fix."))
+
 	afterRetry := loadCLIRun(t, run.root, run.runID)
 	if got := len(afterRetry.Status.Attempts); got != 4 {
 		t.Fatalf("attempt history len = %d, want retry attempt appended", got)
 	}
+
 	if got := afterRetry.Status.Attempts[3].StepID; got != "test" {
 		t.Fatalf("retry step = %q, want test", got)
 	}
+
 	if afterRetry.Status.Continued != nil {
 		t.Fatalf("continued marker = %+v, want cleared after retry launch", afterRetry.Status.Continued)
 	}
@@ -86,6 +96,7 @@ func TestExecuteRunContinueResolveBlockRetriesBlockedStep(t *testing.T) {
 func TestExecuteRunContinueResolveBlockFlagValidation(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
+
 	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 	for _, tc := range []struct {
 		name string
@@ -120,14 +131,18 @@ func TestExecuteRunContinueResolveBlockFlagValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := loadCLIRun(t, root, result.runID)
+
 			var stdout, stderr bytes.Buffer
 			if err := Execute(tc.args, &stdout, &stderr); err == nil {
 				t.Fatal("Execute returned nil error, want flag validation failure")
 			}
+
 			if stdout.Len() != 0 {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
+
 			assertCLIOutputContainsAll(t, stderr.String(), tc.want)
+
 			after := loadCLIRun(t, root, result.runID)
 			if after.Status.LastSequence != before.Status.LastSequence || after.Status.State != before.Status.State {
 				t.Fatalf("after status = %+v, want no mutation from %+v", after.Status, before.Status)
@@ -141,9 +156,11 @@ func TestExecuteRunContinueHelpDocumentsContinuationModes(t *testing.T) {
 	if err := Execute([]string{"run", "continue", "--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
+
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc run continue <run-id> --allow-loop-cap",
 		"orc run continue <run-id> --resolve-block --reason <text>",

@@ -15,7 +15,9 @@ import (
 
 func newReportCommand(stdout, stderr io.Writer) *cobra.Command {
 	opts := report.Options{}
+
 	var followupTitles []string
+
 	cmd := &cobra.Command{
 		Use:   "report",
 		Short: "Validate and persist a worker report",
@@ -30,13 +32,16 @@ Use a JSON report file or direct report flags. JSON input is validated with stri
 			if len(args) > 0 {
 				return reportFlagError(cmd, stderr, stableerr.Errorf("unexpected argument %q", args[0]))
 			}
+
 			if len(args) == 0 && noReportFlagsChanged(cmd) {
 				return cmd.Help()
 			}
+
 			opts.Report.Followups = opts.Report.Followups[:0]
 			for _, title := range followupTitles {
 				opts.Report.Followups = append(opts.Report.Followups, runstore.Followup{Title: title})
 			}
+
 			return executeReport(opts, stdout, stderr)
 		},
 	}
@@ -58,6 +63,7 @@ Use a JSON report file or direct report flags. JSON input is validated with stri
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return reportFlagError(cmd, stderr, err)
 	})
+
 	return cmd
 }
 
@@ -70,24 +76,31 @@ func executeReport(opts report.Options, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("execute report: %w", err)
 	}
+
 	opts.Root = root
+
 	result, err := report.Submit(context.Background(), opts)
 	if err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s report: %v\n", appName, err); writeErr != nil {
 			return fmt.Errorf("execute report: %w", writeErr)
 		}
+
 		return fmt.Errorf("execute report: %w", err)
 	}
+
 	if result.Ignored {
 		_, err = fmt.Fprintf(stdout, "ignored report for run %s\n", result.RunID)
 		if err != nil {
 			return fmt.Errorf("execute report: %w", err)
 		}
+
 		return nil
 	}
+
 	if _, err := fmt.Fprintf(stdout, "recorded report for run %s attempt %s\n", result.RunID, result.Attempt.AttemptID); err != nil {
 		return fmt.Errorf("execute report: %w", err)
 	}
+
 	return nil
 }
 
@@ -95,9 +108,12 @@ func reportFlagError(cmd *cobra.Command, stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s report: %v\n\n", appName, err); writeErr != nil {
 		return fmt.Errorf("report flag error: %w", writeErr)
 	}
+
 	cmd.SetOut(stderr)
+
 	if helpErr := cmd.Usage(); helpErr != nil {
 		return fmt.Errorf("report flag error: %w", helpErr)
 	}
+
 	return fmt.Errorf("%s report: %w", appName, err)
 }

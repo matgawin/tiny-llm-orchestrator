@@ -10,7 +10,9 @@ func sortedKeys(values map[string]struct{}) []string {
 	for key := range values {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
+
 	return keys
 }
 

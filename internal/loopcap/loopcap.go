@@ -39,8 +39,10 @@ func Evaluate(workflowName string, caps config.EffectiveLoopCaps, status runstor
 	if !caps.Enabled || routing.Kind != workflow.DecisionSelectStep {
 		return Decision{}
 	}
+
 	current := status.WorkflowLoop.Counts[routing.Step]
 	prospective := current + 1
+
 	decision := Decision{
 		Workflow:         workflowName,
 		State:            routing.Step,
@@ -54,16 +56,19 @@ func Evaluate(workflowName string, caps config.EffectiveLoopCaps, status runstor
 		decision.TriggerStatus = latest.Status
 		decision.TriggerResult = latest.Result
 	}
+
 	if prospective >= caps.Hard+1 {
 		decision.Kind = DecisionHard
 		return decision
 	}
+
 	switch prospective {
 	case caps.Soft + 1:
 		decision.Kind = DecisionSoft
 	default:
 		return Decision{}
 	}
+
 	return decision
 }
 

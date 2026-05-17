@@ -19,10 +19,12 @@ func TestExecuteRunSkipStepSkipsSelectedReviewStep(t *testing.T) {
 		"reason: not worth another review",
 		"next selected step: code",
 	})
+
 	loaded := loadCLIRun(t, root, result.runID)
 	if got := len(loaded.Status.Attempts); got != 0 {
 		t.Fatalf("attempts = %d, want unchanged empty attempts", got)
 	}
+
 	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != "review" || loaded.Status.SkippedSteps[0].Reason != "not worth another review" {
 		t.Fatalf("skipped steps = %+v, want review skip with trimmed reason", loaded.Status.SkippedSteps)
 	}
@@ -40,10 +42,12 @@ func TestExecuteRunSkipStepSkipsSelectedRemediationStep(t *testing.T) {
 		"reason: human reviewed requested changes",
 		"run status: " + cliStateReadyForHuman,
 	})
+
 	loaded := loadCLIRun(t, root, result.runID)
 	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != "code" {
 		t.Fatalf("skipped steps = %+v, want code remediation skip", loaded.Status.SkippedSteps)
 	}
+
 	if loaded.Status.State != cliStateReadyForHuman {
 		t.Fatalf("state = %q, want %s", loaded.Status.State, cliStateReadyForHuman)
 	}
@@ -69,9 +73,11 @@ func TestExecuteRunSkipStepFlagValidation(t *testing.T) {
 			if err := Execute(tc.args, &stdout, &stderr); err == nil {
 				t.Fatal("Execute returned nil error, want validation failure")
 			}
+
 			if stdout.Len() != 0 {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
+
 			assertCLIOutputContainsAll(t, stderr.String(), tc.want)
 		})
 	}
@@ -116,6 +122,7 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 			skippable: true,
 			setup: func(t *testing.T, root, runID string) {
 				t.Helper()
+
 				if _, _, err := openCLIStore(t, root).UpdateStatus(runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
@@ -134,21 +141,27 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLISkipStepProject(t, root, tc.skippable)
+
 			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 			if tc.setup != nil {
 				tc.setup(t, root, result.runID)
 			}
+
 			before := loadCLIRun(t, root, result.runID)
 
 			var stdout, stderr bytes.Buffer
+
 			err := Execute([]string{"run", "skip-step", result.runID, "--step", tc.step, "--reason", "skip it"}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want skip rejection")
 			}
+
 			if stdout.Len() != 0 {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
+
 			assertCLIOutputContainsAll(t, stderr.String(), tc.want)
+
 			after := loadCLIRun(t, root, result.runID)
 			if after.Status.LastSequence != before.Status.LastSequence || len(after.Status.SkippedSteps) != len(before.Status.SkippedSteps) || after.Status.State != before.Status.State {
 				t.Fatalf("after status = %+v, want no mutation from %+v", after.Status, before.Status)
@@ -162,9 +175,11 @@ func TestExecuteRunHelpListsMigratedSubcommands(t *testing.T) {
 	if err := Execute([]string{"run", "--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
+
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"add-followup",
 		"advance",
@@ -187,9 +202,11 @@ func TestExecuteRunUnknownSubcommandFailsThroughCobra(t *testing.T) {
 	if err := Execute([]string{"run", "unknown"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown command failure")
 	}
+
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
+
 	if got := stderr.String(); !strings.Contains(got, `unknown command "unknown" for "orc run"`) {
 		t.Fatalf("stderr = %q, want Cobra unknown command diagnostic", got)
 	}
@@ -200,9 +217,11 @@ func TestExecuteRunSkipStepHelpDocumentsContract(t *testing.T) {
 	if err := Execute([]string{"run", "skip-step", "--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
+
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc run skip-step <run-id> --step <step-id> --reason <text>",
 		"--step <step-id>",

@@ -25,10 +25,12 @@ const (
 func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	root := t.TempDir()
 	writeSkippableReportProject(t, root)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "skip-report-run",
 		Workflow: "implementation",
@@ -37,6 +39,7 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	writeReportConfigSnapshot(t, root, store, run.ID)
 	startActiveAttempt(t, store, run.ID, "attempt-001")
 
@@ -56,9 +59,11 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	if err == nil {
 		t.Fatal("Submit returned nil error, want reserved skip outcome rejection")
 	}
+
 	if !strings.Contains(err.Error(), "workers cannot report reserved system outcome done/skipped") {
 		t.Fatalf("error = %v, want reserved skip outcome rejection", err)
 	}
+
 	if result.Attempt.State != runstore.AttemptStateInvalidReport || result.Attempt.Status != reportStatusFailed || result.Attempt.Result != runstore.AttemptResultInvalidReport {
 		t.Fatalf("attempt = %+v, want failed/invalid_report", result.Attempt)
 	}
@@ -67,6 +72,7 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
+
 	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
 	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != reportStatusFailed || attempt.Result != runstore.AttemptResultInvalidReport {
 		t.Fatalf("persisted attempt = %+v, want failed/invalid_report", attempt)
@@ -76,10 +82,12 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 func TestSubmitValidatesReportAgainstPinnedWorkflowAfterLiveMutation(t *testing.T) {
 	root := t.TempDir()
 	writeSkippableReportProject(t, root)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "pinned-report-run",
 		Workflow: "implementation",
@@ -88,6 +96,7 @@ func TestSubmitValidatesReportAgainstPinnedWorkflowAfterLiveMutation(t *testing.
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	writeReportConfigSnapshot(t, root, store, run.ID)
 	startActiveAttempt(t, store, run.ID, "attempt-1")
 	writeReportWorkflow(t, root, `name: implementation
@@ -127,6 +136,7 @@ steps:
 	if err != nil {
 		t.Fatalf("Submit returned error after live workflow mutation: %v", err)
 	}
+
 	if result.Attempt.State != runstore.AttemptStateReported {
 		t.Fatalf("attempt state = %q, want reported", result.Attempt.State)
 	}
@@ -137,6 +147,7 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "race-report-run",
 		Workflow: "implementation",
@@ -160,20 +171,25 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 		Reason: "report does not target current active attempt",
 		Err:    stableerr.New("run active attempt changed"),
 	}
+
 	ignored, result := recordTargetRaceAsIgnored(context.Background(), store, report, time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC), err)
 	if !ignored {
 		t.Fatal("ignored = false, want true")
 	}
+
 	if result.Err == nil || !errors.Is(result.Err, err) {
 		t.Fatalf("result error = %v, want original target error", result.Err)
 	}
+
 	if result.Event.Type != reportIgnoredEvent {
 		t.Fatalf("event type = %q, want report.ignored", result.Event.Type)
 	}
+
 	loaded, loadErr := store.Load(run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
+
 	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
 		t.Fatalf("last event type = %q, want report.ignored", got)
 	}
@@ -185,10 +201,12 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 		Beads:            "optional",
 		MarkdownFallback: true,
 	})
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "race-submit-run",
 		Workflow: "implementation",
@@ -197,6 +215,7 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	writeReportConfigSnapshot(t, root, store, run.ID)
 	startActiveAttempt(t, store, run.ID, "attempt-001")
 
@@ -209,7 +228,9 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 		Result:    "ready",
 		Summary:   "Plan is ready.",
 	}
+
 	var once sync.Once
+
 	result, err := submit(context.Background(), Options{
 		Root:   root,
 		Report: report,
@@ -228,17 +249,21 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 	if err == nil {
 		t.Fatal("Submit returned nil error, want stale target error")
 	}
+
 	if !result.Ignored {
 		t.Fatalf("result ignored = false, want true")
 	}
+
 	var targetErr *runstore.ReportTargetError
 	if !errors.As(err, &targetErr) {
 		t.Fatalf("error = %v, want ReportTargetError", err)
 	}
+
 	loaded, loadErr := store.Load(run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
+
 	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
 		t.Fatalf("last event type = %q, want report.ignored", got)
 	}
@@ -246,14 +271,17 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 
 func writeReportConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
 	t.Helper()
+
 	project, err := config.Load(root)
 	if err != nil {
 		t.Fatalf("Load config returned error: %v", err)
 	}
+
 	snapshot, err := configsnapshot.BuildInitial(project, "implementation", time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
+
 	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
@@ -265,6 +293,7 @@ func writeSkippableReportProject(t *testing.T, root string) {
 		Beads:            "optional",
 		MarkdownFallback: true,
 	})
+
 	workflow := `name: implementation
 start: plan
 execution:
@@ -294,6 +323,7 @@ steps:
 
 func writeReportWorkflow(t *testing.T, root, workflow string) {
 	t.Helper()
+
 	if err := os.WriteFile(filepath.Join(root, ".orc", "workflows", "implementation.yaml"), []byte(workflow), 0o600); err != nil {
 		t.Fatalf("write report workflow: %v", err)
 	}
@@ -301,6 +331,7 @@ func writeReportWorkflow(t *testing.T, root, workflow string) {
 
 func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID string) {
 	t.Helper()
+
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
 		StepID:          "plan",
 		AgentID:         "planner",
@@ -311,6 +342,7 @@ func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID st
 	}); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
+
 	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    "plan-" + attemptID,
@@ -320,6 +352,7 @@ func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID st
 	if err != nil {
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
@@ -327,6 +360,7 @@ func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID st
 	}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
+
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    "plan-" + attemptID,
@@ -336,6 +370,7 @@ func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID st
 	if err != nil {
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
 		AttemptID: attemptID,
 		LogRef:    logRef,
@@ -343,6 +378,7 @@ func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID st
 	}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              12345,

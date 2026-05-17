@@ -20,45 +20,59 @@ func (s *Store) RecordWorkflowLoopSoftCapContext(ctx context.Context, runID stri
 	if ctx == nil {
 		return Status{}, Event{}, stableerr.New("context is required")
 	}
+
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
+
 	if err := validateWorkflowLoopSoftCap(loopCap); err != nil {
 		return Status{}, Event{}, err
 	}
+
 	at = normalizeTime(at)
-	var status Status
-	var event Event
+
+	var (
+		status Status
+		event  Event
+	)
+
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("record workflow loop soft cap context: %w", err)
 		}
+
 		run, err := s.load(runID)
 		if err != nil {
 			return err
 		}
+
 		if workflowSoftCapRecorded(run.Status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, loopCap.State) {
 			status = run.Status
 			return nil
 		}
+
 		payload, err := marshalPayload(workflowLoopSoftCapPayload{Cap: loopCap})
 		if err != nil {
 			return err
 		}
+
 		event = Event{Time: at, Type: eventWorkflowSoftCap, Payload: payload}
 		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			applyWorkflowLoopSoftCap(status, loopCap)
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
 		})
+
 		return err
 	})
 	if err != nil {
 		if statusBackedEventPossiblyCommitted(err) {
 			return status, event, err
 		}
+
 		return Status{}, Event{}, err
 	}
+
 	return status, event, nil
 }
 
@@ -72,33 +86,45 @@ func (s *Store) BlockWorkflowLoopHardCapContext(ctx context.Context, runID strin
 	if ctx == nil {
 		return Status{}, Event{}, stableerr.New("context is required")
 	}
+
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
+
 	if err := validateWorkflowLoopHardCap(loopCap); err != nil {
 		return Status{}, Event{}, err
 	}
+
 	at = normalizeTime(at)
-	var status Status
-	var event Event
+
+	var (
+		status Status
+		event  Event
+	)
+
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("block workflow loop hard cap context: %w", err)
 		}
+
 		run, err := s.load(runID)
 		if err != nil {
 			return err
 		}
+
 		if run.Status.ActiveAttempt != nil {
 			return stableerr.Errorf("run %q has active attempt %q; loop hard-cap block is not allowed", runID, run.Status.ActiveAttempt.AttemptID)
 		}
+
 		if run.Status.State != stateRunning {
 			return stableerr.Errorf("run %q state is %q, want %q for loop hard-cap block", runID, run.Status.State, stateRunning)
 		}
+
 		payload, err := marshalPayload(workflowLoopHardCapPayload{Cap: loopCap, State: stateBlockedHuman})
 		if err != nil {
 			return err
 		}
+
 		event = Event{Time: at, Type: eventWorkflowHardCap, Payload: payload}
 		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			applyWorkflowLoopHardCap(status, loopCap)
@@ -106,14 +132,17 @@ func (s *Store) BlockWorkflowLoopHardCapContext(ctx context.Context, runID strin
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
 		})
+
 		return err
 	})
 	if err != nil {
 		if statusBackedEventPossiblyCommitted(err) {
 			return status, event, err
 		}
+
 		return Status{}, Event{}, err
 	}
+
 	return status, event, nil
 }
 
@@ -123,28 +152,38 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
+
 	overrideAction := strings.TrimSpace(humanAction)
 	if overrideAction == "" {
 		return Status{}, Event{}, stableerr.New("workflow loop hard-cap override human action is required")
 	}
+
 	at = normalizeTime(at)
-	var status Status
-	var event Event
+
+	var (
+		status Status
+		event  Event
+	)
+
 	err := s.withRunLock(runID, func() error {
 		run, err := s.load(runID)
 		if err != nil {
 			return err
 		}
+
 		if run.Status.State != stateBlockedHuman {
 			return stableerr.Errorf("run %q has no active workflow loop hard-cap block; state is %q", runID, run.Status.State)
 		}
+
 		block := run.Status.WorkflowLoop.HardCapBlock
 		if block == nil {
 			return stableerr.Errorf("run %q has no active workflow loop hard-cap block", runID)
 		}
+
 		if run.Status.WorkflowLoop.PendingHardCapOverride != nil {
 			return stableerr.Errorf("run %q already has a pending workflow loop hard-cap override", runID)
 		}
+
 		override := WorkflowLoopHardCapOverride{
 			Workflow:            block.Workflow,
 			TargetState:         block.BlockedState,
@@ -158,10 +197,12 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 		if err := validateWorkflowLoopHardCapOverride(override); err != nil {
 			return err
 		}
+
 		payload, err := marshalPayload(workflowLoopHardCapOverridePayload{Override: override, State: stateRunning})
 		if err != nil {
 			return err
 		}
+
 		event = Event{Time: at, Type: eventWorkflowHardCapOverride, Payload: payload}
 		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			applyWorkflowLoopHardCapOverride(status, override)
@@ -169,14 +210,17 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
 		})
+
 		return err
 	})
 	if err != nil {
 		if statusBackedEventPossiblyCommitted(err) {
 			return status, event, err
 		}
+
 		return Status{}, Event{}, err
 	}
+
 	return status, event, nil
 }
 
@@ -190,51 +234,68 @@ func (s *Store) RecordStepSkipContext(ctx context.Context, runID string, req Rec
 	if ctx == nil {
 		return Status{}, Event{}, stableerr.New("context is required")
 	}
+
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
+
 	if validate == nil {
 		return Status{}, Event{}, stableerr.New("step skip validator is required")
 	}
+
 	req.StepID = strings.TrimSpace(req.StepID)
 	if req.StepID == "" {
 		return Status{}, Event{}, stableerr.New("step id is required")
 	}
+
 	req.Reason = strings.TrimSpace(req.Reason)
 	if req.Reason == "" {
 		return Status{}, Event{}, stableerr.New("skip reason is required")
 	}
+
 	req.Source = strings.TrimSpace(req.Source)
 	req.Time = normalizeTime(req.Time)
-	var status Status
-	var event Event
+
+	var (
+		status Status
+		event  Event
+	)
+
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("record step skip context: %w", err)
 		}
+
 		run, err := s.load(runID)
 		if err != nil {
 			return err
 		}
+
 		transition, err := validate(run.Status)
 		if err != nil {
 			return err
 		}
+
 		if transition.State == "" {
 			return stableerr.New("step skip transition state is required")
 		}
+
 		consumeAttemptID := ""
 		if attempt, ok := LatestConsumableOutcome(run.Status); ok {
 			consumeAttemptID = attempt.AttemptID
 		}
+
 		var workflowEntry *WorkflowStateEntry
+
 		if transition.WorkflowStateEntry.State != "" {
 			entry, err := nextWorkflowStateEntry(run.Status, transition.WorkflowStateEntry)
 			if err != nil {
 				return err
 			}
+
 			workflowEntry = &entry
 		}
+
 		payload, err := marshalPayload(workflowStepSkippedPayload{
 			StepID:             req.StepID,
 			Status:             attemptStatusDone,
@@ -248,11 +309,13 @@ func (s *Store) RecordStepSkipContext(ctx context.Context, runID string, req Rec
 		if err != nil {
 			return err
 		}
+
 		event = Event{Time: req.Time, Type: eventWorkflowStepSkipped, Payload: payload}
 		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			if workflowEntry != nil {
 				applyWorkflowStateEntry(status, *workflowEntry)
 			}
+
 			applyAttemptOutcomeConsumption(status, event, consumeAttemptID)
 			applyStepSkipped(status, SkippedStep{
 				StepID:        req.StepID,
@@ -269,14 +332,17 @@ func (s *Store) RecordStepSkipContext(ctx context.Context, runID string, req Rec
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
 		})
+
 		return err
 	})
 	if err != nil {
 		if statusBackedEventPossiblyCommitted(err) {
 			return status, event, err
 		}
+
 		return Status{}, Event{}, err
 	}
+
 	return status, event, nil
 }
 
@@ -286,31 +352,42 @@ func (s *Store) ResolveHumanBlock(runID, reason string, at time.Time) (Status, E
 	if err := validateRunID(runID); err != nil {
 		return Status{}, Event{}, err
 	}
+
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return Status{}, Event{}, stableerr.New("--reason is required for --resolve-block and must be non-empty after trimming")
 	}
+
 	at = normalizeTime(at)
-	var status Status
-	var event Event
+
+	var (
+		status Status
+		event  Event
+	)
+
 	err := s.withRunLock(runID, func() error {
 		run, err := s.load(runID)
 		if err != nil {
 			return err
 		}
+
 		if run.Status.WorkflowLoop.HardCapBlock != nil {
 			return stableerr.Errorf("run %q is blocked by a workflow-loop hard cap; next action is orc run continue %s --allow-loop-cap after human review", runID, runID)
 		}
+
 		if run.Status.ActiveAttempt != nil {
 			return stableerr.Errorf("run %q has active attempt %q; wait, recover, or inspect before continuing", runID, run.Status.ActiveAttempt.AttemptID)
 		}
+
 		if run.Status.State != stateBlockedHuman {
 			return stableerr.Errorf("run %q state is %q; run is not in a resumable blocked state; inspect the run or start a new workflow as appropriate", runID, run.Status.State)
 		}
+
 		attempt, ok := latestResolvableBlockedAttempt(run.Status)
 		if !ok {
 			return stableerr.Errorf("run %q has no terminal blocked attempt that can be resolved; inspect the run or start a new workflow", runID)
 		}
+
 		payload, err := marshalPayload(runContinuedPayload{
 			Mode:              ContinueModeResolveBlock,
 			PreviousState:     stateBlockedHuman,
@@ -324,6 +401,7 @@ func (s *Store) ResolveHumanBlock(runID, reason string, at time.Time) (Status, E
 		if err != nil {
 			return err
 		}
+
 		event = Event{Time: at, Type: eventRunContinued, Payload: payload}
 		status, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			applyRunContinued(status, runContinuedPayload{
@@ -339,14 +417,17 @@ func (s *Store) ResolveHumanBlock(runID, reason string, at time.Time) (Status, E
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
 		})
+
 		return err
 	})
 	if err != nil {
 		if statusBackedEventPossiblyCommitted(err) {
 			return status, event, err
 		}
+
 		return Status{}, Event{}, err
 	}
+
 	return status, event, nil
 }
 
@@ -354,7 +435,9 @@ func nextWorkflowStateEntry(status Status, req WorkflowStateEntryRequest) (Workf
 	if req.State == "" {
 		return WorkflowStateEntry{}, stableerr.New("workflow state entry state is required")
 	}
+
 	count := status.WorkflowLoop.Counts[req.State] + 1
+
 	return WorkflowStateEntry{
 		Workflow:      status.Workflow,
 		State:         req.State,
@@ -370,7 +453,9 @@ func applyWorkflowStateEntry(status *Status, entry WorkflowStateEntry) {
 	if status.WorkflowLoop.Counts == nil {
 		status.WorkflowLoop.Counts = map[string]int{}
 	}
+
 	status.WorkflowLoop.Counts[entry.State] = entry.Count
+
 	status.WorkflowLoop.Entries = append(status.WorkflowLoop.Entries, entry)
 	if entry.Repeated && !slices.Contains(status.WorkflowLoop.RepeatedStates, entry.State) {
 		status.WorkflowLoop.RepeatedStates = append(status.WorkflowLoop.RepeatedStates, entry.State)
@@ -381,6 +466,7 @@ func applyWorkflowLoopSoftCap(status *Status, loopCap WorkflowLoopSoftCap) {
 	if workflowSoftCapRecorded(status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, loopCap.State) {
 		return
 	}
+
 	status.WorkflowLoop.SoftCapWarnings = append(status.WorkflowLoop.SoftCapWarnings, loopCap)
 }
 
@@ -434,16 +520,19 @@ func validateRunContinuedPayload(status Status, payload runContinuedPayload) err
 	case status.WorkflowLoop.HardCapBlock != nil:
 		return stableerr.New("run continued resolve_block is not valid for active workflow-loop hard-cap block")
 	}
+
 	attempt, ok := latestResolvableBlockedAttempt(status)
 	if !ok {
 		return stableerr.New("run continued resolve_block requires latest terminal blocked attempt")
 	}
+
 	if payload.ResolvedAttemptID != attempt.AttemptID ||
 		payload.ResolvedStepID != attempt.StepID ||
 		payload.ResolvedStatus != attempt.Status ||
 		payload.ResolvedResult != attempt.Result {
 		return stableerr.New("run continued resolved attempt fields do not match latest terminal blocked attempt")
 	}
+
 	return nil
 }
 
@@ -467,9 +556,11 @@ func validateWorkflowStepSkippedPayload(status Status, event Event, payload work
 	case status.State != stateRunning:
 		return SkippedStep{}, stableerr.Errorf("event %d skips step while run state is %q, want %q", event.Sequence, status.State, stateRunning)
 	}
+
 	if err := validateAttemptOutcomeConsumption(status, payload.ConsumeAttemptID); err != nil {
 		return SkippedStep{}, fmt.Errorf("event %d workflow.step_skipped consume_attempt_id: %w", event.Sequence, err)
 	}
+
 	return SkippedStep{
 		StepID:        payload.StepID,
 		Status:        payload.Status,
@@ -494,6 +585,7 @@ func validateWorkflowLoopSoftCap(loopCap WorkflowLoopSoftCap) error {
 	case loopCap.Hard <= 0:
 		return stableerr.Errorf("workflow loop soft cap hard must be > 0, got %d", loopCap.Hard)
 	}
+
 	return nil
 }
 
@@ -514,6 +606,7 @@ func validateWorkflowLoopHardCap(loopCap WorkflowLoopHardCap) error {
 	case loopCap.Reason != WorkflowLoopHardCapReason:
 		return stableerr.Errorf("workflow loop hard cap reason = %q, want %q", loopCap.Reason, WorkflowLoopHardCapReason)
 	}
+
 	return nil
 }
 
@@ -536,6 +629,7 @@ func validateWorkflowLoopHardCapOverride(override WorkflowLoopHardCapOverride) e
 	case override.Reason != WorkflowLoopHardCapReason:
 		return stableerr.Errorf("workflow loop hard-cap override reason = %q, want %q", override.Reason, WorkflowLoopHardCapReason)
 	}
+
 	return nil
 }
 
@@ -543,6 +637,7 @@ func validateWorkflowLoopHardCapOverrideConsumption(status Status, entry Workflo
 	if err := validateWorkflowLoopHardCapOverride(override); err != nil {
 		return err
 	}
+
 	pending := status.WorkflowLoop.PendingHardCapOverride
 	switch {
 	case pending == nil:
@@ -558,6 +653,7 @@ func validateWorkflowLoopHardCapOverrideConsumption(status Status, entry Workflo
 	case status.WorkflowLoop.Counts[entry.State] != override.CountBeforeOverride:
 		return stableerr.Errorf("workflow loop hard-cap override count before = %d, want current count %d", override.CountBeforeOverride, status.WorkflowLoop.Counts[entry.State])
 	}
+
 	return nil
 }
 
@@ -565,6 +661,7 @@ func applyReplayedWorkflowStateEntry(status *Status, event Event, entry *Workflo
 	if entry == nil {
 		return nil
 	}
+
 	switch {
 	case entry.Workflow != status.Workflow:
 		return stableerr.Errorf("event %d workflow state entry workflow %q does not match status workflow %q", event.Sequence, entry.Workflow, status.Workflow)
@@ -575,7 +672,9 @@ func applyReplayedWorkflowStateEntry(status *Status, event Event, entry *Workflo
 	case entry.Repeated != (entry.Count > 1):
 		return stableerr.Errorf("event %d workflow state entry %q repeated = %t, want %t", event.Sequence, entry.State, entry.Repeated, entry.Count > 1)
 	}
+
 	applyWorkflowStateEntry(status, *entry)
+
 	return nil
 }
 
@@ -583,5 +682,6 @@ func normalizeTime(value time.Time) time.Time {
 	if value.IsZero() {
 		return time.Now().UTC()
 	}
+
 	return value.UTC()
 }

@@ -31,29 +31,37 @@ func LoadContext(ctx context.Context, root, runID string) (Context, error) {
 	if ctx == nil {
 		return Context{}, stableerr.Errorf("context is required")
 	}
+
 	if err := ctx.Err(); err != nil {
 		return Context{}, fmt.Errorf("load context: %w", err)
 	}
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		return Context{}, fmt.Errorf("load context: %w", err)
 	}
+
 	run, err := store.LoadContext(ctx, runID)
 	if err != nil {
 		return Context{}, fmt.Errorf("load context: %w", err)
 	}
+
 	if err := ctx.Err(); err != nil {
 		return Context{}, fmt.Errorf("load context: %w", err)
 	}
+
 	snapshot, err := configsnapshot.LoadCurrent(run)
 	if err != nil {
 		return Context{}, fmt.Errorf("load context: %w", err)
 	}
+
 	project := snapshot.Project
+
 	workflowConfig, ok := project.Workflows[run.Status.Workflow]
 	if !ok {
 		return Context{}, stableerr.Errorf("workflow %q from run %q is not configured", run.Status.Workflow, run.ID)
 	}
+
 	return Context{
 		Project:                  project,
 		Workflow:                 workflowConfig,

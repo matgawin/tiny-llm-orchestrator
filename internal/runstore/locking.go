@@ -19,6 +19,8 @@ var (
 	runLockWaitObserver   func(string)
 )
 
+const flockRetryInterval = 10 * time.Millisecond
+
 type contextRunLock struct {
 	ch chan struct{}
 }
@@ -33,6 +35,7 @@ func (l *contextRunLock) lock(ctx context.Context, lockName string) error {
 		return nil
 	default:
 		observeRunLockWait(lockName)
+
 		select {
 		case l.ch <- struct{}{}:
 			return nil
@@ -56,6 +59,7 @@ func SetRunLockWaitObserverForTest(observer func(string)) func() {
 	previous := runLockWaitObserver
 	runLockWaitObserver = observer
 	runLockWaitObserverMu.Unlock()
+
 	return func() {
 		runLockWaitObserverMu.Lock()
 		runLockWaitObserver = previous
@@ -67,6 +71,7 @@ func observeRunLockWait(lockName string) {
 	runLockWaitObserverMu.Lock()
 	observer := runLockWaitObserver
 	runLockWaitObserverMu.Unlock()
+
 	if observer != nil {
 		observer(lockName)
 	}
@@ -76,22 +81,28 @@ func (s *Store) lockRunsDir(ctx context.Context) (func(), error) {
 	if ctx == nil {
 		return nil, stableerr.New("context is required")
 	}
+
 	if err := validateRunsDir(s.orcDir, s.runsDir); err != nil {
 		return nil, fmt.Errorf("runs directory: %w", err)
 	}
+
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("lock runs dir: %w", err)
 	}
+
 	lockPath := filepath.Join(s.runsDir, ".lock")
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600) // #nosec G304,G703 -- lock path is scoped to the validated runs directory.
+
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, runFilePerm) // #nosec G304,G703 -- lock path is scoped to the validated runs directory.
 	if err != nil {
 		return nil, fmt.Errorf("lock runs dir: %w", err)
 	}
+
 	fd := int(file.Fd()) // #nosec G115 -- file descriptors fit int on supported Linux targets.
 	if err := flockExclusiveContext(ctx, fd, "runs-directory"); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
+
 	return func() {
 		_ = syscall.Flock(fd, syscall.LOCK_UN)
 		_ = file.Close()
@@ -104,14 +115,17 @@ func flockExclusiveContext(ctx context.Context, fd int, lockName string) error {
 		if err == nil {
 			return nil
 		}
+
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
 			return fmt.Errorf("flock exclusive context: %w", err)
 		}
+
 		observeRunLockWait(lockName)
+
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("flock exclusive context: %w", ctx.Err())
-		case <-time.After(10 * time.Millisecond):
+		case <-time.After(flockRetryInterval):
 		}
 	}
 }
@@ -124,61 +138,79 @@ func (s *Store) withRunLockContext(ctx context.Context, runID string, fn func() 
 	if ctx == nil {
 		return stableerr.New("context is required")
 	}
+
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("with run lock context: %w", err)
 	}
+
 	unlockRuns, err := s.lockRunsDir(ctx)
 	if err != nil {
 		return err
 	}
+
 	runsReleased := false
+
 	releaseRuns := func() {
 		if !runsReleased {
 			unlockRuns()
+
 			runsReleased = true
 		}
 	}
 	defer releaseRuns()
+
 	runDir := s.runDir(runID)
 	if err := validateDir(runDir); err != nil {
 		return fmt.Errorf("run %q directory: %w", runID, err)
 	}
+
 	localLockValue, _ := runLocks.LoadOrStore(runDir, newContextRunLock())
+
 	localLock, ok := localLockValue.(*contextRunLock)
 	if !ok {
 		return stableerr.Errorf("run %q lock has unexpected type %T", runID, localLockValue)
 	}
+
 	if err := localLock.lock(ctx, runID); err != nil {
 		return err
 	}
 	defer localLock.unlock()
+
 	lockPath := filepath.Join(runDir, ".lock")
 	if err := validateRunLockFile(lockPath); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600) // #nosec G304,G703 -- lock path is scoped to a validated run directory and O_NOFOLLOW rejects symlinks.
+
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, runFilePerm) // #nosec G304,G703 -- lock path is scoped to a validated run directory and O_NOFOLLOW rejects symlinks.
 	if err != nil {
 		return fmt.Errorf("with run lock context: %w", err)
 	}
+
 	defer func() {
 		_ = file.Close()
 	}()
+
 	if info, err := file.Stat(); err != nil {
 		return fmt.Errorf("with run lock context: %w", err)
 	} else if !info.Mode().IsRegular() {
 		return stableerr.Errorf("run %q lock is not a regular file", runID)
 	}
+
 	fd := int(file.Fd()) // #nosec G115 -- file descriptors fit int on supported Linux targets.
 	if err := flockExclusiveContext(ctx, fd, runID); err != nil {
 		return err
 	}
+
 	defer func() {
 		_ = syscall.Flock(fd, syscall.LOCK_UN)
 	}()
+
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("with run lock context: %w", err)
 	}
+
 	releaseRuns()
+
 	return fn()
 }
 
@@ -187,8 +219,10 @@ func validateRunLockFile(lockPath string) error {
 	if os.IsNotExist(err) {
 		return nil
 	}
+
 	if err != nil {
 		return fmt.Errorf("validate run lock file: %w", err)
 	}
+
 	return validateFileInfo("run lock", info)
 }

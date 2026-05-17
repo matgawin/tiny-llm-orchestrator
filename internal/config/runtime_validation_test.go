@@ -25,28 +25,36 @@ func TestLoadValidRuntimeDescriptors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	codex := project.Runtimes["codex"]
 	if codex.ID != "codex" {
 		t.Fatalf("codex runtime id = %q, want codex", codex.ID)
 	}
+
 	if got, want := codex.Command.Executable, "codex"; got != want {
 		t.Fatalf("codex executable = %q, want %q", got, want)
 	}
+
 	if !codex.Model.Supported {
 		t.Fatal("codex model.supported = false, want true")
 	}
+
 	if len(codex.Model.Allowed) != 0 {
 		t.Fatalf("codex model.allowed = %v, want empty pass-through list", codex.Model.Allowed)
 	}
+
 	if !codex.Reasoning.Supported {
 		t.Fatal("codex reasoning.supported = false, want true")
 	}
+
 	if got, want := codex.Reasoning.Default, "medium"; got != want {
 		t.Fatalf("codex reasoning.default = %q, want %q", got, want)
 	}
+
 	if got, want := project.Runtimes["fileai"].Prompt.Delivery, "file"; got != want {
 		t.Fatalf("fileai prompt.delivery = %q, want %q", got, want)
 	}
+
 	if got, want := project.Runtimes["fileai"].Sandbox.Requirements.Env.Set["ORC_RUNTIME"], "fileai"; got != want {
 		t.Fatalf("fileai sandbox env = %q, want %q", got, want)
 	}
@@ -134,8 +142,10 @@ func TestLoadRuntimeSelectionAllowlistValidation(t *testing.T) {
 				if _, err := Load(root); err != nil {
 					t.Fatalf("Load returned error: %v", err)
 				}
+
 				return
 			}
+
 			assertLoadErrorContains(t, root, tt.contains...)
 		})
 	}
@@ -156,30 +166,36 @@ prompt:
   delivery: stdin
 model:
 `)
+
 	if options.selection == "model" {
 		writeRuntimeSelectionDescriptorFields(&builder, options)
 	} else {
 		builder.WriteString("  supported: false\n")
 	}
+
 	if options.selection == "reasoning" {
 		builder.WriteString("reasoning:\n")
 		writeRuntimeSelectionDescriptorFields(&builder, options)
 		builder.WriteString(`  args: [--reasoning, "{reasoning}"]
 `)
 	}
+
 	builder.WriteString(`directories:
   supported: false
 sandbox:
   supported: true
 `)
+
 	return builder.String()
 }
 
 func writeRuntimeSelectionDescriptorFields(builder *strings.Builder, options runtimeSelectionDescriptorOptions) {
 	builder.WriteString("  supported: true\n")
+
 	if options.defaultName != "" {
 		builder.WriteString("  default: " + options.defaultName + "\n")
 	}
+
 	if options.allowed != nil {
 		builder.WriteString("  allowed: [" + strings.Join(options.allowed, ", ") + "]\n")
 	}
@@ -235,13 +251,16 @@ sandbox:
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	requirements := project.Runtimes["custom"].Sandbox.Requirements
 	if got := requirements.Mounts[0].ID; got != "config_home" {
 		t.Fatalf("extended mount id = %q, want config_home", got)
 	}
+
 	if got := requirements.Env.SetFromMount["CUSTOM_HOME"].Mount; got != "config_home" {
 		t.Fatalf("set_from_mount mount = %q, want config_home", got)
 	}
+
 	if got := requirements.Mounts[1].Target.Path; got != "/workspace/.orc/cache/custom" {
 		t.Fatalf("simple mount target = %q, want legacy scalar target", got)
 	}
@@ -331,6 +350,7 @@ func TestLoadRejectsInvalidRuntimeSandboxRequirementExtendedSchema(t *testing.T)
 			if env == "" {
 				env = "      set: {}\n"
 			}
+
 			root := writeMinimalProject(t, projectFixture{
 				config: configWithRuntimes(map[string]string{"custom": "runtimes/custom.yaml"}),
 				workflow: workflowYAML(t, func(workflow Workflow) Workflow {
@@ -825,13 +845,16 @@ func TestLoadRejectsUnsafeRuntimeReferences(t *testing.T) {
 		})
 		outside := filepath.Join(t.TempDir(), "codex.yaml")
 		writeFile(t, outside, validCodexRuntimeDescriptor())
+
 		runtimePath := filepath.Join(root, ".orc", "runtimes", "codex.yaml")
 		if err := os.Remove(runtimePath); err != nil {
 			t.Fatalf("remove runtime fixture: %v", err)
 		}
+
 		if err := os.Symlink(outside, runtimePath); err != nil {
 			t.Fatalf("create symlink: %v", err)
 		}
+
 		assertLoadErrorContains(t, root, `runtime "codex" path "runtimes/codex.yaml": path must not escape .orc`)
 	})
 }
@@ -845,9 +868,11 @@ agents:
   planner: agents/planner.md
 runtimes:
 `)
+
 	for id, path := range runtimes {
 		config.WriteString("  " + id + ": " + path + "\n")
 	}
+
 	return config.String()
 }
 

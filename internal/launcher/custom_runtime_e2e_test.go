@@ -24,6 +24,7 @@ func TestLaunchNextRunsCustomRuntimeWithStdinPromptAndModeArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			recordPath := filepath.Join(root, "runtime-record.txt")
+
 			runID := writeCustomRuntimeLauncherProject(t, root, customRuntimeProject{
 				RecordPath:     recordPath,
 				PromptDelivery: runtimePromptDeliveryStdin,
@@ -52,12 +53,15 @@ func TestLaunchNextRunsCustomRuntimeWithStdinPromptAndModeArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LaunchNext returned error: %v", err)
 			}
+
 			if !result.Launched {
 				t.Fatal("Launched = false, want true")
 			}
+
 			if result.Attempt.State != runstore.AttemptStateMissingReport || result.Attempt.Result != resultMissingReport {
 				t.Fatalf("attempt = %+v, want missing_report after fixture exit", result.Attempt)
 			}
+
 			record := string(readLauncherFile(t, recordPath))
 			assertRecordContains(t, record,
 				"arg:0=--mode",
@@ -105,9 +109,11 @@ func TestLaunchNextCustomRuntimeFilePromptStepOverridesModelAndRuntime(t *testin
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
+
 	if !result.Launched {
 		t.Fatal("Launched = false, want true")
 	}
+
 	if _, err := os.Stat(fallbackRecordPath); !os.IsNotExist(err) {
 		t.Fatalf("fallback runtime record stat error = %v, want not launched", err)
 	}
@@ -173,13 +179,16 @@ func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LaunchNext returned error: %v", err)
 			}
+
 			if !result.Launched {
 				t.Fatal("Launched = false, want true")
 			}
+
 			record := string(readLauncherFile(t, recordPath))
 			if tt.want != "" {
 				assertRecordContains(t, record, tt.want)
 			}
+
 			assertRecordNotContains(t, record, tt.notWant...)
 		})
 	}
@@ -240,11 +249,14 @@ func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) 
 			if err != nil {
 				t.Fatalf("LaunchNext returned error after live config mutation: %v", err)
 			}
+
 			if !result.Launched {
 				t.Fatal("Launched = false, want snapshot-backed launch")
 			}
+
 			record := string(readLauncherFile(t, recordPath))
 			assertRecordContains(t, record, tt.wantRecord)
+
 			if !strings.Contains(record, "prompt_file_content:# Tiny Orc Worker Prompt") {
 				t.Fatalf("record = %q, want prompt from snapshot-backed launch", record)
 			}
@@ -278,12 +290,14 @@ type customRuntimeWorkflow struct {
 
 func writeCustomRuntimeLauncherProject(t *testing.T, root string, project customRuntimeProject) string {
 	t.Helper()
+
 	orcDir := filepath.Join(root, ".orc")
 	for _, dir := range []string{"agents", "runtimes", "workflows"} {
 		if err := os.MkdirAll(filepath.Join(orcDir, dir), 0o750); err != nil {
 			t.Fatalf("create %s dir: %v", dir, err)
 		}
 	}
+
 	configYAML := `version: 1
 workflows:
   implementation: workflows/implementation.yaml
@@ -295,22 +309,27 @@ runtimes:
 	if project.FallbackRecordPath != "" {
 		configYAML += "  fallback: runtimes/fallback.yaml\n"
 	}
+
 	if project.IncludeSandbox {
 		configYAML += `sandbox:
   command:
     argv: ["sh", "-c", "true"]
 `
 	}
+
 	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), configYAML)
 	writeLauncherFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
 	fixturePath := runtimeRecorderFixturePath(t)
 	writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", fixturePath, project.RecordPath, project.PromptDelivery, project.Runtime))
+
 	if project.FallbackRecordPath != "" {
 		writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "fallback.yaml"), customRuntimeYAML("fallback", fixturePath, project.FallbackRecordPath, project.PromptDelivery, project.Runtime))
 	}
+
 	writeLauncherFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), customRuntimeWorkflowYAML(project.Workflow))
 
 	store := openLauncherStore(t, root)
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        "custom-runtime-run",
 		Workflow:     "implementation",
@@ -320,7 +339,9 @@ runtimes:
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	writeLauncherConfigSnapshot(t, root, store, run.ID)
+
 	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    "task",
@@ -329,6 +350,7 @@ runtimes:
 	}); err != nil {
 		t.Fatalf("WriteArtifact task returned error: %v", err)
 	}
+
 	return run.ID
 }
 
@@ -340,37 +362,48 @@ func customRuntimeYAML(id, executable, recordPath, delivery string, descriptor c
 	out.WriteString("  normal_args: [--mode, normal]\n")
 	out.WriteString("  sandbox_args: [--mode, sandbox]\n")
 	out.WriteString("  args: [--record, " + strconv.Quote(filepath.ToSlash(recordPath)))
+
 	if delivery == runtimePromptDeliveryFile {
 		out.WriteString(", --prompt-file, \"{prompt_file}\"")
 	}
+
 	out.WriteString("]\n")
 	out.WriteString("prompt:\n  delivery: " + delivery + "\n")
 	out.WriteString("model:\n")
 	out.WriteString("  supported: " + strconv.FormatBool(descriptor.ModelSupported) + "\n")
 	out.WriteString("  required: false\n")
+
 	if descriptor.ModelSupported {
 		if descriptor.ModelDefault != "" {
 			out.WriteString("  default: " + strconv.Quote(descriptor.ModelDefault) + "\n")
 		}
+
 		out.WriteString("  allowed: []\n")
 		out.WriteString("  args: [--model, \"{model}\"]\n")
 	}
+
 	out.WriteString("directories:\n")
 	out.WriteString("  supported: " + strconv.FormatBool(descriptor.DirsSupported) + "\n")
+
 	if descriptor.DirsSupported {
 		out.WriteString("  args: [--dir, \"{dir}\"]\n")
 	}
+
 	out.WriteString("sandbox:\n  supported: true\n  required: false\n")
+
 	return out.String()
 }
 
 func runtimeRecorderFixturePath(t *testing.T) string {
 	t.Helper()
+
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve runtime recorder fixture: runtime.Caller failed")
 	}
+
 	path := filepath.Join(filepath.Dir(file), "testdata", "runtime-recorder.sh")
+
 	return filepath.ToSlash(path)
 }
 
@@ -388,20 +421,26 @@ defaults:
   report_exit_grace: 30ms
   retries: {}
 `)
+
 	if workflow.DefaultsRuntime != "" {
 		out.WriteString("  runtime: " + workflow.DefaultsRuntime + "\n")
 	}
+
 	if workflow.DefaultsModel != "" {
 		out.WriteString("  model: " + workflow.DefaultsModel + "\n")
 	}
+
 	writeRuntimeDirsYAML(&out, "  ", "runtime_dirs", workflow.DefaultsDirs)
 	out.WriteString("steps:\n  code:\n    agent: coder\n")
+
 	if workflow.StepRuntime != "" {
 		out.WriteString("    runtime: " + workflow.StepRuntime + "\n")
 	}
+
 	if workflow.StepModel != "" {
 		out.WriteString("    model: " + workflow.StepModel + "\n")
 	}
+
 	writeRuntimeDirsYAML(&out, "    ", "runtime_dirs", workflow.StepDirs)
 	out.WriteString(`    allowed_results:
       done: [ready]
@@ -412,6 +451,7 @@ defaults:
       failed/process_error: blocked_for_human
       failed/timeout: blocked_for_human
 `)
+
 	return out.String()
 }
 
@@ -419,7 +459,9 @@ func writeRuntimeDirsYAML(out *strings.Builder, indent, key string, dirs []strin
 	if len(dirs) == 0 {
 		return
 	}
+
 	out.WriteString(indent + key + ":\n")
+
 	for _, dir := range dirs {
 		out.WriteString(indent + "  - " + strconv.Quote(dir) + "\n")
 	}
@@ -427,6 +469,7 @@ func writeRuntimeDirsYAML(out *strings.Builder, indent, key string, dirs []strin
 
 func assertRecordContains(t *testing.T, record string, wants ...string) {
 	t.Helper()
+
 	for _, want := range wants {
 		if !strings.Contains(record, want) {
 			t.Fatalf("record = %q, want %q", record, want)
@@ -436,6 +479,7 @@ func assertRecordContains(t *testing.T, record string, wants ...string) {
 
 func assertRecordNotContains(t *testing.T, record string, notWants ...string) {
 	t.Helper()
+
 	for _, notWant := range notWants {
 		if strings.Contains(record, notWant) {
 			t.Fatalf("record = %q, did not want %q", record, notWant)

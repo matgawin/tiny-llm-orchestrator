@@ -16,9 +16,11 @@ func readYAML(realOrcDir, path string, out any) error {
 	if err != nil {
 		return err
 	}
+
 	if err := yaml.Unmarshal(content, out); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
+
 	return nil
 }
 
@@ -29,10 +31,12 @@ func readConfigFile(realOrcDir, path string) ([]byte, error) {
 	if err := validateResolvedUnderDir(realOrcDir, path); err != nil {
 		return nil, err
 	}
+
 	content, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("read config file %s: %w", path, err)
 	}
+
 	return content, nil
 }
 
@@ -40,19 +44,23 @@ func resolveOrcRelativePath(orcDir, realOrcDir, relPath string) (string, error) 
 	if relPath == "" {
 		return "", stableerr.New("path is required")
 	}
+
 	if filepath.IsAbs(relPath) {
 		return "", stableerr.New("path must be relative to .orc")
 	}
+
 	clean := filepath.Clean(relPath)
 	if invalidBaseRelativePath(clean) {
 		return "", stableerr.New("path must not escape .orc")
 	}
+
 	path := filepath.Join(orcDir, clean)
 	// Resolve referenced workflow/agent paths early so path errors are reported
 	// against the config reference before the file read guard runs.
 	if err := validateResolvedUnderDir(realOrcDir, path); err != nil {
 		return "", err
 	}
+
 	return path, nil
 }
 
@@ -61,13 +69,16 @@ func validateResolvedUnderDir(realDir, path string) error {
 	if err != nil {
 		return fmt.Errorf("validate resolved under dir: %w", err)
 	}
+
 	rel, err := filepath.Rel(realDir, realPath)
 	if err != nil {
 		return fmt.Errorf("resolve path relative to .orc: %w", err)
 	}
+
 	if invalidBaseRelativePath(rel) {
 		return stableerr.New("path must not escape .orc")
 	}
+
 	return nil
 }
 

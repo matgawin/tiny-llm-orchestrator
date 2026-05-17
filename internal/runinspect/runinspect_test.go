@@ -28,10 +28,12 @@ func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	if _, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    "task",
@@ -76,6 +78,7 @@ func TestNextShowsSelectedStepWithoutLaunching(t *testing.T) {
 		"agent: planner\n",
 		"launch: not launched\n",
 	})
+
 	after := snapshotRunDir(t, root, runID)
 	if !maps.Equal(before, after) {
 		t.Fatalf("Next mutated run directory:\nbefore: %+v\nafter: %+v", before, after)
@@ -111,12 +114,14 @@ steps:
 	if err := Next(context.Background(), Options{Root: root, RunID: runID, Stdout: &stdout}); err != nil {
 		t.Fatalf("Next returned error after live workflow mutation: %v", err)
 	}
+
 	output := stdout.String()
 	assertContainsAll(t, "next", output, []string{
 		"decision: select_step\n",
 		"selected_step: plan\n",
 		"agent: planner\n",
 	})
+
 	if strings.Contains(output, "selected_step: review") {
 		t.Fatalf("Next used live workflow mutation:\n%s", output)
 	}
@@ -139,6 +144,7 @@ func TestConfigShowsSnapshotMetadataAndRefreshHistoryWithoutLiveConfig(t *testin
 	}); err != nil {
 		t.Fatalf("Refresh returned error: %v", err)
 	}
+
 	writeInspectFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
 
 	var stdout bytes.Buffer
@@ -188,10 +194,12 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	if _, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    "task",
@@ -200,6 +208,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordStepSkip(runID, runstore.RecordStepSkipRequest{
 		StepID: "plan",
 		Reason: "not worth another review",
@@ -222,6 +231,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 	if err := Status(context.Background(), Options{Root: root, RunID: runID, Stdout: &statusOut}); err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
+
 	assertContainsAll(t, "status", statusOut.String(), []string{
 		"skipped_steps:\n",
 		"  - step_id: plan\n",
@@ -234,6 +244,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 	if err := SummaryContext(context.Background(), Options{Root: root, RunID: runID, Stdout: &summaryOut}); err != nil {
 		t.Fatalf("SummaryContext returned error: %v", err)
 	}
+
 	wording := "step plan skipped by human decision: not worth another review"
 	if got := strings.Count(summaryOut.String(), wording); got != 1 {
 		t.Fatalf("summary skip wording count = %d, want 1\n%s", got, summaryOut.String())
@@ -244,10 +255,12 @@ func TestStatusAndNextShowActiveAttempt(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
 		StepID:          "plan",
 		AgentID:         "planner",
@@ -277,10 +290,12 @@ func TestNextRoutesExhaustedLauncherOutcome(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	recordMissingReportAttempt(t, store, runID, "attempt-missing-report")
 
 	status, next := inspectStatusAndNext(t, root, runID)
@@ -296,6 +311,7 @@ func TestNextRoutesExhaustedLauncherOutcome(t *testing.T) {
 		"retry_count: 0/0\n",
 		"transition: failed/missing_report -> blocked_for_human\n",
 	}
+
 	assertContainsAll(t, "status", status, statusOnly)
 	assertBothOutputsContain(t, status, next, terminalOutcome)
 	assertContainsAll(t, "next", next, []string{
@@ -308,11 +324,14 @@ func TestStatusAndNextShowInvalidReportOutcome(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	recordLaunchedAttempt(t, store, runID, "attempt-invalid-report")
+
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateInvalidReport,
 		Report: runstore.Report{
@@ -349,10 +368,12 @@ func TestStatusAndNextShowExhaustedRetryCountFromWorkflowPolicy(t *testing.T) {
 		Retries:          map[string]int{"failed/missing_report": 2},
 	})
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	recordRetriedMissingReportAttempt(t, store, runID, 2)
 
 	status, next := inspectStatusAndNext(t, root, runID)
@@ -366,11 +387,14 @@ func TestNextRoutesValidReportedOutcome(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	recordLaunchedAttempt(t, store, runID, "attempt-reported")
+
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -401,6 +425,7 @@ func TestNextRoutesValidReportedOutcome(t *testing.T) {
 		"launch: no worker should launch\n",
 		"review_state: ready_for_human; no more workers should launch\n",
 	})
+
 	if strings.Contains(next, forbiddenLegacyPendingWorkerOutcome) {
 		t.Fatalf("next output contains legacy pending worker outcome for valid report:\n%s", next)
 	}
@@ -410,11 +435,14 @@ func TestStatusRoutesValidReportedOutcomeToBlockedForHuman(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	recordLaunchedAttempt(t, store, runID, "attempt-reported")
+
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -453,11 +481,14 @@ func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
 		TwoStep:          true,
 	})
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	recordLaunchedAttempt(t, store, runID, "attempt-reported")
+
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -481,6 +512,7 @@ func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
 		"agent: coder\n",
 		"launch: not launched\n",
 	})
+
 	if strings.Contains(next, forbiddenLegacyPendingWorkerOutcome) {
 		t.Fatalf("next output contains legacy pending worker outcome for valid report:\n%s", next)
 	}
@@ -494,11 +526,14 @@ func TestNextShowsReportedRetryStepOutcome(t *testing.T) {
 		Retries:          map[string]int{"done/ready": 1},
 	})
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	recordLaunchedAttempt(t, store, runID, "attempt-retry")
+
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -529,6 +564,7 @@ func TestNextShowsReportedRetryStepOutcome(t *testing.T) {
 func recordMissingReportAttempt(t *testing.T, store *runstore.Store, runID, attemptID string) {
 	t.Helper()
 	recordLaunchedAttempt(t, store, runID, attemptID)
+
 	if _, _, err := store.FinishAttempt(runID, runstore.FinishAttemptRequest{
 		AttemptID: attemptID,
 		State:     runstore.AttemptStateMissingReport,
@@ -543,9 +579,14 @@ func recordMissingReportAttempt(t *testing.T, store *runstore.Store, runID, atte
 
 func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runID string, retryCount int) {
 	t.Helper()
-	const firstAttemptID = "attempt-missing-report"
-	const retryAttemptID = "attempt-retry"
+
+	const (
+		firstAttemptID = "attempt-missing-report"
+		retryAttemptID = "attempt-retry"
+	)
+
 	recordMissingReportAttempt(t, store, runID, firstAttemptID)
+
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
 		StepID:           "plan",
 		AgentID:          "planner",
@@ -559,7 +600,9 @@ func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runI
 	}); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
+
 	recordAttemptPromptLogAndProcess(t, store, runID, "plan", retryAttemptID, 3200*time.Millisecond)
+
 	if _, _, err := store.FinishAttempt(runID, runstore.FinishAttemptRequest{
 		AttemptID: retryAttemptID,
 		State:     runstore.AttemptStateMissingReport,
@@ -574,6 +617,7 @@ func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runI
 
 func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID, stepID, attemptID string, at time.Duration) {
 	t.Helper()
+
 	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    stepID + "-" + attemptID,
@@ -583,6 +627,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 	if err != nil {
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
@@ -590,6 +635,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 	}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
+
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    stepID + "-" + attemptID,
@@ -599,6 +645,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 	if err != nil {
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
 		AttemptID: attemptID,
 		LogRef:    logRef,
@@ -606,6 +653,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 	}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
+
 	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              12345,
@@ -650,10 +698,12 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		TwoStep:          true,
 	})
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	writeSummaryTaskContext(t, store, runID, "# Task\n\nImplement summary context.")
 	writeSummaryContextVCSSnapshot(t, store, runID, "vcs-pre-run", vcs.Snapshot{
 		SchemaVersion: 1,
@@ -697,6 +747,7 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		name:    "plan",
 		content: []byte("## Plan Report\n"),
 	})
+
 	if _, err := store.RecordFollowup(runID, runstore.RecordFollowupRequest{
 		Followup: runstore.Followup{
 			Title:   "Create manual follow-up",
@@ -707,6 +758,7 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 	}); err != nil {
 		t.Fatalf("RecordFollowup returned error: %v", err)
 	}
+
 	writeSummaryContextVCSSnapshot(t, store, runID, "vcs-post-run", vcs.Snapshot{
 		SchemaVersion: 1,
 		Phase:         vcs.PhasePostRun,
@@ -716,12 +768,14 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		ChangedPaths:  []string{"docs/features/summary-context.md", "internal/runinspect/runinspect.go", "preexisting.md"},
 		Commands:      [][]string{{"jj", "root"}, {"jj", "status"}},
 	}, fixedTime().Add(5*time.Minute))
+
 	if _, _, err := store.UpdateStatus(runID, runstore.StatusUpdate{
 		State: workflow.RunStatusReadyForHuman,
 		Time:  fixedTime().Add(6 * time.Minute),
 	}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
+
 	return runID
 }
 
@@ -732,6 +786,7 @@ type summaryContextReportContent struct {
 
 func recordSummaryContextReport(t *testing.T, store *runstore.Store, runID string, report runstore.Report, at time.Time, content ...summaryContextReportContent) {
 	t.Helper()
+
 	request := runstore.RecordReportRequest{
 		State:  runstore.AttemptStateReported,
 		Report: report,
@@ -742,6 +797,7 @@ func recordSummaryContextReport(t *testing.T, store *runstore.Store, runID strin
 		request.ReportContentSet = true
 		request.ReportName = content[0].name
 	}
+
 	if _, _, err := store.RecordAttemptReport(runID, request); err != nil {
 		t.Fatalf("RecordAttemptReport %s returned error: %v", report.AttemptID, err)
 	}
@@ -749,6 +805,7 @@ func recordSummaryContextReport(t *testing.T, store *runstore.Store, runID strin
 
 func writeSummaryContextVCSSnapshot(t *testing.T, store *runstore.Store, runID, name string, snapshot vcs.Snapshot, at time.Time) {
 	t.Helper()
+
 	if _, err := vcs.WriteSnapshot(context.Background(), store, runID, name, snapshot, at); err != nil {
 		t.Fatalf("WriteSnapshot %s returned error: %v", name, err)
 	}
@@ -765,20 +822,25 @@ func newSummaryContextFixture(t *testing.T, state, taskContext string) summaryCo
 	root := t.TempDir()
 	writeProject(t, root)
 	runID := createRun(t, root, state, nil)
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	writeSummaryTaskContext(t, store, runID, taskContext)
+
 	return summaryContextFixture{root: root, runID: runID, store: store}
 }
 
 func (fixture summaryContextFixture) renderSummaryContext(t *testing.T) string {
 	t.Helper()
+
 	var stdout bytes.Buffer
 	if err := SummaryContext(context.Background(), Options{Root: fixture.root, RunID: fixture.runID, Stdout: &stdout}); err != nil {
 		t.Fatalf("SummaryContext returned error: %v", err)
 	}
+
 	return stdout.String()
 }
 
@@ -818,6 +880,7 @@ func TestSummaryContextUsesLatestVCSSnapshotForPhase(t *testing.T) {
 		"- \"latest.md\"\n",
 		"latest post-run summary",
 	})
+
 	if strings.Contains(output, "stale.md") || strings.Contains(output, "stale post-run summary") {
 		t.Fatalf("summary context used stale VCS snapshot:\n%s", output)
 	}
@@ -858,15 +921,20 @@ func TestSummaryContextQuotesReportScalars(t *testing.T) {
 	}
 	scalar := func(name string) string {
 		t.Helper()
+
 		for _, item := range scalars {
 			if item.name == name {
 				return item.value
 			}
 		}
+
 		t.Fatalf("test scalar %q is not declared", name)
+
 		return ""
 	}
+
 	recordLaunchedAttempt(t, fixture.store, fixture.runID, "attempt-report")
+
 	if _, _, err := fixture.store.RecordAttemptReport(fixture.runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -890,6 +958,7 @@ func TestSummaryContextQuotesReportScalars(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
+
 	if _, _, err := fixture.store.UpdateStatus(fixture.runID, runstore.StatusUpdate{
 		State: workflow.RunStatusReadyForHuman,
 		Time:  fixedTime().Add(3 * time.Minute),
@@ -897,15 +966,18 @@ func TestSummaryContextQuotesReportScalars(t *testing.T) {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
-	wants := []string{
-		`- step: "plan"` + "\n",
-		`- attempt: "attempt-report"` + "\n",
-		`- agent: "planner"` + "\n",
-		`- outcome_status: "done"` + "\n",
-	}
+	wants := make([]string, 0, 4+len(scalars))
+
+	wants = append(wants,
+		`- step: "plan"`+"\n",
+		`- attempt: "attempt-report"`+"\n",
+		`- agent: "planner"`+"\n",
+		`- outcome_status: "done"`+"\n",
+	)
 	for _, item := range scalars {
 		wants = append(wants, fmt.Sprintf(item.want, quoteScalar(item.value)))
 	}
+
 	assertContainsAll(t, "summary context", fixture.renderSummaryContext(t), wants)
 }
 
@@ -925,6 +997,7 @@ func TestSummaryContextLabelsBlockedRunAndMissingPostRunVCS(t *testing.T) {
 func TestSummaryContextBlockedRunIncludesBlockedReportReason(t *testing.T) {
 	fixture := newSummaryContextFixture(t, workflow.RunStatusRunning, "# Blocked task\n")
 	recordLaunchedAttempt(t, fixture.store, fixture.runID, "attempt-blocked")
+
 	if _, _, err := fixture.store.RecordAttemptReport(fixture.runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -957,6 +1030,7 @@ func recordLaunchedAttempt(t *testing.T, store *runstore.Store, runID, attemptID
 
 func recordLaunchedStepAttempt(t *testing.T, store *runstore.Store, runID, stepID, agentID, attemptID string) {
 	t.Helper()
+
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
 		StepID:          stepID,
 		AgentID:         agentID,
@@ -967,11 +1041,13 @@ func recordLaunchedStepAttempt(t *testing.T, store *runstore.Store, runID, stepI
 	}); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
+
 	recordAttemptPromptLogAndProcess(t, store, runID, stepID, attemptID, 1200*time.Millisecond)
 }
 
 func writeSummaryTaskContext(t *testing.T, store *runstore.Store, runID, content string) {
 	t.Helper()
+
 	if _, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    "task",
@@ -1044,6 +1120,7 @@ type terminalPathWants struct {
 
 func terminalPaths(root, runID string) terminalPathWants {
 	runPath := filepath.ToSlash(filepath.Join(root, ".orc", "runs", runID))
+
 	return terminalPathWants{
 		run:       runPath,
 		summaries: filepath.ToSlash(filepath.Join(runPath, "summaries")),
@@ -1102,19 +1179,23 @@ func TestInspectUnknownRunFailsClearly(t *testing.T) {
 
 func inspectStatusAndNext(t *testing.T, root, runID string) (string, string) {
 	t.Helper()
+
 	var statusOut bytes.Buffer
 	if err := Status(context.Background(), Options{Root: root, RunID: runID, Stdout: &statusOut}); err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
+
 	var nextOut bytes.Buffer
 	if err := Next(context.Background(), Options{Root: root, RunID: runID, Stdout: &nextOut}); err != nil {
 		t.Fatalf("Next returned error: %v", err)
 	}
+
 	return statusOut.String(), nextOut.String()
 }
 
 func assertContainsAll(t *testing.T, label, output string, wants []string) {
 	t.Helper()
+
 	for _, want := range wants {
 		if !strings.Contains(output, want) {
 			t.Fatalf("%s output missing %q:\n%s", label, want, output)
@@ -1130,19 +1211,23 @@ func assertBothOutputsContain(t *testing.T, status, next string, wants []string)
 
 func readRunInspectTestdata(t *testing.T, name string) string {
 	t.Helper()
+
 	content, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("read testdata %s: %v", name, err)
 	}
+
 	return string(content)
 }
 
 func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) string {
 	t.Helper()
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
 	}
+
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "inspect-run",
 		Workflow: "implementation",
@@ -1151,34 +1236,42 @@ func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) st
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	writeInspectConfigSnapshot(t, root, store, run.ID)
+
 	if artifact != nil {
 		if _, err := store.WriteArtifact(run.ID, *artifact); err != nil {
 			t.Fatalf("WriteArtifact returned error: %v", err)
 		}
 	}
+
 	if state != workflow.RunStatusRunning {
 		at := fixedTime().Add(time.Minute)
 		if artifact != nil {
 			at = fixedTime().Add(2 * time.Minute)
 		}
+
 		if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: state, Time: at}); err != nil {
 			t.Fatalf("UpdateStatus returned error: %v", err)
 		}
 	}
+
 	return run.ID
 }
 
 func writeInspectConfigSnapshot(t *testing.T, root string, store *runstore.Store, runID string) {
 	t.Helper()
+
 	project, err := config.Load(root)
 	if err != nil {
 		t.Fatalf("Load config returned error: %v", err)
 	}
+
 	snapshot, err := configsnapshot.BuildInitial(project, "implementation", fixedTime())
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
+
 	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
@@ -1200,6 +1293,7 @@ func writeInspectWorkflow(t *testing.T, root, content string) {
 
 func writeInspectFile(t *testing.T, path, content string) {
 	t.Helper()
+
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write inspect file %s: %v", path, err)
 	}
@@ -1207,10 +1301,12 @@ func writeInspectFile(t *testing.T, path, content string) {
 
 func readFile(t *testing.T, path string) []byte {
 	t.Helper()
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read file %s: %v", path, err)
 	}
+
 	return content
 }
 
@@ -1223,6 +1319,7 @@ func TestReportPathsFiltersReports(t *testing.T) {
 		{Kind: runstore.KindTaskContext, Path: "task/context.md"},
 		{Kind: runstore.KindReport, Path: "reports/000002-plan.md"},
 	}
+
 	paths := reportPaths(refs)
 	if want := []string{"reports/000002-plan.md"}; !slices.Equal(paths, want) {
 		t.Fatalf("report paths = %v, want %v", paths, want)
@@ -1231,27 +1328,35 @@ func TestReportPathsFiltersReports(t *testing.T) {
 
 func snapshotRunDir(t *testing.T, root, runID string) map[string]string {
 	t.Helper()
+
 	runDir := filepath.Join(root, ".orc", "runs", runID)
 	snapshot := map[string]string{}
+
 	if err := filepath.WalkDir(runDir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if entry.IsDir() {
 			return nil
 		}
+
 		rel, err := filepath.Rel(runDir, path)
 		if err != nil {
 			return fmt.Errorf("snapshot run dir: %w", err)
 		}
+
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("snapshot run dir: %w", err)
 		}
+
 		snapshot[filepath.ToSlash(rel)] = string(content)
+
 		return nil
 	}); err != nil {
 		t.Fatalf("snapshot run dir: %v", err)
 	}
+
 	return snapshot
 }

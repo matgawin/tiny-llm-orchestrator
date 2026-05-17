@@ -26,6 +26,7 @@ func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 			if len(args) > 0 {
 				return initFlagError(cmd, stderr, stableerr.Errorf("unexpected argument %q", args[0]))
 			}
+
 			return executeInit(opts, stderr)
 		},
 	}
@@ -35,6 +36,7 @@ func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return initFlagError(cmd, stderr, err)
 	})
+
 	return cmd
 }
 
@@ -43,13 +45,16 @@ func executeInit(opts initconfig.Options, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("execute init: %w", err)
 	}
+
 	opts.Root = root
 	if err := initconfig.Run(opts); err != nil {
 		if _, writeErr := fmt.Fprintf(stderr, "%s init: %v\n", appName, err); writeErr != nil {
 			return fmt.Errorf("execute init: %w", writeErr)
 		}
+
 		return fmt.Errorf("execute init: %w", err)
 	}
+
 	return nil
 }
 
@@ -57,9 +62,12 @@ func initFlagError(cmd *cobra.Command, stderr io.Writer, err error) error {
 	if _, writeErr := fmt.Fprintf(stderr, "%s init: %v\n\n", appName, err); writeErr != nil {
 		return fmt.Errorf("init flag error: %w", writeErr)
 	}
+
 	cmd.SetOut(stderr)
+
 	if usageErr := cmd.Usage(); usageErr != nil {
 		return fmt.Errorf("init flag error: %w", usageErr)
 	}
+
 	return fmt.Errorf("%s init: %w", appName, err)
 }

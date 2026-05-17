@@ -16,9 +16,11 @@ func enforceWorkerSandboxGuard(root string, sandboxConfig *config.SandboxConfig)
 	if sandboxConfig == nil || !sandboxConfig.RequireForWorkers {
 		return nil
 	}
+
 	if err := verifyWorkerRepoSandbox(root); err != nil {
 		return workerSandboxGuardError(err)
 	}
+
 	return nil
 }
 
@@ -26,21 +28,26 @@ func verifyWorkerRepoSandbox(root string) error {
 	if os.Getenv("ORC_SANDBOX") != "1" {
 		return errMissingWorkerSandboxMarker
 	}
+
 	markerRoot := os.Getenv("ORC_SANDBOX_ROOT")
 	if markerRoot == "" {
 		return errMissingWorkerSandboxRoot
 	}
+
 	currentRoot, err := canonicalPath(root)
 	if err != nil {
 		return fmt.Errorf("resolve current repo root for sandbox worker guard: %w", err)
 	}
+
 	sandboxRoot, err := canonicalPath(markerRoot)
 	if err != nil {
 		return workerSandboxRootInvalidError{markerRoot: markerRoot, err: err}
 	}
+
 	if sandboxRoot != currentRoot {
 		return workerSandboxRootMismatchError{sandboxRoot: sandboxRoot, currentRoot: currentRoot}
 	}
+
 	return nil
 }
 
@@ -55,10 +62,12 @@ func workerSandboxGuardError(err error) error {
 		if errors.As(err, &invalid) {
 			return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q is invalid: %w", sandboxWorkerGuardGuidance, invalid.markerRoot, invalid.err)
 		}
+
 		var mismatch workerSandboxRootMismatchError
 		if errors.As(err, &mismatch) {
 			return stableerr.Errorf("%s; ORC_SANDBOX_ROOT %q does not match current repo root %q", sandboxWorkerGuardGuidance, mismatch.sandboxRoot, mismatch.currentRoot)
 		}
+
 		return err
 	}
 }
@@ -95,9 +104,11 @@ func canonicalPath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve absolute path %s: %w", path, err)
 	}
+
 	realPath, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", fmt.Errorf("resolve symlinks for %s: %w", abs, err)
 	}
+
 	return realPath, nil
 }

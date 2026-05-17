@@ -30,15 +30,18 @@ func Execute(args []string, stdout, stderr io.Writer) error {
 func ExecuteWithInput(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	root := newRootCommand(stdin, stdout, stderr)
 	root.SetArgs(args)
+
 	err := root.Execute()
 	if err != nil && isRootRoutingError(err) {
 		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
 			return fmt.Errorf("execute with input: %w", writeErr)
 		}
 	}
+
 	if err != nil {
 		return fmt.Errorf("execute with input: %w", err)
 	}
+
 	return nil
 }
 
@@ -54,9 +57,11 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
+
 	if stdin != nil {
 		cmd.SetIn(stdin)
 	}
+
 	cmd.DisableSuggestions = true
 	cmd.CompletionOptions.DisableDefaultCmd = true
 
@@ -86,6 +91,7 @@ func newVersionCommand(stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("new version command: %w", err)
 			}
+
 			return nil
 		},
 	}
@@ -116,6 +122,7 @@ Supported shells are bash, zsh, fish, and powershell.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+
 	return cmd
 }
 
@@ -124,9 +131,11 @@ func completionShellArgs(stderr io.Writer) cobra.PositionalArgs {
 		if len(args) == 1 && args[0] != "" {
 			return nil
 		}
+
 		if len(args) == 0 || args[0] == "" {
 			return completionShellError(cmd, stderr, stableerr.Errorf("requires <shell>"))
 		}
+
 		return completionShellError(cmd, stderr, stableerr.Errorf("accepts exactly one <shell>"))
 	}
 }
@@ -135,10 +144,13 @@ func completionShellError(cmd *cobra.Command, stderr io.Writer, err error) error
 	if _, writeErr := fmt.Fprintf(stderr, "%s completion: %v\n\n", appName, err); writeErr != nil {
 		return fmt.Errorf("completion shell error: %w", writeErr)
 	}
+
 	cmd.SetOut(stderr)
+
 	if usageErr := cmd.Usage(); usageErr != nil {
 		return fmt.Errorf("completion shell error: %w", usageErr)
 	}
+
 	return fmt.Errorf("%s completion: %w", appName, err)
 }
 
@@ -146,7 +158,9 @@ func isRootRoutingError(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	message := err.Error()
+
 	return strings.HasPrefix(message, "unknown command ") || strings.HasPrefix(message, "unknown flag: ")
 }
 
@@ -155,14 +169,17 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
+
 	var cliExit exitError
 	if errors.As(err, &cliExit) {
 		return cliExit.Code
 	}
+
 	var sandboxExit sandbox.ExitError
 	if errors.As(err, &sandboxExit) {
 		return sandboxExit.Code
 	}
+
 	return 1
 }
 
@@ -175,6 +192,7 @@ func (e exitError) Error() string {
 	if e.Err != nil {
 		return e.Err.Error()
 	}
+
 	return fmt.Sprintf("exit code %d", e.Code)
 }
 

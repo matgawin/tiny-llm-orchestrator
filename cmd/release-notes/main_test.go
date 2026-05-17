@@ -21,15 +21,19 @@ func TestParseGitLog(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d commits, want 2", len(got))
 	}
+
 	if got[0].SHA != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 		t.Fatalf("first SHA = %q", got[0].SHA)
 	}
+
 	if got[0].Subject != "feat: add thing" {
 		t.Fatalf("first subject = %q", got[0].Subject)
 	}
+
 	if got[0].Body != "feat: add thing\n\nBody" {
 		t.Fatalf("first body = %q", got[0].Body)
 	}
+
 	if got[1].Subject != "fix: patch thing" {
 		t.Fatalf("second subject = %q", got[1].Subject)
 	}

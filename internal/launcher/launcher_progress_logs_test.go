@@ -15,6 +15,7 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	root, runID := createLauncherRun(t, "200ms")
 
 	var stdout bytes.Buffer
+
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
@@ -25,17 +26,21 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
+
 	if !result.Launched {
 		t.Fatal("Launched = false, want true")
 	}
+
 	if result.Attempt.State != runstore.AttemptStateMissingReport ||
 		result.Attempt.Status != workflow.ReportStatusFailed ||
 		result.Attempt.Result != resultMissingReport {
 		t.Fatalf("attempt = %+v, want failed/missing_report", result.Attempt)
 	}
+
 	if result.Attempt.PromptRef == nil || result.Attempt.LogRef == nil {
 		t.Fatalf("attempt refs = prompt %+v log %+v, want both recorded", result.Attempt.PromptRef, result.Attempt.LogRef)
 	}
+
 	logContent := readLauncherArtifact(t, root, runID, *result.Attempt.LogRef)
 	assertContainsAll(t, string(logContent), []string{
 		"# Tiny Orc Worker Prompt\n",
@@ -44,13 +49,16 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 		"- agent_id: `planner`\n",
 		"- attempt_id: `" + result.Attempt.AttemptID + "`\n",
 	})
+
 	if !strings.Contains(stdout.String(), "launched attempt "+result.Attempt.AttemptID) {
 		t.Fatalf("stdout = %q, want launched attempt", stdout.String())
 	}
+
 	loaded := loadLauncherRun(t, root, runID)
 	if loaded.Status.ActiveAttempt != nil {
 		t.Fatalf("active attempt = %+v, want terminalized", loaded.Status.ActiveAttempt)
 	}
+
 	if got := len(loaded.Status.Attempts); got != 1 {
 		t.Fatalf("attempt history len = %d, want 1", got)
 	}
@@ -59,6 +67,7 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 func TestLaunchNextStreamsLogBeforeWorkerExits(t *testing.T) {
 	root, runID := createLauncherRun(t, "500ms")
 	done := make(chan error, 1)
+
 	go func() {
 		_, err := LaunchNext(context.Background(), Options{
 			Root:    root,
@@ -72,10 +81,12 @@ func TestLaunchNextStreamsLogBeforeWorkerExits(t *testing.T) {
 	eventually(t, time.Second, func() bool {
 		return strings.Contains(allLauncherLogs(t, root, runID), "before-exit")
 	})
+
 	loadedWhileRunning := loadLauncherRun(t, root, runID)
 	if loadedWhileRunning.Status.ActiveAttempt == nil || loadedWhileRunning.Status.ActiveAttempt.LogRef == nil {
 		t.Fatalf("active attempt = %+v, want log ref before worker exits", loadedWhileRunning.Status.ActiveAttempt)
 	}
+
 	if err := <-done; err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}

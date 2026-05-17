@@ -21,27 +21,33 @@ type projectFixture struct {
 
 func workflowYAML(t *testing.T, mutate func(Workflow) Workflow) string {
 	t.Helper()
+
 	workflow := minimalWorkflowSpec()
 	if mutate != nil {
 		workflow = mutate(workflow)
 	}
+
 	content, err := yaml.Marshal(workflow)
 	if err != nil {
 		t.Fatalf("marshal workflow: %v", err)
 	}
+
 	return string(content)
 }
 
 func readConfigTestdata(t *testing.T, name string) string {
 	t.Helper()
+
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve config testdata path")
 	}
+
 	content, err := os.ReadFile(filepath.Join(filepath.Dir(file), "testdata", name))
 	if err != nil {
 		t.Fatalf("read testdata %s: %v", name, err)
 	}
+
 	return string(content)
 }
 
@@ -76,13 +82,16 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 	t.Helper()
 
 	root := t.TempDir()
+
 	orcDir := filepath.Join(root, ".orc")
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o755); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o755); err != nil {
 		t.Fatalf("create workflows dir: %v", err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o755); err != nil {
 		t.Fatalf("create runtimes dir: %v", err)
 	}
@@ -91,17 +100,21 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 	if agents == nil {
 		agents = map[string]string{"planner": validAgentDescriptor("planner")}
 	}
+
 	config := fixture.config
 	if config == "" {
 		config = configForAgents(agents)
 	}
+
 	runtimes := fixture.runtimes
 	if runtimes == nil {
 		runtimes = map[string]string{"codex": validCodexRuntimeDescriptor()}
+
 		if !strings.Contains(config, "\nruntimes:") {
 			config += "runtimes:\n  codex: runtimes/codex.yaml\n"
 		}
 	}
+
 	workflow := fixture.workflow
 	if workflow == "" {
 		workflow = workflowYAML(t, nil)
@@ -109,9 +122,11 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 
 	writeFile(t, filepath.Join(orcDir, "config.yaml"), config)
 	writeFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), workflow)
+
 	for id, descriptor := range agents {
 		writeFile(t, filepath.Join(orcDir, "agents", id+".md"), descriptor)
 	}
+
 	for id, descriptor := range runtimes {
 		writeFile(t, filepath.Join(orcDir, "runtimes", id+".yaml"), descriptor)
 	}
@@ -124,10 +139,12 @@ func configForAgents(agents map[string]string) string {
 	for id := range agents {
 		ids = append(ids, id)
 	}
+
 	sort.Strings(ids)
 
 	var b strings.Builder
 	b.WriteString("version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n")
+
 	for _, id := range ids {
 		b.WriteString("  ")
 		b.WriteString(id)
@@ -135,15 +152,19 @@ func configForAgents(agents map[string]string) string {
 		b.WriteString(id)
 		b.WriteString(".md\n")
 	}
+
 	b.WriteString("runtimes:\n  codex: runtimes/codex.yaml\n")
+
 	return b.String()
 }
 
 func removeOnce(t *testing.T, input, target string) string {
 	t.Helper()
+
 	if !strings.Contains(input, target) {
 		t.Fatalf("workflow removal target missing: %q", target)
 	}
+
 	return strings.Replace(input, target, "", 1)
 }
 
@@ -153,6 +174,7 @@ func validAgentDescriptor(id string) string {
 
 func assertErrorContains(t *testing.T, err error, want string) {
 	t.Helper()
+
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("error = %q, want substring %q", err.Error(), want)
 	}
@@ -160,10 +182,12 @@ func assertErrorContains(t *testing.T, err error, want string) {
 
 func assertLoadErrorContains(t *testing.T, root string, wants ...string) {
 	t.Helper()
+
 	_, err := Load(root)
 	if err == nil {
 		t.Fatal("Load returned nil error, want validation error")
 	}
+
 	for _, want := range wants {
 		assertErrorContains(t, err, want)
 	}
@@ -171,6 +195,7 @@ func assertLoadErrorContains(t *testing.T, root string, wants ...string) {
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
+
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}

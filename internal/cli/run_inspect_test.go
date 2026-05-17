@@ -65,9 +65,11 @@ func TestExecuteRunInspectUnknownRunFailsClearly(t *testing.T) {
 			if err := Execute(tc.args, &stdout, &stderr); err == nil {
 				t.Fatal("Execute returned nil error, want missing run failure")
 			}
+
 			if stdout.Len() != 0 {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
+
 			if got := stderr.String(); !strings.Contains(got, tc.want) {
 				t.Fatalf("stderr = %q, want %q", got, tc.want)
 			}

@@ -27,7 +27,8 @@ const (
 	PhasePostRun = "post_run"
 	PhaseRefresh = "config_refresh"
 
-	schemaVersion = 1
+	schemaVersion        = 1
+	minGitStatusLineSize = 4
 )
 
 var (
@@ -76,11 +77,14 @@ func RecordPostRun(ctx context.Context, store *runstore.Store, runID string, opt
 	if store == nil {
 		return runstore.ArtifactRef{}, Snapshot{}, stableerr.New("run store is required")
 	}
+
 	snapshot, err := InspectPostRun(ctx, opts)
 	if err != nil {
 		return runstore.ArtifactRef{}, snapshot, err
 	}
+
 	ref, err := WriteSnapshot(ctx, store, runID, "vcs-post-run", snapshot, opts.Time)
+
 	return ref, snapshot, err
 }
 
@@ -90,7 +94,9 @@ func WriteSnapshot(ctx context.Context, store *runstore.Store, runID, name strin
 	if err != nil {
 		return runstore.ArtifactRef{}, fmt.Errorf("marshal VCS snapshot: %w", err)
 	}
+
 	content = append(content, '\n')
+
 	ref, err := store.WriteArtifactContext(ctx, runID, runstore.Artifact{
 		Kind:    runstore.KindSnapshot,
 		Name:    name,
@@ -100,6 +106,7 @@ func WriteSnapshot(ctx context.Context, store *runstore.Store, runID, name strin
 	if err != nil {
 		return runstore.ArtifactRef{}, fmt.Errorf("write VCS snapshot artifact %s: %w", name, err)
 	}
+
 	return ref, nil
 }
 
@@ -107,20 +114,24 @@ func inspect(ctx context.Context, opts Options, phase string) (Snapshot, error) 
 	if opts.Root == "" {
 		return Snapshot{}, stableerr.New("project root is required")
 	}
+
 	env := opts.Env
 	if env == nil {
 		env = os.Environ()
 	}
+
 	if ok, err := probeVCS(ctx, opts.Root, env, jjRootCommand); err != nil {
 		return Snapshot{}, err
 	} else if ok {
 		return inspectJJ(ctx, opts.Root, env, phase)
 	}
+
 	if ok, err := probeVCS(ctx, opts.Root, env, gitRootCommand); err != nil {
 		return Snapshot{}, err
 	} else if ok {
 		return inspectGit(ctx, opts.Root, env, phase)
 	}
+
 	return Snapshot{
 		SchemaVersion: schemaVersion,
 		Phase:         phase,
@@ -140,9 +151,11 @@ func probeVCS(ctx context.Context, root string, env, command []string) (bool, er
 	if err == nil {
 		return strings.TrimSpace(output) != "", nil
 	}
+
 	if vcsProbeUnavailable(err) {
 		return false, nil
 	}
+
 	return false, err
 }
 
@@ -151,8 +164,10 @@ func inspectJJ(ctx context.Context, root string, env []string, phase string) (Sn
 	if err != nil {
 		return Snapshot{}, err
 	}
+
 	changed := parseJJChangedPaths(output)
 	dirty := len(changed) > 0 || !strings.Contains(output, "The working copy has no changes.")
+
 	return Snapshot{
 		SchemaVersion: schemaVersion,
 		Phase:         phase,
@@ -172,7 +187,9 @@ func inspectGit(ctx context.Context, root string, env []string, phase string) (S
 	if err != nil {
 		return Snapshot{}, err
 	}
+
 	changed := parseGitChangedPathsZ(output)
+
 	return Snapshot{
 		SchemaVersion: schemaVersion,
 		Phase:         phase,
@@ -192,6 +209,7 @@ func runCommand(ctx context.Context, root string, env, command []string) (string
 	if len(command) == 0 {
 		return "", stableerr.New("command is required")
 	}
+
 	executable, err := lookPathEnv(command[0], env)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", strings.Join(command, " "), err)
@@ -200,23 +218,29 @@ func runCommand(ctx context.Context, root string, env, command []string) (string
 	cmd := exec.CommandContext(ctx, executable, command[1:]...)
 	cmd.Dir = root
 	cmd.Env = env
+
 	var stderr bytes.Buffer
+
 	cmd.Stderr = &stderr
+
 	out, err := cmd.Output()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", fmt.Errorf("%s: %w", strings.Join(command, " "), ctxErr)
 		}
+
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = err.Error()
 		}
+
 		return "", commandError{
 			command: strings.Join(command, " "),
 			err:     err,
 			message: message,
 		}
 	}
+
 	return string(out), nil
 }
 
@@ -230,6 +254,7 @@ func (err commandError) Error() string {
 	if err.message == "" {
 		return err.command + ": " + err.err.Error()
 	}
+
 	return err.command + ": " + err.message
 }
 
@@ -241,14 +266,17 @@ func vcsProbeUnavailable(err error) bool {
 	if errors.Is(err, exec.ErrNotFound) {
 		return true
 	}
+
 	var cmdErr commandError
 	if !errors.As(err, &cmdErr) {
 		return false
 	}
+
 	message := strings.ToLower(cmdErr.message)
 	if message == "" {
 		return false
 	}
+
 	return strings.Contains(message, "not a git repository") ||
 		strings.Contains(message, "no jj repo") ||
 		strings.Contains(message, "no jj repository") ||
@@ -260,7 +288,9 @@ func lookPathEnv(file string, env []string) (string, error) {
 	if strings.Contains(file, string(filepath.Separator)) {
 		return file, nil
 	}
+
 	pathValue := os.Getenv("PATH")
+
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
 		if ok && key == "PATH" {
@@ -268,22 +298,28 @@ func lookPathEnv(file string, env []string) (string, error) {
 			break
 		}
 	}
+
 	for _, dir := range filepath.SplitList(pathValue) {
 		if dir == "" {
 			dir = "."
 		}
+
 		candidate := filepath.Join(dir, file)
+
 		info, err := os.Stat(candidate) // #nosec G304,G703 -- PATH entries come from the caller's execution environment for fixed jj/git command names.
 		if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
 			continue
 		}
+
 		return candidate, nil
 	}
+
 	return "", exec.ErrNotFound
 }
 
 func parseJJChangedPaths(output string) []string {
 	var paths []string
+
 	for line := range strings.SplitSeq(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" ||
@@ -293,10 +329,12 @@ func parseJJChangedPaths(output string) []string {
 			strings.HasPrefix(trimmed, "The working copy has no changes.") {
 			continue
 		}
+
 		if path, ok := jjChangedPath(trimmed); ok {
 			paths = append(paths, path)
 		}
 	}
+
 	return uniqueSorted(paths)
 }
 
@@ -307,17 +345,20 @@ func jjChangedPath(line string) (string, bool) {
 			return path, path != ""
 		}
 	}
+
 	return "", false
 }
 
 func parseGitChangedPathsZ(output string) []string {
 	var paths []string
+
 	records := strings.Split(output, "\x00")
 	for i := 0; i < len(records); i++ {
 		record := records[i]
-		if len(record) < 4 {
+		if len(record) < minGitStatusLineSize {
 			continue
 		}
+
 		path := record[3:]
 		if record[0] == 'R' || record[1] == 'R' || record[0] == 'C' || record[1] == 'C' {
 			paths = append(paths, path)
@@ -325,12 +366,15 @@ func parseGitChangedPathsZ(output string) []string {
 				paths = append(paths, records[i+1])
 				i++
 			}
+
 			continue
 		}
+
 		if path != "" {
 			paths = append(paths, path)
 		}
 	}
+
 	return uniqueSorted(paths)
 }
 
@@ -338,26 +382,33 @@ func gitSummary(changed []string) string {
 	if len(changed) == 0 {
 		return "Git working copy has no changes."
 	}
+
 	if len(changed) == 1 {
 		return "Git working copy has 1 changed path."
 	}
+
 	return fmt.Sprintf("Git working copy has %d changed paths.", len(changed))
 }
 
 func uniqueSorted(paths []string) []string {
 	seen := map[string]struct{}{}
+
 	out := make([]string, 0, len(paths))
 	for _, path := range paths {
 		clean := filepath.ToSlash(strings.TrimSpace(path))
 		if clean == "" {
 			continue
 		}
+
 		if _, ok := seen[clean]; ok {
 			continue
 		}
+
 		seen[clean] = struct{}{}
 		out = append(out, clean)
 	}
+
 	sort.Strings(out)
+
 	return out
 }

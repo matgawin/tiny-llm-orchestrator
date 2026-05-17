@@ -43,14 +43,17 @@ func TestRuntimeCommandBuildsCodexNormalAndSandboxArgv(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		t.Setenv("ORC_SANDBOX", "0")
 		t.Setenv("ORC_SANDBOX_ROOT", root)
+
 		command, promptMode, err := runtimeCommandForTest(root, workflow, codex)
 		if err != nil {
 			t.Fatalf("runtimeCommand returned error: %v", err)
 		}
+
 		want := []string{"codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check", "-"}
 		if !slices.Equal(command, want) {
 			t.Fatalf("command = %#v, want %#v", command, want)
 		}
+
 		if promptMode != runtimePromptDeliveryStdin {
 			t.Fatalf("promptMode = %q, want stdin", promptMode)
 		}
@@ -59,14 +62,17 @@ func TestRuntimeCommandBuildsCodexNormalAndSandboxArgv(t *testing.T) {
 	t.Run("sandbox", func(t *testing.T) {
 		t.Setenv("ORC_SANDBOX", "1")
 		t.Setenv("ORC_SANDBOX_ROOT", root)
+
 		command, promptMode, err := runtimeCommandForTest(root, workflow, codex)
 		if err != nil {
 			t.Fatalf("runtimeCommand returned error: %v", err)
 		}
+
 		want := []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check", "-"}
 		if !slices.Equal(command, want) {
 			t.Fatalf("command = %#v, want %#v", command, want)
 		}
+
 		if promptMode != runtimePromptDeliveryStdin {
 			t.Fatalf("promptMode = %q, want stdin", promptMode)
 		}
@@ -77,6 +83,7 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("ORC_SANDBOX", "0")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
+
 	fileAI := config.Runtime{
 		ID: "fileai",
 		Command: config.RuntimeCommand{
@@ -117,7 +124,9 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
+
 	promptPath := filepath.ToSlash(filepath.Join(root, ".orc", "runs", "run-1", "prompts", "code.md"))
+
 	want := []string{
 		"fileai",
 		"--attempt", "attempt-1",
@@ -132,6 +141,7 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
 	}
+
 	if promptMode != runtimePromptDeliveryFile {
 		t.Fatalf("promptMode = %q, want file", promptMode)
 	}
@@ -221,9 +231,11 @@ func TestRuntimeCommandAppendsModelReasoningAndDirsInOrder(t *testing.T) {
 			if err != nil {
 				t.Fatalf("runtimeCommand returned error: %v", err)
 			}
+
 			if !slices.Equal(command, tt.want) {
 				t.Fatalf("command = %#v, want %#v", command, tt.want)
 			}
+
 			for _, notWant := range tt.notWant {
 				if slices.Contains(command, notWant) {
 					t.Fatalf("command = %#v, did not want %q", command, notWant)
@@ -238,9 +250,11 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRepositoryRelativeDirs(t *testing.
 	if err := os.Mkdir(filepath.Join(root, "shared"), 0o750); err != nil {
 		t.Fatalf("create shared runtime dir: %v", err)
 	}
+
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root)
+
 	runtime := runtimeWithDirs("recorder")
 	workflow := config.Workflow{
 		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{"shared", "shared"}},
@@ -253,6 +267,7 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRepositoryRelativeDirs(t *testing.
 	if err != nil {
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
+
 	want := []string{"recorder", "--dir", filepath.Join(root, "shared"), "--dir", filepath.Join(root, "shared")}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want duplicate runtime_dirs preserved as %#v", command, want)
@@ -261,13 +276,16 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRepositoryRelativeDirs(t *testing.
 
 func TestRuntimeCommandSandboxRuntimeDirsAllowProjectSandboxMount(t *testing.T) {
 	root := t.TempDir()
+
 	external := filepath.Join(t.TempDir(), "external-worktree")
 	if err := os.Mkdir(external, 0o750); err != nil {
 		t.Fatalf("create external runtime dir: %v", err)
 	}
+
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root, external)
+
 	runtime := runtimeWithDirs("recorder")
 	workflow := config.Workflow{
 		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
@@ -283,6 +301,7 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowProjectSandboxMount(t *testing.T) 
 	if err != nil {
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
+
 	want := []string{"recorder", "--dir", external}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
@@ -291,13 +310,16 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowProjectSandboxMount(t *testing.T) 
 
 func TestRuntimeCommandSandboxRuntimeDirsAllowRuntimeSandboxRequirement(t *testing.T) {
 	root := t.TempDir()
+
 	external := filepath.Join(t.TempDir(), "runtime-required")
 	if err := os.Mkdir(external, 0o750); err != nil {
 		t.Fatalf("create runtime-required dir: %v", err)
 	}
+
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root, external)
+
 	runtime := runtimeWithDirs("recorder")
 	runtime.Sandbox.Requirements.Mounts = []config.RuntimeSandboxMount{
 		{Host: external, Target: config.RuntimeSandboxMountTarget{Path: external}, Mode: "rw"},
@@ -313,6 +335,7 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRuntimeSandboxRequirement(t *testi
 	if err != nil {
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
+
 	want := []string{"recorder", "--dir", external}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
@@ -321,13 +344,16 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRuntimeSandboxRequirement(t *testi
 
 func TestRuntimeCommandSandboxRuntimeDirsUseActiveSandboxCoverage(t *testing.T) {
 	root := t.TempDir()
+
 	external := filepath.Join(t.TempDir(), "runtime-required")
 	if err := os.Mkdir(external, 0o750); err != nil {
 		t.Fatalf("create runtime-required dir: %v", err)
 	}
+
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root, external)
+
 	runtime := runtimeWithDirs("recorder")
 	runtime.Sandbox.Requirements.Mounts = []config.RuntimeSandboxMount{
 		{
@@ -352,6 +378,7 @@ func TestRuntimeCommandSandboxRuntimeDirsUseActiveSandboxCoverage(t *testing.T) 
 	if err != nil {
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
+
 	want := []string{"recorder", "--dir", external}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
@@ -376,10 +403,12 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t
 			name: "file",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()
+
 				path := filepath.Join(root, "runtime-file")
 				if err := os.WriteFile(path, []byte("not a dir"), 0o640); err != nil {
 					t.Fatalf("create runtime file: %v", err)
 				}
+
 				return "runtime-file"
 			},
 			wantErr: "visible path is not a directory",
@@ -391,6 +420,7 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t
 			t.Setenv("ORC_SANDBOX", "1")
 			t.Setenv("ORC_SANDBOX_ROOT", root)
 			setRuntimeDirCoverageEnv(t, root)
+
 			runtime := runtimeWithDirs("recorder")
 			workflow := config.Workflow{
 				Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{dir}},
@@ -400,6 +430,7 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t
 			}
 
 			_, _, err := runtimeCommandForTest(root, workflow, runtime)
+
 			resolved := effectiveRuntimeDir(root, dir)
 			for _, want := range []string{
 				`step "plan"`,
@@ -418,13 +449,16 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t
 
 func TestRuntimeCommandSandboxRuntimeDirsRejectUncoveredAbsoluteDir(t *testing.T) {
 	root := t.TempDir()
+
 	external := filepath.Join(t.TempDir(), "unmounted")
 	if err := os.Mkdir(external, 0o750); err != nil {
 		t.Fatalf("create unmounted dir: %v", err)
 	}
+
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root)
+
 	runtime := runtimeWithDirs("recorder")
 	workflow := config.Workflow{
 		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
@@ -452,6 +486,7 @@ func TestRuntimeCommandRejectsPlaceholderWithoutValue(t *testing.T) {
 	if err == nil {
 		t.Fatal("substituteRuntimePlaceholders returned nil error, want missing value")
 	}
+
 	if got, want := err.Error(), "placeholder {model} has no value"; !strings.Contains(got, want) {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
@@ -462,6 +497,7 @@ func TestRuntimeCommandRejectsUnknownPlaceholder(t *testing.T) {
 	if err == nil {
 		t.Fatal("substituteRuntimePlaceholders returned nil error, want unknown placeholder")
 	}
+
 	if got, want := err.Error(), "unknown placeholder {unknown}"; !strings.Contains(got, want) {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
@@ -474,10 +510,12 @@ func runtimeCommandForTest(root string, workflow config.Workflow, runtime config
 func runtimeCommandForTestWithSandbox(root string, workflow config.Workflow, runtime config.Runtime, sandboxConfig config.SandboxConfig) ([]string, string, error) {
 	stepID := launcherPlanStep
 	agentID := "planner"
+
 	if _, ok := workflow.Steps[launcherCodeStep]; ok {
 		stepID = launcherCodeStep
 		agentID = "coder"
 	}
+
 	runner := workerRunner{
 		loaded: runcontext.Context{
 			Project: &config.Project{
@@ -499,6 +537,7 @@ func runtimeCommandForTestWithSandbox(root string, workflow config.Workflow, run
 			Path: filepath.ToSlash(filepath.Join(root, ".orc", "runs", "run-1", "prompts", stepID+".md")),
 		},
 	}
+
 	return runner.runtimeCommand()
 }
 
@@ -516,9 +555,11 @@ func runtimeWithDirs(id string) config.Runtime {
 
 func setRuntimeDirCoverageEnv(t *testing.T, targets ...string) {
 	t.Helper()
+
 	value, err := json.Marshal(targets)
 	if err != nil {
 		t.Fatalf("marshal runtime dir coverage: %v", err)
 	}
+
 	t.Setenv(sandbox.RuntimeDirCoverageEnv, string(value))
 }

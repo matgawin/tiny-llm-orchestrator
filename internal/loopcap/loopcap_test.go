@@ -15,6 +15,7 @@ func TestEvaluateIgnoresDisabledRetryAndTerminalDecisions(t *testing.T) {
 			Counts: map[string]int{"code": 4},
 		},
 	}
+
 	caps := config.EffectiveLoopCaps{Enabled: true, Soft: 2, Hard: 4}
 	for _, tt := range []struct {
 		name     string
@@ -48,18 +49,21 @@ func TestEvaluateIgnoresDisabledRetryAndTerminalDecisions(t *testing.T) {
 func TestEvaluateSoftAndHardThresholds(t *testing.T) {
 	caps := config.EffectiveLoopCaps{Enabled: true, Soft: 2, Hard: 4}
 	latest := runstore.Attempt{StepID: "test", Status: "done", Result: "passed"}
+
 	soft := Evaluate("implementation", caps, runstore.Status{
 		WorkflowLoop: runstore.WorkflowLoop{Counts: map[string]int{"code": 2}},
 	}, workflow.Decision{Kind: workflow.DecisionSelectStep, Step: "code"}, latest, true)
 	if soft.Kind != DecisionSoft || soft.ProspectiveCount != 3 || soft.PreviousState != "test" || soft.TriggerStatus != "done" || soft.TriggerResult != "passed" {
 		t.Fatalf("soft decision = %+v, want threshold decision with trigger", soft)
 	}
+
 	hard := Evaluate("implementation", caps, runstore.Status{
 		WorkflowLoop: runstore.WorkflowLoop{Counts: map[string]int{"code": 4}},
 	}, workflow.Decision{Kind: workflow.DecisionSelectStep, Step: "code"}, latest, true)
 	if hard.Kind != DecisionHard || hard.CurrentCount != 4 || hard.ProspectiveCount != 5 {
 		t.Fatalf("hard decision = %+v, want hard threshold before count increment", hard)
 	}
+
 	hardAgain := Evaluate("implementation", caps, runstore.Status{
 		WorkflowLoop: runstore.WorkflowLoop{Counts: map[string]int{"code": 5}},
 	}, workflow.Decision{Kind: workflow.DecisionSelectStep, Step: "code"}, latest, true)

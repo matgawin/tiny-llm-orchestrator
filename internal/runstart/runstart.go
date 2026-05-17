@@ -97,24 +97,30 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if opts.Root == "" {
 		return Result{}, stableerr.New("project root is required")
 	}
+
 	if opts.Workflow == "" {
 		return Result{}, stableerr.New("workflow is required")
 	}
+
 	project, err := config.Load(opts.Root)
 	if err != nil {
 		return Result{}, fmt.Errorf("load project config: %w", err)
 	}
+
 	workflow, ok := project.Workflows[opts.Workflow]
 	if !ok {
 		return Result{}, stableerr.Errorf("workflow %q is not configured", opts.Workflow)
 	}
+
 	if opts.Env == nil {
 		opts.Env = os.Environ()
 	}
+
 	task, err := resolveTask(ctx, workflow, opts)
 	if err != nil {
 		return Result{}, err
 	}
+
 	vcsSnapshot, err := inspectPreRunVCS(ctx, workflow, opts)
 	if err != nil {
 		return Result{}, err
@@ -124,6 +130,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("start: %w", err)
 	}
+
 	return createRun(ctx, opts, project, store, workflow.Start, task, vcsSnapshot)
 }
 
@@ -132,6 +139,7 @@ func createRun(ctx context.Context, opts Options, project *config.Project, store
 	if err != nil {
 		return Result{}, fmt.Errorf("create run: %w", err)
 	}
+
 	run, err := store.CreateContext(ctx, runstore.CreateRunRequest{
 		RunID:        opts.RunID,
 		Workflow:     opts.Workflow,
@@ -142,23 +150,29 @@ func createRun(ctx context.Context, opts Options, project *config.Project, store
 	if err != nil {
 		return Result{}, fmt.Errorf("create run: %w", err)
 	}
+
 	if err := store.WriteInitialConfigSnapshotContext(ctx, run.ID, configSnapshot); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
+
 	if err := writeTaskArtifact(ctx, store, run.ID, runstore.KindTaskContext, task.context, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
+
 	snapshot, err := json.MarshalIndent(task.snapshot, "", "  ")
 	if err != nil {
 		return Result{}, cleanupStartedRun(run.Path, fmt.Errorf("marshal task snapshot: %w", err))
 	}
+
 	snapshot = append(snapshot, '\n')
 	if err := writeTaskArtifact(ctx, store, run.ID, runstore.KindTaskSnapshot, snapshot, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
+
 	if _, err := vcs.WriteSnapshot(ctx, store, run.ID, "vcs-pre-run", vcsSnapshot, opts.Time); err != nil {
 		return Result{}, cleanupStartedRun(run.Path, err)
 	}
+
 	return Result{RunID: run.ID, Path: run.Path}, nil
 }
 
@@ -171,12 +185,15 @@ func inspectPreRunVCS(ctx context.Context, workflow config.Workflow, opts Option
 	if err != nil {
 		return vcs.Snapshot{}, fmt.Errorf("inspect VCS before run start: %w", err)
 	}
+
 	if snapshot.Kind == vcs.KindNone && workflow.VCS.EffectiveNoVCS() == config.VCSNoVCSBlock {
 		return vcs.Snapshot{}, stableerr.New("workflow requires supported VCS but no supported VCS was detected")
 	}
+
 	if snapshot.Dirty && workflow.VCS.EffectiveDirtyStart() == config.VCSDirtyStartBlock {
 		return vcs.Snapshot{}, stableerr.Errorf("working copy is dirty; workflow %q blocks dirty starts", workflow.Name)
 	}
+
 	return snapshot, nil
 }
 
@@ -190,6 +207,7 @@ func writeTaskArtifact(ctx context.Context, store *runstore.Store, runID string,
 	if err != nil {
 		return fmt.Errorf("write task artifact: %w", err)
 	}
+
 	return nil
 }
 
@@ -197,9 +215,11 @@ func resolveTask(ctx context.Context, workflow config.Workflow, opts Options) (r
 	if err := validateSources(opts); err != nil {
 		return resolvedTask{}, err
 	}
+
 	if err := validateWorkflowPolicy(workflow, opts); err != nil {
 		return resolvedTask{}, err
 	}
+
 	switch {
 	case opts.BeadID != "":
 		return resolveBeadTask(ctx, opts)
@@ -217,17 +237,21 @@ func resolveTask(ctx context.Context, workflow config.Workflow, opts Options) (r
 func validateSources(opts Options) error {
 	sources := selectedTaskSources(opts)
 	count := 0
+
 	for _, source := range sources {
 		if source.selected {
 			count++
 		}
 	}
+
 	if count > 1 {
 		return stableerr.Errorf("%s are mutually exclusive", allowedTaskSourceList(sources))
 	}
+
 	if opts.FallbackTaskFile != "" && opts.BeadID == "" {
 		return stableerr.New("--fallback-task-file requires --bead")
 	}
+
 	return nil
 }
 
@@ -250,50 +274,62 @@ func allowedTaskSourceList(sources []taskSourceSelection) string {
 	for _, source := range sources {
 		names = append(names, source.name)
 	}
+
 	if len(names) == 0 {
 		return ""
 	}
+
 	if len(names) == 1 {
 		return names[0]
 	}
+
 	return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
 }
 
 func validateWorkflowPolicy(workflow config.Workflow, opts Options) error {
 	beads := workflow.TaskContext.Beads
 	markdownAllowed := workflow.TaskContext.MarkdownFallback.Value
+
 	switch {
 	case beads == taskContextBeadsDisabled && opts.BeadID != "":
 		return stableerr.Errorf("workflow %q disables bead task context", workflow.Name)
 	case beads == taskContextBeadsRequired && opts.BeadID == "":
 		return stableerr.Errorf("workflow %q requires bead task context", workflow.Name)
 	}
+
 	if !markdownAllowed {
 		if opts.TaskFile != "" || opts.TaskText != "" || opts.TaskStdin {
 			return stableerr.Errorf("workflow %q disables Markdown task context", workflow.Name)
 		}
+
 		if opts.FallbackTaskFile != "" {
 			return stableerr.Errorf("workflow %q disables Markdown fallback task context", workflow.Name)
 		}
 	}
+
 	return nil
 }
 
 func resolveBeadTask(ctx context.Context, opts Options) (resolvedTask, error) {
 	command := []string{"bd", "show", opts.BeadID, "--json"}
+
 	content, lookupErr := runBeadCommand(ctx, opts.Root, command, opts.Env)
 	if lookupErr != nil {
 		if opts.FallbackTaskFile == "" {
 			return resolvedTask{}, fmt.Errorf("read bead %q: %w", opts.BeadID, lookupErr)
 		}
+
 		task, err := resolveTaskFile(opts.FallbackTaskFile, SourceFallbackTaskFile)
 		if err != nil {
 			return resolvedTask{}, err
 		}
+
 		applyFallbackSnapshotMetadata(&task.snapshot, opts, command, lookupErr)
 		task.taskSlug = opts.BeadID
+
 		return task, nil
 	}
+
 	snapshot := Snapshot{
 		SchemaVersion: 1,
 		Source: Source{
@@ -309,6 +345,7 @@ func resolveBeadTask(ctx context.Context, opts Options) (resolvedTask, error) {
 			Command:   command,
 		},
 	}
+
 	return resolvedTask{
 		context:  beadMarkdownContext(opts.BeadID, content),
 		snapshot: snapshot,
@@ -339,16 +376,21 @@ func runBeadCommand(ctx context.Context, dir string, command, env []string) ([]b
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = dir
 	cmd.Env = env
+
 	var stderr bytes.Buffer
+
 	cmd.Stderr = &stderr
+
 	output, err := cmd.Output()
 	if err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = err.Error()
 		}
+
 		return nil, stableerr.New(message)
 	}
+
 	return output, nil
 }
 
@@ -356,10 +398,12 @@ func resolveTaskFile(path, sourceType string) (resolvedTask, error) {
 	if path == "" {
 		return resolvedTask{}, stableerr.New("task file path is required")
 	}
+
 	content, err := os.ReadFile(path) // #nosec G304 -- caller-provided task file is the explicit source.
 	if err != nil {
 		return resolvedTask{}, fmt.Errorf("read task file %q: %w", path, err)
 	}
+
 	return resolvedMarkdownTask(sourceType, path, content, taskSlugFromPath(path)), nil
 }
 
@@ -367,10 +411,12 @@ func resolveStdinTask(opts Options) (resolvedTask, error) {
 	if opts.Stdin == nil {
 		return resolvedTask{}, stableerr.New("--task-stdin requires stdin")
 	}
+
 	content, err := io.ReadAll(opts.Stdin)
 	if err != nil {
 		return resolvedTask{}, fmt.Errorf("read task stdin: %w", err)
 	}
+
 	return resolvedMarkdownTask(SourceStdinTask, "", content, ""), nil
 }
 
@@ -378,6 +424,7 @@ func resolvedMarkdownTask(sourceType, path string, content []byte, taskSlug stri
 	if len(content) > 0 {
 		content = []byte(normalizeMarkdown(string(content)))
 	}
+
 	return resolvedTask{
 		context: content,
 		snapshot: Snapshot{
@@ -397,10 +444,13 @@ func beadMarkdownContext(beadID string, content []byte) []byte {
 	b.WriteString(beadID)
 	b.WriteString("\n\n```json\n")
 	b.Write(content)
+
 	if len(content) == 0 || content[len(content)-1] != '\n' {
 		b.WriteByte('\n')
 	}
+
 	b.WriteString("```\n")
+
 	return []byte(b.String())
 }
 
@@ -408,12 +458,14 @@ func normalizeMarkdown(content string) string {
 	if content == "" || strings.HasSuffix(content, "\n") {
 		return content
 	}
+
 	return content + "\n"
 }
 
 func taskSlugFromPath(path string) string {
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
+
 	return strings.TrimSuffix(base, ext)
 }
 
@@ -424,6 +476,7 @@ func observedBeadsEnv(env []string) map[string]string {
 			return map[string]string{"BEADS_DIR": value}
 		}
 	}
+
 	return nil
 }
 
@@ -431,5 +484,6 @@ func cleanupStartedRun(runPath string, cause error) error {
 	if err := os.RemoveAll(runPath); err != nil { // #nosec G304 -- runPath is returned by the Run Store for the run just created.
 		return errors.Join(cause, fmt.Errorf("cleanup run directory %s: %w", runPath, err))
 	}
+
 	return cause
 }

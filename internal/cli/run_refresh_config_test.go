@@ -31,9 +31,11 @@ func TestExecuteRunRefreshConfigRejectsForceFlag(t *testing.T) {
 	if err := Execute([]string{"run", "refresh-config", "run-1", "--force"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want --force rejection")
 	}
+
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
+
 	if !strings.Contains(stderr.String(), "unknown flag: --force") {
 		t.Fatalf("stderr = %q, want unsupported --force rejection", stderr.String())
 	}

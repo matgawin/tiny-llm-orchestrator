@@ -26,6 +26,7 @@ func newSandboxCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command
 	}
 
 	cmd.AddCommand(newSandboxRunCommand(stdin, stdout, stderr))
+
 	return cmd
 }
 
@@ -38,9 +39,11 @@ func newSandboxRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Comm
 			if len(args) == 0 {
 				return nil
 			}
+
 			if _, err := fmt.Fprintf(stderr, "%s sandbox run: unexpected argument %q\n\n", appName, args[0]); err != nil {
 				return fmt.Errorf("new sandbox run command: %w", err)
 			}
+
 			return stableerr.Errorf("unexpected sandbox run argument: %s", args[0])
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,10 +57,13 @@ func executeSandboxRun(stdin io.Reader, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("execute sandbox run: %w", err)
 	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
 	restoreSignals := context.AfterFunc(ctx, stop)
 	defer restoreSignals()
+
 	if err := sandbox.Run(ctx, sandbox.Options{
 		Root:   root,
 		Stdin:  stdin,
@@ -67,7 +73,9 @@ func executeSandboxRun(stdin io.Reader, stdout, stderr io.Writer) error {
 		if _, writeErr := fmt.Fprintf(stderr, "%s sandbox run: %v\n", appName, err); writeErr != nil {
 			return fmt.Errorf("execute sandbox run: %w", writeErr)
 		}
+
 		return fmt.Errorf("execute sandbox run: %w", err)
 	}
+
 	return nil
 }

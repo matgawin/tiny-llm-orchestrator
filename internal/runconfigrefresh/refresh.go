@@ -50,44 +50,56 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, stableerr.New("context is required")
 	}
+
 	if opts.Root == "" {
 		return Result{}, stableerr.New("project root is required")
 	}
+
 	if opts.RunID == "" {
 		return Result{}, stableerr.New("run id is required")
 	}
+
 	source := opts.Source
 	if source == "" {
 		source = defaultSource
 	}
+
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
+
 	project, err := config.Load(opts.Root)
 	if err != nil {
 		return Result{}, fmt.Errorf("load live .orc config: %w", err)
 	}
+
 	store, err := runstore.Open(opts.Root)
 	if err != nil {
 		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
+
 	run, err := store.LoadContext(ctx, opts.RunID)
 	if err != nil {
 		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
+
 	current, err := configsnapshot.LoadCurrent(run)
 	if err != nil {
 		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
+
 	vcsSnapshot, err := vcs.InspectRefresh(ctx, vcs.Options{Root: opts.Root, Env: opts.Env, Time: opts.Time})
 	if err != nil {
 		return Result{}, fmt.Errorf("inspect VCS for config refresh: %w", err)
 	}
+
 	snapshot, err := configsnapshot.BuildRefresh(project, run.Status.Workflow, current.Version+1, source, vcsSnapshot, opts.Time)
 	if err != nil {
 		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
+
 	manifestHash := configsnapshot.ManifestHash(snapshot.Manifest)
+
 	refresh, err := store.RefreshConfigSnapshotContext(ctx, opts.RunID, runstore.RefreshConfigSnapshotRequest{
 		Snapshot:              snapshot,
 		Source:                source,
@@ -98,15 +110,18 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 		if lockedCurrent.Version != current.Version || lockedCurrent.VersionDir != current.VersionDir {
 			return stableerr.Errorf("run %q config snapshot changed from %s to %s during refresh; retry refresh-config", opts.RunID, current.VersionDir, lockedCurrent.VersionDir)
 		}
+
 		lockedOld, err := configsnapshot.LoadCurrent(lockedRun)
 		if err != nil {
 			return fmt.Errorf("refresh: %w", err)
 		}
+
 		return validateCompatibility(lockedRun, lockedOld.Project, project)
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
+
 	return Result{
 		RunID:                 opts.RunID,
 		OldVersion:            refresh.OldVersion,
@@ -124,30 +139,38 @@ func validateCompatibility(run *runstore.Run, oldProject, newProject *config.Pro
 	if run.Status.ActiveAttempt != nil {
 		return stableerr.Errorf("run %q has active attempt %q; cannot refresh config", run.ID, run.Status.ActiveAttempt.AttemptID)
 	}
+
 	oldWorkflow, ok := oldProject.Workflows[run.Status.Workflow]
 	if !ok {
 		return stableerr.Errorf("run %q old snapshot workflow %q is missing", run.ID, run.Status.Workflow)
 	}
+
 	newWorkflow, ok := newProject.Workflows[run.Status.Workflow]
 	if !ok {
 		return stableerr.Errorf("run %q live .orc config is missing workflow %q", run.ID, run.Status.Workflow)
 	}
+
 	if oldWorkflow.Name != newWorkflow.Name {
 		return stableerr.Errorf("run %q workflow name changed from %q to %q", run.ID, oldWorkflow.Name, newWorkflow.Name)
 	}
+
 	if err := validateReferencedSteps(run.Status, newWorkflow); err != nil {
 		return fmt.Errorf("run %q config refresh is incompatible: %w", run.ID, err)
 	}
+
 	state := runstate.WorkflowState(run.Status)
 	if err := validatePendingAllowedPairs(state, oldWorkflow, newWorkflow); err != nil {
 		return fmt.Errorf("run %q config refresh is incompatible: %w", run.ID, err)
 	}
+
 	if _, err := workflow.Evaluate(oldWorkflow, state); err != nil {
 		return fmt.Errorf("run %q current state is not evaluable against old snapshot workflow: %w", run.ID, err)
 	}
+
 	if _, err := workflow.Evaluate(newWorkflow, state); err != nil {
 		return fmt.Errorf("run %q current state is not evaluable against live workflow: %w", run.ID, err)
 	}
+
 	return nil
 }
 
@@ -155,18 +178,22 @@ func validatePendingAllowedPairs(state workflow.RunState, oldWorkflow, newWorkfl
 	if state.Outcome != nil {
 		return nil
 	}
+
 	selectedStep := state.SelectedStep
 	if selectedStep == "" {
 		selectedStep = oldWorkflow.Start
 	}
+
 	oldStep, ok := oldWorkflow.Steps[selectedStep]
 	if !ok {
 		return nil
 	}
+
 	newStep, ok := newWorkflow.Steps[selectedStep]
 	if !ok {
 		return nil
 	}
+
 	for _, status := range sortedKeys(oldStep.AllowedResults) {
 		for _, result := range oldStep.AllowedResults[status] {
 			if !slices.Contains(newStep.AllowedResults[status], result) {
@@ -174,15 +201,18 @@ func validatePendingAllowedPairs(state workflow.RunState, oldWorkflow, newWorkfl
 			}
 		}
 	}
+
 	for pair := range state.Retry.Counts {
 		status, result, ok := strings.Cut(pair, "/")
 		if !ok || status == "" || result == "" {
 			return stableerr.Errorf("retry lineage pair %q is invalid", pair)
 		}
+
 		if !slices.Contains(newStep.AllowedResults[status], result) {
 			return stableerr.Errorf("retry lineage pair %q is not declared in allowed_results for selected step %q", pair, selectedStep)
 		}
 	}
+
 	return nil
 }
 
@@ -192,48 +222,61 @@ func validateReferencedSteps(status runstore.Status, workflowConfig config.Workf
 		if stepID == "" || terminalStatus(stepID) {
 			return
 		}
+
 		steps[stepID] = source
 	}
 	add(workflowConfig.Start, "workflow start")
+
 	if state := status.State; state == workflow.RunStatusRunning {
 		evalState := runstate.WorkflowState(status)
 		add(evalState.SelectedStep, "current selected step")
+
 		if evalState.Outcome != nil {
 			add(evalState.Outcome.Step, "current outcome step")
 		}
 	} else {
 		add(status.State, "current status")
 	}
+
 	if status.RetryLineage != nil {
 		add(status.RetryLineage.StepID, "retry lineage")
 	}
+
 	if status.Continued != nil {
 		add(status.Continued.ResolvedStepID, "continued resolved step")
 	}
+
 	for _, attempt := range status.Attempts {
 		add(attempt.StepID, "attempt history")
 	}
+
 	for _, skipped := range status.SkippedSteps {
 		add(skipped.StepID, "skipped step")
 	}
+
 	for _, entry := range status.WorkflowLoop.Entries {
 		add(entry.State, "workflow loop entry")
 		add(entry.PreviousState, "workflow loop previous state")
 	}
+
 	for state := range status.WorkflowLoop.Counts {
 		add(state, "workflow loop count")
 	}
+
 	for _, state := range status.WorkflowLoop.RepeatedStates {
 		add(state, "workflow loop repeated state")
 	}
+
 	for _, warning := range status.WorkflowLoop.SoftCapWarnings {
 		add(warning.State, "workflow loop soft cap")
 		add(warning.PreviousState, "workflow loop soft cap previous state")
 	}
+
 	if block := status.WorkflowLoop.HardCapBlock; block != nil {
 		add(block.BlockedState, "workflow loop hard cap block")
 		add(block.PreviousState, "workflow loop hard cap previous state")
 	}
+
 	if override := status.WorkflowLoop.PendingHardCapOverride; override != nil {
 		add(override.TargetState, "workflow loop hard cap override")
 	}
@@ -243,12 +286,14 @@ func validateReferencedSteps(status runstore.Status, workflowConfig config.Workf
 			return stableerr.Errorf("%s %q is not declared in live workflow", steps[stepID], stepID)
 		}
 	}
+
 	return nil
 }
 
 func sortedKeys[V any](values map[string]V) []string {
 	keys := slices.Collect(maps.Keys(values))
 	slices.Sort(keys)
+
 	return keys
 }
 

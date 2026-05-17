@@ -12,10 +12,12 @@ import (
 func TestLoadReportsMalformedStateWithArtifactPath(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "broken-run")
+
 	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
+
 	if err := os.Remove(filepath.Join(run.Path, filepath.FromSlash(ref.Path))); err != nil {
 		t.Fatalf("remove artifact: %v", err)
 	}
@@ -27,10 +29,12 @@ func TestLoadReportsMalformedStateWithArtifactPath(t *testing.T) {
 func TestLoadRejectsBootstrapFIFO(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "events-fifo")
+
 	eventsPath := runEventsPath(run)
 	if err := os.Remove(eventsPath); err != nil {
 		t.Fatalf("remove events: %v", err)
 	}
+
 	makeFIFO(t, eventsPath)
 
 	_, err := store.Load(run.ID)
@@ -59,6 +63,7 @@ func TestLoadRejectsMissingBootstrapFiles(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := openStore(t, t.TempDir())
+
 			run := createManualRun(t, store, "missing-"+tc.name)
 			if err := os.Remove(filepath.Join(run.Path, tc.remove)); err != nil {
 				t.Fatalf("remove %s: %v", tc.remove, err)
@@ -82,10 +87,12 @@ func TestLoadRejectsBootstrapFileSymlinks(t *testing.T) {
 			store := openStore(t, t.TempDir())
 			run := createManualRun(t, store, "bootstrap-symlink-"+tc.name)
 			path := filepath.Join(run.Path, tc.file)
+
 			outside := filepath.Join(filepath.Dir(run.Path), "outside-"+tc.file)
 			if err := os.WriteFile(outside, []byte("{}\n"), 0o600); err != nil {
 				t.Fatalf("write outside %s: %v", tc.file, err)
 			}
+
 			replacePathWithSymlink(t, path, outside)
 
 			_, err := store.Load(run.ID)
@@ -96,6 +103,7 @@ func TestLoadRejectsBootstrapFileSymlinks(t *testing.T) {
 
 func TestLoadRejectsHalfCreatedRunDirectory(t *testing.T) {
 	store := openStore(t, t.TempDir())
+
 	runDir := filepath.Join(store.runsDir, "half-created")
 	if err := os.MkdirAll(runDir, 0o750); err != nil {
 		t.Fatalf("mkdir half-created run: %v", err)
@@ -116,6 +124,7 @@ func TestLoadRejectsMissingInitialRunLayout(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := openStore(t, t.TempDir())
+
 			run := createManualRun(t, store, "missing-layout-"+tc.name)
 			if err := os.Remove(filepath.Join(run.Path, tc.remove)); err != nil {
 				t.Fatalf("remove %s: %v", tc.remove, err)
@@ -137,9 +146,11 @@ func TestLoadRejectsMalformedArtifactFileShapes(t *testing.T) {
 			name: "directory",
 			corrupt: func(t *testing.T, _ *Run, artifactPath string) {
 				t.Helper()
+
 				if err := os.Remove(artifactPath); err != nil {
 					t.Fatalf("remove artifact: %v", err)
 				}
+
 				if err := os.Mkdir(artifactPath, 0o750); err != nil {
 					t.Fatalf("mkdir artifact path: %v", err)
 				}
@@ -158,9 +169,11 @@ func TestLoadRejectsMalformedArtifactFileShapes(t *testing.T) {
 			name: "fifo",
 			corrupt: func(t *testing.T, _ *Run, artifactPath string) {
 				t.Helper()
+
 				if err := os.Remove(artifactPath); err != nil {
 					t.Fatalf("remove artifact: %v", err)
 				}
+
 				makeFIFO(t, artifactPath)
 			},
 			want: "regular file",
@@ -181,9 +194,11 @@ func TestLoadRejectsSymlinkedArtifactParent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run, ref, artifactPath := createRunWithReportArtifact(t, store, "load-symlink-parent")
 	reportsDir := filepath.Join(run.Path, "reports")
+
 	if err := os.Remove(artifactPath); err != nil {
 		t.Fatalf("remove artifact: %v", err)
 	}
+
 	outsideDir := outsideDirSymlink(t, run.Path, reportsDir, "outside-load-reports")
 	if err := os.WriteFile(filepath.Join(outsideDir, filepath.Base(ref.Path)), []byte("outside\n"), 0o600); err != nil {
 		t.Fatalf("write outside artifact: %v", err)
@@ -195,6 +210,7 @@ func TestLoadRejectsSymlinkedArtifactParent(t *testing.T) {
 
 func TestLoadReportsMalformedEventLine(t *testing.T) {
 	store := openStore(t, t.TempDir())
+
 	run := createManualRun(t, store, "bad-events")
 	if err := os.WriteFile(runEventsPath(run), []byte("{not-json}\n"), 0o600); err != nil {
 		t.Fatalf("write bad events: %v", err)
@@ -206,6 +222,7 @@ func TestLoadReportsMalformedEventLine(t *testing.T) {
 
 func TestLoadRejectsEmptyEventLog(t *testing.T) {
 	store := openStore(t, t.TempDir())
+
 	run := createManualRun(t, store, "empty-events")
 	if err := os.WriteFile(runEventsPath(run), nil, 0o600); err != nil {
 		t.Fatalf("truncate events: %v", err)
@@ -231,6 +248,7 @@ func TestLoadRejectsEventLogWithoutTrailingNewline(t *testing.T) {
 	run := createManualRun(t, store, "missing-event-newline")
 	eventsPath := runEventsPath(run)
 	content := readFile(t, eventsPath)
+
 	content = bytes.TrimSuffix(content, []byte("\n"))
 	if err := os.WriteFile(eventsPath, content, 0o600); err != nil {
 		t.Fatalf("write events without trailing newline: %v", err)
@@ -243,12 +261,14 @@ func TestLoadRejectsEventLogWithoutTrailingNewline(t *testing.T) {
 func TestLoadReadsLargeEventPayload(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "large-event")
+
 	payload, err := json.Marshal(map[string]string{
 		"content": string(bytes.Repeat([]byte("x"), 128*1024)),
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
+
 	if _, err := store.AppendEvent(run.ID, Event{Type: "workflow.large-payload", Payload: payload}); err != nil {
 		t.Fatalf("AppendEvent returned error: %v", err)
 	}
@@ -257,9 +277,11 @@ func TestLoadReadsLargeEventPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if got := len(loaded.Events); got != 2 {
 		t.Fatalf("loaded event count = %d, want 2", got)
 	}
+
 	if got := len(loaded.Events[1].Payload); got <= 64*1024 {
 		t.Fatalf("loaded payload size = %d, want over scanner default limit", got)
 	}
@@ -302,10 +324,12 @@ func TestLoadRejectsDuplicateRunCreatedEvent(t *testing.T) {
 
 func TestLoadReplaysStatusStateWhenMaterializedStatusIsStale(t *testing.T) {
 	store := openStore(t, t.TempDir())
+
 	run := createManualRun(t, store, "status-mismatch")
 	if _, _, err := store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
+
 	status := readRunStatus(t, run)
 	status.State = stateRunning
 	writeRunStatus(t, run, status)
@@ -314,6 +338,7 @@ func TestLoadReplaysStatusStateWhenMaterializedStatusIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if loaded.Status.State != readyForHumanState {
 		t.Fatalf("loaded state = %q, want replayed %s", loaded.Status.State, readyForHumanState)
 	}
@@ -322,10 +347,12 @@ func TestLoadReplaysStatusStateWhenMaterializedStatusIsStale(t *testing.T) {
 func TestLoadReplaysArtifactEventWhenMaterializedStatusIsStale(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-ref")
+
 	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
+
 	status := readRunStatus(t, run)
 	status.Artifacts = nil
 	writeRunStatus(t, run, status)
@@ -334,9 +361,11 @@ func TestLoadReplaysArtifactEventWhenMaterializedStatusIsStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if got := len(loaded.Status.Artifacts); got != 1 {
 		t.Fatalf("loaded artifact refs = %d, want 1", got)
 	}
+
 	if loaded.Status.Artifacts[0].Path != ref.Path {
 		t.Fatalf("loaded artifact path = %q, want %q", loaded.Status.Artifacts[0].Path, ref.Path)
 	}
@@ -352,9 +381,11 @@ func TestLoadUsesArtifactEventPayloadName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if loaded.Status.Artifacts[0].Name != "other" {
 		t.Fatalf("loaded artifact name = %q, want event payload name other", loaded.Status.Artifacts[0].Name)
 	}
+
 	if loaded.Status.Artifacts[0].Path != ref.Path {
 		t.Fatalf("loaded artifact path = %q, want %q", loaded.Status.Artifacts[0].Path, ref.Path)
 	}
@@ -420,12 +451,15 @@ func TestLoadRejectsNestedRepeatableArtifactPath(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run, _ := createRunWithMutatedArtifactEvent(t, store, "nested-artifact-path", func(run *Run, _ ArtifactRef, payload *artifactWrittenPayload) {
 		nestedPath := "reports/000002-plan/evil.md"
+
 		if err := os.Mkdir(filepath.Join(run.Path, "reports", "000002-plan"), 0o750); err != nil {
 			t.Fatalf("mkdir nested artifact dir: %v", err)
 		}
+
 		if err := os.WriteFile(filepath.Join(run.Path, filepath.FromSlash(nestedPath)), []byte("evil\n"), 0o600); err != nil {
 			t.Fatalf("write nested artifact: %v", err)
 		}
+
 		payload.Artifact.Path = nestedPath
 	})
 
@@ -468,17 +502,21 @@ func TestLoadRejectsUnsupportedArtifactKind(t *testing.T) {
 func TestLoadIgnoresStatusRefMissingArtifactEvent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-event")
+
 	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
+
 	events := readRunEvents(t, run)
 	if err := writeInitialEventLog(filepath.Join(run.Path, eventsName+".next"), events[0]); err != nil {
 		t.Fatalf("write replacement events: %v", err)
 	}
+
 	if err := os.Rename(filepath.Join(run.Path, eventsName+".next"), runEventsPath(run)); err != nil {
 		t.Fatalf("replace events: %v", err)
 	}
+
 	status := readRunStatus(t, run)
 	status.LastSequence = 1
 	writeRunStatus(t, run, status)
@@ -487,6 +525,7 @@ func TestLoadIgnoresStatusRefMissingArtifactEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
+
 	if got := len(loaded.Status.Artifacts); got != 0 {
 		t.Fatalf("loaded artifact refs = %d, want 0 from event replay", got)
 	}

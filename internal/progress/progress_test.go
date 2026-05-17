@@ -32,7 +32,9 @@ func TestListenerAcceptsValidTokenBearingPayload(t *testing.T) {
 	if resp.Status != StatusAccepted {
 		t.Fatalf("response status = %q, want accepted: %s", resp.Status, resp.Error)
 	}
+
 	msg := receiveAccepted(t, l)
+
 	want := AcceptedMessage{StepID: "code", AttemptID: "attempt-001", Message: "editing code now"}
 	if msg != want {
 		t.Fatalf("accepted message = %+v, want %+v", msg, want)
@@ -77,13 +79,16 @@ func TestListenerRejectsMissingWrongOrMismatchedToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			l := newRegisteredListener(t, validRegistration)
+
 			resp := sendProgress(t, l.SocketPath(), tt.req)
 			if resp.Status != StatusRejected {
 				t.Fatalf("response status = %q, want rejected", resp.Status)
 			}
+
 			if resp.Error == "" {
 				t.Fatal("response error is empty, want actionable rejection error")
 			}
+
 			assertNoAccepted(t, l)
 		})
 	}
@@ -105,10 +110,12 @@ func TestListenerSanitizationAndInputRejection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			l := newRegisteredListener(t, validRegistration)
+
 			resp := sendProgress(t, l.SocketPath(), requestWithMessage(tt.message))
 			if resp.Status != tt.wantState {
 				t.Fatalf("response status = %q, want %q; error=%q", resp.Status, tt.wantState, resp.Error)
 			}
+
 			if tt.wantState == StatusAccepted {
 				msg := receiveAccepted(t, l)
 				if msg.Message != tt.want {
@@ -118,6 +125,7 @@ func TestListenerSanitizationAndInputRejection(t *testing.T) {
 				if resp.Error == "" {
 					t.Fatal("response error is empty, want rejection reason")
 				}
+
 				assertNoAccepted(t, l)
 			}
 		})
@@ -133,16 +141,20 @@ func TestListenerRateLimitDropsExcessMessages(t *testing.T) {
 			t.Fatalf("response %d status = %q, want accepted: %s", i, resp.Status, resp.Error)
 		}
 	}
+
 	resp := sendProgress(t, l.SocketPath(), requestWithMessage("burst"))
 	if resp.Status != StatusDropped {
 		t.Fatalf("fourth response status = %q, want dropped", resp.Status)
 	}
+
 	if resp.Error != "" {
 		t.Fatalf("dropped response error = %q, want empty", resp.Error)
 	}
+
 	for range 3 {
 		_ = receiveAccepted(t, l)
 	}
+
 	assertNoAccepted(t, l)
 }
 
@@ -158,26 +170,32 @@ func TestListenerRateLimiterRefillsExactlyOneTokenPerSecond(t *testing.T) {
 			t.Fatalf("response %d status = %q, want accepted: %s", i, resp.Status, resp.Error)
 		}
 	}
+
 	resp := l.evaluate(requestWithMessage("burst"))
 	if resp.Status != StatusDropped {
 		t.Fatalf("fourth response status = %q, want dropped", resp.Status)
 	}
+
 	for range 3 {
 		_ = receiveAccepted(t, l)
 	}
+
 	assertNoAccepted(t, l)
 
 	now = now.Add(time.Second)
+
 	resp = l.evaluate(requestWithMessage("refilled"))
 	if resp.Status != StatusAccepted {
 		t.Fatalf("one-second refill status = %q, want accepted: %s", resp.Status, resp.Error)
 	}
+
 	_ = receiveAccepted(t, l)
 
 	resp = l.evaluate(requestWithMessage("still limited"))
 	if resp.Status != StatusDropped {
 		t.Fatalf("second same-timestamp response status = %q, want dropped", resp.Status)
 	}
+
 	assertNoAccepted(t, l)
 }
 
@@ -193,24 +211,29 @@ func TestListenerRateLimiterCapacityStaysCappedAtBurst(t *testing.T) {
 			t.Fatalf("initial burst status = %q, want accepted: %s", resp.Status, resp.Error)
 		}
 	}
+
 	for range 3 {
 		_ = receiveAccepted(t, l)
 	}
 
 	now = now.Add(10 * time.Second)
+
 	for i := range 3 {
 		resp := l.evaluate(requestWithMessage("capped"))
 		if resp.Status != StatusAccepted {
 			t.Fatalf("capped burst response %d status = %q, want accepted: %s", i, resp.Status, resp.Error)
 		}
 	}
+
 	resp := l.evaluate(requestWithMessage("over cap"))
 	if resp.Status != StatusDropped {
 		t.Fatalf("post-refill fourth response status = %q, want dropped", resp.Status)
 	}
+
 	for range 3 {
 		_ = receiveAccepted(t, l)
 	}
+
 	assertNoAccepted(t, l)
 }
 
@@ -226,20 +249,24 @@ func TestListenerRateLimiterResetsOnRegistration(t *testing.T) {
 			t.Fatalf("initial attempt status = %q, want accepted: %s", resp.Status, resp.Error)
 		}
 	}
+
 	resp := l.evaluate(requestWithMessage("first attempt"))
 	if resp.Status != StatusDropped {
 		t.Fatalf("initial attempt fourth status = %q, want dropped", resp.Status)
 	}
+
 	for range 3 {
 		_ = receiveAccepted(t, l)
 	}
 
 	nextRegistration := validRegistration
 	nextRegistration.AttemptID = "attempt-002"
+
 	nextRegistration.Token = "token-002"
 	if err := l.Register(nextRegistration); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+
 	resp = l.evaluate(Request{
 		RunID:     nextRegistration.RunID,
 		StepID:    nextRegistration.StepID,
@@ -250,6 +277,7 @@ func TestListenerRateLimiterResetsOnRegistration(t *testing.T) {
 	if resp.Status != StatusAccepted {
 		t.Fatalf("new registration status = %q, want accepted: %s", resp.Status, resp.Error)
 	}
+
 	_ = receiveAccepted(t, l)
 	assertNoAccepted(t, l)
 }
@@ -266,9 +294,11 @@ func TestListenerDropsWhenAcceptedChannelIsFullWithoutBlockingClose(t *testing.T
 	}
 
 	done := make(chan error, 1)
+
 	go func() {
 		done <- l.Close()
 	}()
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -286,9 +316,11 @@ func TestSendUsesSocketProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send returned error: %v", err)
 	}
+
 	if resp.Status != StatusAccepted {
 		t.Fatalf("response status = %q, want accepted: %s", resp.Status, resp.Error)
 	}
+
 	msg := receiveAccepted(t, l)
 	if msg.Message != "sending from client" {
 		t.Fatalf("accepted message = %q, want client message", msg.Message)
@@ -305,19 +337,24 @@ func TestSendUnavailableSocket(t *testing.T) {
 func TestListenerCleanupRemovesSocketDirectory(t *testing.T) {
 	l := newRegisteredListener(t, validRegistration)
 	path := l.SocketPath()
+
 	dir := strings.TrimSuffix(path, "/"+socketName)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("socket path does not exist before close: %v", err)
 	}
+
 	if err := l.Close(); err != nil {
 		t.Fatalf("Close returned error: %v", err)
 	}
+
 	if _, ok := <-l.Accepted(); ok {
 		t.Fatal("accepted channel is still open after Close")
 	}
+
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("socket path stat after close error = %v, want not exist", err)
 	}
+
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("socket directory stat after close error = %v, want not exist", err)
 	}
@@ -325,10 +362,12 @@ func TestListenerCleanupRemovesSocketDirectory(t *testing.T) {
 
 func TestListenerCloseUnblocksIdleConnection(t *testing.T) {
 	l := newRegisteredListener(t, validRegistration)
+
 	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", l.SocketPath())
 	if err != nil {
 		t.Fatalf("DialTimeout returned error: %v", err)
 	}
+
 	defer func() {
 		_ = conn.Close()
 	}()
@@ -336,9 +375,11 @@ func TestListenerCloseUnblocksIdleConnection(t *testing.T) {
 	if err := l.Close(); err != nil {
 		t.Fatalf("Close returned error: %v", err)
 	}
+
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatalf("SetReadDeadline returned error: %v", err)
 	}
+
 	var b [1]byte
 	if _, err := conn.Read(b[:]); err == nil {
 		t.Fatal("Read after listener close returned nil error, want closed connection")
@@ -350,9 +391,11 @@ func TestGenerateTokenIsPrintableAndAtLeast128Bits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateToken returned error: %v", err)
 	}
+
 	if len(token) != 32 {
 		t.Fatalf("token length = %d, want 32 hex characters", len(token))
 	}
+
 	for _, r := range token {
 		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 			t.Fatalf("token contains non-hex printable rune %q", r)
@@ -362,10 +405,12 @@ func TestGenerateTokenIsPrintableAndAtLeast128Bits(t *testing.T) {
 
 func TestSocketDirectoryUsesPrivatePermissions(t *testing.T) {
 	l := newRegisteredListener(t, validRegistration)
+
 	info, err := os.Stat(strings.TrimSuffix(l.SocketPath(), "/"+socketName))
 	if err != nil {
 		t.Fatalf("stat socket directory: %v", err)
 	}
+
 	if got := info.Mode().Perm(); got != 0o700 {
 		t.Fatalf("socket directory mode = %o, want 700", got)
 	}
@@ -373,10 +418,12 @@ func TestSocketDirectoryUsesPrivatePermissions(t *testing.T) {
 
 func TestPackageHasNoRunStoreWorkflowOrReportDependencies(t *testing.T) {
 	cmd := exec.CommandContext(context.Background(), "go", "list", "-f", "{{join .Deps \"\\n\"}}", ".")
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list returned error: %v\n%s", err, out)
 	}
+
 	for dep := range strings.SplitSeq(string(out), "\n") {
 		switch dep {
 		case "tiny-llm-orchestrator/orc/internal/runstore",
@@ -394,19 +441,23 @@ func newRegisteredListener(t *testing.T, reg Registration) *Listener {
 
 func newRegisteredListenerWithClock(t *testing.T, reg Registration, now func() time.Time) *Listener {
 	t.Helper()
+
 	l, err := NewListener()
 	if err != nil {
 		t.Fatalf("NewListener returned error: %v", err)
 	}
+
 	t.Cleanup(func() {
 		if err := l.Close(); err != nil {
 			t.Fatalf("Close returned error: %v", err)
 		}
 	})
+
 	l.now = now
 	if err := l.Register(reg); err != nil {
 		t.Fatalf("Register returned error: %v", err)
 	}
+
 	return l
 }
 
@@ -422,28 +473,35 @@ func requestWithMessage(message string) Request {
 
 func sendProgress(t *testing.T, socketPath string, req Request) Response {
 	t.Helper()
+
 	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", socketPath)
 	if err != nil {
 		t.Fatalf("DialTimeout returned error: %v", err)
 	}
+
 	defer func() {
 		_ = conn.Close()
 	}()
+
 	if err := conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatalf("SetDeadline returned error: %v", err)
 	}
+
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}
+
 	var resp Response
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
 		t.Fatalf("Decode response returned error: %v", err)
 	}
+
 	return resp
 }
 
 func receiveAccepted(t *testing.T, l *Listener) AcceptedMessage {
 	t.Helper()
+
 	select {
 	case msg := <-l.Accepted():
 		return msg
@@ -455,6 +513,7 @@ func receiveAccepted(t *testing.T, l *Listener) AcceptedMessage {
 
 func assertNoAccepted(t *testing.T, l *Listener) {
 	t.Helper()
+
 	select {
 	case msg := <-l.Accepted():
 		t.Fatalf("unexpected accepted message: %+v", msg)

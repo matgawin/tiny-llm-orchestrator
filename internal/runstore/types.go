@@ -64,6 +64,7 @@ func (err *ReportTargetError) Error() string {
 	if err == nil || err.Err == nil {
 		return "report does not target current active attempt"
 	}
+
 	return err.Err.Error()
 }
 
@@ -71,6 +72,7 @@ func (err *ReportTargetError) Unwrap() error {
 	if err == nil {
 		return nil
 	}
+
 	return err.Err
 }
 
@@ -85,6 +87,7 @@ func (err *StateMismatchError) Error() string {
 	if err == nil {
 		return "run state did not match expected state"
 	}
+
 	return fmt.Sprintf("run %q state is %q, want %q", err.RunID, err.Got, err.Want)
 }
 
@@ -619,6 +622,7 @@ func (e *EventAppendError) Error() string {
 	if e.PossiblyAppended {
 		return fmt.Sprintf("%s append possibly committed: %v", e.Path, e.Err)
 	}
+
 	return fmt.Sprintf("%s append failed: %v", e.Path, e.Err)
 }
 

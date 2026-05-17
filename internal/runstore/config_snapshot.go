@@ -55,9 +55,11 @@ func (s *Store) WriteInitialConfigSnapshotContext(ctx context.Context, runID str
 	if snapshot.Version == 0 {
 		snapshot.Version = 1
 	}
+
 	if snapshot.Version != 1 {
 		return stableerr.Errorf("initial config snapshot version = %d, want 1", snapshot.Version)
 	}
+
 	return s.writeConfigSnapshot(ctx, runID, snapshot, true)
 }
 
@@ -71,56 +73,72 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 	if ctx == nil {
 		return ConfigSnapshotRefresh{}, stableerr.New("context is required")
 	}
+
 	if req.Source == "" {
 		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh source is required")
 	}
+
 	if req.ManifestHashAlgorithm == "" {
 		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh manifest hash algorithm is required")
 	}
+
 	if req.ManifestHash == "" {
 		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh manifest hash is required")
 	}
+
 	if validate == nil {
 		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot refresh validator is required")
 	}
+
 	if err := validateRunID(runID); err != nil {
 		return ConfigSnapshotRefresh{}, err
 	}
+
 	if len(req.Snapshot.Resolved) == 0 {
 		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot resolved.json content is required")
 	}
+
 	if len(req.Snapshot.Manifest) == 0 {
 		return ConfigSnapshotRefresh{}, stableerr.New("config snapshot manifest.json content is required")
 	}
 
 	var refresh ConfigSnapshotRefresh
+
 	err := s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("refresh config snapshot context: %w", err)
 		}
+
 		run, err := s.load(runID)
 		if err != nil {
 			return err
 		}
+
 		configDir := filepath.Join(run.Path, configDirName)
 		currentPath := filepath.Join(configDir, configCurrentName)
+
 		current, err := readConfigCurrentFile(currentPath)
 		if err != nil {
 			return fmt.Errorf("run %q config snapshot %s: %w", runID, configCurrentName, err)
 		}
+
 		if err := validate(run, CurrentConfigSnapshot{Version: current.Version, VersionDir: current.VersionDir}); err != nil {
 			return err
 		}
+
 		if req.Snapshot.Version != current.Version+1 {
 			return stableerr.Errorf("run %q refresh config snapshot version = %d, want %d", runID, req.Snapshot.Version, current.Version+1)
 		}
+
 		newVersionDir, err := configVersionDir(req.Snapshot.Version)
 		if err != nil {
 			return err
 		}
+
 		if err := s.writeConfigSnapshotLocked(run, req.Snapshot); err != nil {
 			return err
 		}
+
 		payload := configSnapshotRefreshedPayload{
 			OldVersion:            current.Version,
 			OldVersionDir:         current.VersionDir,
@@ -130,11 +148,14 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 			ManifestHash:          req.ManifestHash,
 			Source:                req.Source,
 		}
+
 		eventPayload, err := marshalPayload(payload)
 		if err != nil {
 			return err
 		}
+
 		event := Event{Time: req.Time, Type: EventConfigSnapshotRefreshed, Payload: eventPayload}
+
 		_, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
@@ -142,6 +163,7 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 		if err != nil {
 			return err
 		}
+
 		refresh = ConfigSnapshotRefresh{
 			OldVersion:            current.Version,
 			OldVersionDir:         current.VersionDir,
@@ -152,11 +174,13 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 			Source:                req.Source,
 			Event:                 event,
 		}
+
 		return nil
 	})
 	if err != nil {
 		return ConfigSnapshotRefresh{}, err
 	}
+
 	return refresh, nil
 }
 
@@ -164,23 +188,29 @@ func (s *Store) writeConfigSnapshot(ctx context.Context, runID string, snapshot 
 	if ctx == nil {
 		return stableerr.New("context is required")
 	}
+
 	if err := validateRunID(runID); err != nil {
 		return err
 	}
+
 	if len(snapshot.Resolved) == 0 {
 		return stableerr.New("config snapshot resolved.json content is required")
 	}
+
 	if len(snapshot.Manifest) == 0 {
 		return stableerr.New("config snapshot manifest.json content is required")
 	}
+
 	return s.withRunLockContext(ctx, runID, func() error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("write config snapshot: %w", err)
 		}
+
 		run, err := s.load(runID)
 		if err != nil {
 			return err
 		}
+
 		if initial {
 			currentPath := filepath.Join(run.Path, configDirName, configCurrentName)
 			if _, err := os.Lstat(currentPath); err == nil {
@@ -189,6 +219,7 @@ func (s *Store) writeConfigSnapshot(ctx context.Context, runID string, snapshot 
 				return fmt.Errorf("run %q config snapshot current.json: %w", runID, err)
 			}
 		}
+
 		return s.writeConfigSnapshotLocked(run, snapshot)
 	})
 }
@@ -198,6 +229,7 @@ func (s *Store) writeConfigSnapshotLocked(run *Run, snapshot ConfigSnapshot) err
 	if err != nil {
 		return err
 	}
+
 	currentContent, err := json.MarshalIndent(configCurrent{
 		SchemaVersion: configSnapshotVersion,
 		Version:       snapshot.Version,
@@ -206,24 +238,31 @@ func (s *Store) writeConfigSnapshotLocked(run *Run, snapshot ConfigSnapshot) err
 	if err != nil {
 		return fmt.Errorf("write config snapshot locked: %w", err)
 	}
+
 	currentContent = append(currentContent, '\n')
 	configDir := filepath.Join(run.Path, configDirName)
 	currentPath := filepath.Join(configDir, configCurrentName)
+
 	versionPath := filepath.Join(configDir, versionDir)
 	if err := ensureConfigSnapshotDir(configDir, versionPath); err != nil {
 		return fmt.Errorf("run %q config snapshot %s: %w", run.ID, versionDir, err)
 	}
+
 	resolvedPath := filepath.Join(versionPath, configResolvedName)
 	manifestPath := filepath.Join(versionPath, configManifestName)
+
 	if err := writeNewRegularFile(resolvedPath, snapshot.Resolved); err != nil {
 		return fmt.Errorf("run %q config snapshot %s/%s: %w", run.ID, versionDir, configResolvedName, err)
 	}
+
 	if err := writeNewRegularFile(manifestPath, snapshot.Manifest); err != nil {
 		return fmt.Errorf("run %q config snapshot %s/%s: %w", run.ID, versionDir, configManifestName, err)
 	}
+
 	if err := writeAtomic(currentPath, currentContent); err != nil {
 		return fmt.Errorf("run %q config snapshot %s: %w", run.ID, configCurrentName, err)
 	}
+
 	return nil
 }
 
@@ -231,27 +270,34 @@ func readConfigCurrentFile(path string) (configCurrent, error) {
 	if err := validateRegularFile(path, configCurrentName); err != nil {
 		return configCurrent{}, err
 	}
+
 	content, err := os.ReadFile(path) // #nosec G304 -- path is derived from a validated run directory.
 	if err != nil {
 		return configCurrent{}, fmt.Errorf("read config current file: %w", err)
 	}
+
 	var current configCurrent
 	if err := json.Unmarshal(content, &current); err != nil {
 		return configCurrent{}, fmt.Errorf("decode current snapshot: %w", err)
 	}
+
 	if current.SchemaVersion != configSnapshotVersion {
 		return configCurrent{}, stableerr.Errorf("schema_version = %d, want %d", current.SchemaVersion, configSnapshotVersion)
 	}
+
 	if current.Version <= 0 {
 		return configCurrent{}, stableerr.New("version must be positive")
 	}
+
 	wantDir, err := configVersionDir(current.Version)
 	if err != nil {
 		return configCurrent{}, err
 	}
+
 	if current.VersionDir != wantDir {
 		return configCurrent{}, stableerr.Errorf("version_dir = %q, want %q", current.VersionDir, wantDir)
 	}
+
 	return current, nil
 }
 
@@ -259,6 +305,7 @@ func configVersionDir(version int) (string, error) {
 	if version <= 0 || version > 999999 {
 		return "", stableerr.Errorf("config snapshot version %d is outside supported range 1..999999", version)
 	}
+
 	return fmt.Sprintf("%06d", version), nil
 }
 
@@ -266,20 +313,25 @@ func ensureConfigSnapshotDir(configDir, versionPath string) error {
 	if err := ensureDir(configDir); err != nil {
 		return err
 	}
+
 	versionName := filepath.Base(versionPath)
 	if _, err := strconv.Atoi(versionName); err != nil || len(versionName) != 6 {
 		return stableerr.Errorf("invalid config snapshot version directory %q", versionName)
 	}
+
 	info, err := os.Lstat(versionPath)
 	if os.IsNotExist(err) {
-		if err := os.Mkdir(versionPath, 0o750); err != nil { // #nosec G301 -- versionPath is scoped under a validated run directory.
+		if err := os.Mkdir(versionPath, runDirPerm); err != nil { // #nosec G301 -- versionPath is scoped under a validated run directory.
 			return fmt.Errorf("ensure config snapshot dir: %w", err)
 		}
+
 		info, err = os.Lstat(versionPath)
 	}
+
 	if err != nil {
 		return fmt.Errorf("ensure config snapshot dir: %w", err)
 	}
+
 	return validateDirInfo(versionPath, info)
 }
 
@@ -289,5 +341,6 @@ func writeNewRegularFile(path string, content []byte) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("write new regular file: %w", err)
 	}
+
 	return writeAtomic(path, content)
 }

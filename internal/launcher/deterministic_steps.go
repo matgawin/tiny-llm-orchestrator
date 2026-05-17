@@ -30,6 +30,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateCanceled, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	promptRef, err := loaded.Store.WriteArtifactContext(ctx, opts.RunID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    attempt.StepID + "-system",
@@ -40,6 +41,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	attempt, _, err = loaded.Store.RecordAttemptPromptContext(ctx, opts.RunID, runstore.AttemptPromptRequest{
 		AttemptID: attempt.AttemptID,
 		PromptRef: promptRef,
@@ -49,6 +51,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStatePromptRecordFail, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	processLogRef, err := loaded.Store.WriteArtifactContext(ctx, opts.RunID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    attempt.StepID + "-" + attempt.AttemptID + "-process",
@@ -59,6 +62,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateLogStartFailed, runstore.ArtifactRef{}, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	attempt, _, err = loaded.Store.RecordAttemptLogContext(ctx, opts.RunID, runstore.AttemptLogRequest{
 		AttemptID: attempt.AttemptID,
 		LogRef:    processLogRef,
@@ -68,48 +72,59 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		finished, finishErr := finishProcessErrorAttempt(ctx, loaded.Store, opts.RunID, attempt.AttemptID, exitStateLogStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	command, cwd, env, err := deterministicExecSpec(loaded.Project.Root, step)
 	if err != nil {
 		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, nil, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	env = mergeEnv(env, progressEnv)
+
 	execPath, err := deterministicCommandPath(command, env, cwd)
 	if err != nil {
 		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	cmd := exec.CommandContext(ctx, execPath, command[1:]...) // #nosec G204 -- workflow command argv is the configured v1 command-step contract.
 	cmd.Args = append([]string(nil), command...)
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	stdoutFile, stdoutPath, err := openDeterministicOutputFile(attempt, "stdout")
 	if err != nil {
 		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
 	defer removeDeterministicOutput(stdoutFile, stdoutPath)
+
 	stderrFile, stderrPath, err := openDeterministicOutputFile(attempt, "stderr")
 	if err != nil {
 		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
 	defer removeDeterministicOutput(stderrFile, stderrPath)
+
 	cmd.Stdout = stdoutFile
+
 	cmd.Stderr = stderrFile
 	if err := cmd.Start(); err != nil {
 		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, false, finishErr
 	}
+
 	processStartTime, err := processStartIdentity(cmd.Process.Pid)
 	if err != nil {
 		terminateProcessGroup(cmd.Process.Pid)
 		_, _ = cmd.Process.Wait()
 		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, true, finishErr
 	}
+
 	attempt, _, err = loaded.Store.RecordAttemptProcessContext(ctx, opts.RunID, runstore.AttemptProcessRequest{
 		AttemptID:        attempt.AttemptID,
 		PID:              cmd.Process.Pid,
@@ -120,15 +135,19 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		terminateProcessGroup(cmd.Process.Pid)
 		_, _ = cmd.Process.Wait()
 		finished, finishErr := recordDeterministicProcessError(ctx, loaded.Store, opts.RunID, attempt, step, command, exitStateStartFailed, processLogRef, at, err)
+
 		return finished, runstore.ArtifactRef{}, runstore.ArtifactRef{}, true, finishErr
 	}
+
 	waitResult := waitForDeterministicProcess(ctx, loaded.Workflow.Defaults.Timeout.Duration, cmd)
 	stdoutCloseErr := stdoutFile.Close()
 	stderrCloseErr := stderrFile.Close()
 	stdoutTail, stdoutTailErr := boundedLogTailFromFile(stdoutPath)
 	stderrTail, stderrTailErr := boundedLogTailFromFile(stderrPath)
+
 	persistCtx, persistCancel := context.WithTimeout(cleanupContext(ctx), launchCleanupTimeout)
 	defer persistCancel()
+
 	stdoutRef, stdoutErr := loaded.Store.WriteArtifactFromFileContext(persistCtx, opts.RunID, runstore.Artifact{
 		Kind: runstore.KindLog,
 		Name: attempt.StepID + "-" + attempt.AttemptID + "-stdout",
@@ -161,6 +180,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 		LogRef:    refPtr(processLogRef),
 		Time:      at,
 	})
+
 	return finished, stdoutRef, stderrRef, true, errors.Join(stdoutCloseErr, stderrCloseErr, stdoutTailErr, stderrTailErr, stdoutErr, stderrErr, reportErr, outcomeErr, waitResult.ctxErr)
 }
 
@@ -171,6 +191,7 @@ func deterministicPromptContent(workflowName string, attempt runstore.Attempt, s
 	fmt.Fprintf(&out, "- step_id: `%s`\n", attempt.StepID)
 	fmt.Fprintf(&out, "- kind: `%s`\n", step.EffectiveKind())
 	fmt.Fprintf(&out, "- attempt_id: `%s`\n", attempt.AttemptID)
+
 	return []byte(out.String())
 }
 
@@ -179,10 +200,13 @@ func recordDeterministicProcessError(ctx context.Context, store *runstore.Store,
 	if err := validateGeneratedOutcome(step, status, result); err != nil {
 		causes = append(causes, err)
 	}
+
 	if len(command) == 0 {
 		command = []string{step.EffectiveKind()}
 	}
+
 	summary := deterministicReportSummary(step.EffectiveKind(), command, status, result, "", "")
+
 	finished, _, reportErr := store.RecordAttemptReportContext(ctx, runID, runstore.RecordReportRequest{
 		State:                runstore.AttemptStateReported,
 		Report:               deterministicReport(runID, attempt, status, result, summary, command),
@@ -194,7 +218,9 @@ func recordDeterministicProcessError(ctx context.Context, store *runstore.Store,
 	if reportErr == nil {
 		return finished, errors.Join(causes...)
 	}
+
 	finished, finishErr := finishProcessErrorAttempt(ctx, store, runID, attempt.AttemptID, exitState, logRef, at, causes...)
+
 	return finished, errors.Join(reportErr, finishErr)
 }
 
@@ -216,6 +242,7 @@ func validateGeneratedOutcome(step config.Step, status, result string) error {
 	if slices.Contains(step.AllowedResults[status], result) {
 		return nil
 	}
+
 	return stableerr.Errorf("step generated outcome %q is not declared in allowed_results", status+"/"+result)
 }
 
@@ -224,7 +251,9 @@ func openDeterministicOutputFile(attempt runstore.Attempt, stream string) (*os.F
 	if err != nil {
 		return nil, "", fmt.Errorf("open deterministic output file: %w", err)
 	}
+
 	name := file.Name()
+
 	return file, name, nil
 }
 
@@ -232,6 +261,7 @@ func removeDeterministicOutput(file *os.File, path string) {
 	if file != nil {
 		_ = file.Close()
 	}
+
 	if path != "" {
 		_ = os.Remove(path)
 	}
@@ -244,9 +274,12 @@ func deterministicExecSpec(root string, step config.Step) ([]string, string, []s
 		if err != nil {
 			return nil, "", nil, err
 		}
+
 		cwd = resolved
 	}
+
 	var command []string
+
 	switch step.EffectiveKind() {
 	case config.StepKindCommand:
 		command = append([]string(nil), step.Command.Argv...)
@@ -255,11 +288,14 @@ func deterministicExecSpec(root string, step config.Step) ([]string, string, []s
 		if err != nil {
 			return nil, "", nil, err
 		}
+
 		command = append([]string{path}, step.Script.Args...)
 	default:
 		return nil, "", nil, stableerr.Errorf("step kind %q is not deterministic", step.EffectiveKind())
 	}
+
 	env := mergeEnv(os.Environ(), step.Env)
+
 	return command, cwd, env, nil
 }
 
@@ -267,6 +303,7 @@ func deterministicCommandPath(command, env []string, cwd string) (string, error)
 	if len(command) == 0 || command[0] == "" {
 		return "", stableerr.New("command argv[0] is required")
 	}
+
 	return resolveWorkerExecutable(command[0], env, cwd)
 }
 
@@ -278,28 +315,35 @@ type deterministicWaitResult struct {
 
 func waitForDeterministicProcess(ctx context.Context, timeout time.Duration, cmd *exec.Cmd) deterministicWaitResult {
 	done := make(chan error, 1)
+
 	go func() {
 		done <- cmd.Wait()
 	}()
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
+
 	select {
 	case err := <-done:
 		terminateProcessGroup(cmd.Process.Pid)
 		return deterministicWaitResult{err: err}
 	case <-timer.C:
 		terminateProcessGroup(cmd.Process.Pid)
+
 		err := <-done
 		if err == nil {
 			err = context.DeadlineExceeded
 		}
+
 		return deterministicWaitResult{err: err, workflowTimeout: true}
 	case <-ctx.Done():
 		terminateProcessGroup(cmd.Process.Pid)
+
 		err := <-done
 		if err == nil {
 			err = ctx.Err()
 		}
+
 		return deterministicWaitResult{err: err, ctxErr: ctx.Err()}
 	}
 }
@@ -308,33 +352,41 @@ func deterministicOutcome(result deterministicWaitResult) (string, string, *int,
 	if result.workflowTimeout {
 		return workflow.ReportStatusFailed, resultTimeout, nil, exitStateTimeout
 	}
+
 	if result.ctxErr != nil {
 		return workflow.ReportStatusFailed, resultProcessError, nil, exitStateCanceled
 	}
+
 	if result.err == nil {
 		code := 0
 		return workflow.ReportStatusDone, resultCommandPassed, &code, exitStateExited
 	}
+
 	var exitErr *exec.ExitError
 	if errors.As(result.err, &exitErr) {
 		code := exitErr.ExitCode()
 		return workflow.ReportStatusDone, resultCommandFailed, &code, exitStateExited
 	}
+
 	return workflow.ReportStatusFailed, resultProcessError, nil, result.err.Error()
 }
 
 func deterministicReportSummary(kind string, command []string, status, result, stdoutTail, stderrTail string) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "%s step finished with %s/%s: %s", kind, status, result, strings.Join(command, " "))
+
 	if status == workflow.ReportStatusDone && result == resultCommandPassed {
 		return out.String()
 	}
+
 	if stdoutTail != "" {
 		fmt.Fprintf(&out, "\n\nstdout tail:\n%s", stdoutTail)
 	}
+
 	if stderrTail != "" {
 		fmt.Fprintf(&out, "\n\nstderr tail:\n%s", stderrTail)
 	}
+
 	return out.String()
 }
 
@@ -343,31 +395,39 @@ func boundedLogTailFromFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
+
 	defer func() {
 		_ = file.Close()
 	}()
+
 	info, err := file.Stat()
 	if err != nil {
 		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
+
 	start := int64(0)
 	truncated := false
+
 	if info.Size() > failureTailBytes {
 		start = info.Size() - failureTailBytes
 		truncated = true
 	}
+
 	if _, err := file.Seek(start, io.SeekStart); err != nil {
 		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
+
 	content, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("bounded log tail from file: %w", err)
 	}
+
 	if truncated {
 		if i := bytes.IndexByte(content, '\n'); i >= 0 && i+1 < len(content) {
 			content = content[i+1:]
 		}
 	}
+
 	return boundedLogTail(content), nil
 }
 
@@ -378,9 +438,11 @@ func boundedLogTail(content []byte) string {
 			content = content[i+1:]
 		}
 	}
+
 	lines := bytes.Split(content, []byte{'\n'})
 	if len(lines) > failureTailLines {
 		lines = lines[len(lines)-failureTailLines:]
 	}
+
 	return strings.TrimRight(string(bytes.Join(lines, []byte{'\n'})), "\n")
 }

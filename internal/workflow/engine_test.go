@@ -206,6 +206,7 @@ func TestEvaluateSelectsStartForNewRunningRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate returned error: %v", err)
 	}
+
 	assertSelectedStep(t, decision, stepPlan)
 }
 
@@ -224,6 +225,7 @@ func TestEvaluateSelectedStepPreservesRetryLineage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate selected retry step returned error: %v", err)
 	}
+
 	assertSelectedStepWithRetry(t, decision, stepPlan, pairFailedMissingReport, 1)
 
 	outcome := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: "missing_report"}
@@ -239,6 +241,7 @@ func TestEvaluateWaitsWhenActiveAttemptExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate returned error: %v", err)
 	}
+
 	assertWaitActiveAttempt(t, decision)
 }
 
@@ -247,6 +250,7 @@ func TestEvaluateTreatsCancelledAsTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate returned error: %v", err)
 	}
+
 	assertTerminalDecision(t, decision, RunStatusCancelled)
 }
 
@@ -316,6 +320,7 @@ func TestEvaluateAlternatingRetryableOutcomesShareStepLineage(t *testing.T) {
 
 	decision = evaluateRunningOutcome(t, workflow, processError, decision.Retry)
 	assertRetryStep(t, decision, stepPlan, pairFailedProcessError, 1)
+
 	if decision.Retry.Counts[pairFailedMissingReport] != 1 {
 		t.Fatalf("retry lineage = %+v, want missing_report count preserved", decision.Retry)
 	}
@@ -344,6 +349,7 @@ func TestEvaluateRejectsUndeclaredSynthesizedFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Evaluate returned nil error, want undeclared synthesized failure error")
 	}
+
 	if !strings.Contains(err.Error(), `step "plan" outcome "failed/timeout" is not declared`) {
 		t.Fatalf("error = %v, want undeclared outcome", err)
 	}
@@ -367,10 +373,12 @@ func implementationWorkflow(t *testing.T) config.Workflow {
 	if err != nil {
 		t.Fatalf("load scaffold config: %v", err)
 	}
+
 	workflow, ok := project.Workflows["implementation"]
 	if !ok {
 		t.Fatal("scaffold config did not load implementation workflow")
 	}
+
 	return workflow
 }
 
@@ -388,6 +396,7 @@ func reentryRetryWorkflow() config.Workflow {
 			"done/failed": "code",
 		},
 	}
+
 	return retryWorkflow("reentry", map[string]string{pairFailedError: "test"}, &testStep)
 }
 
@@ -398,6 +407,7 @@ func retryWorkflow(name string, codeTransitions map[string]string, testStep *con
 	if testStep != nil {
 		steps["test"] = *testStep
 	}
+
 	return config.Workflow{
 		Name:  name,
 		Start: "code",
@@ -434,6 +444,7 @@ func evaluateRunningOutcome(t *testing.T, workflow config.Workflow, outcome Outc
 	if err != nil {
 		t.Fatalf("Evaluate returned error: %v", err)
 	}
+
 	return decision
 }
 
@@ -443,9 +454,11 @@ func assertDecision(t *testing.T, got, want Decision) {
 	if got.Kind != want.Kind {
 		t.Fatalf("decision = %+v, want kind %q", got, want.Kind)
 	}
+
 	if got.Step != want.Step {
 		t.Fatalf("decision = %+v, want step %q", got, want.Step)
 	}
+
 	if got.RunStatus != want.RunStatus {
 		t.Fatalf("decision = %+v, want run status %q", got, want.RunStatus)
 	}
@@ -464,9 +477,11 @@ func assertSelectedStepWithRetry(t *testing.T, decision Decision, step, pair str
 
 	want := Decision{Kind: DecisionSelectStep, Step: step, RunStatus: RunStatusRunning}
 	assertDecision(t, decision, want)
+
 	if decision.Retry.Step != step {
 		t.Fatalf("retry lineage = %+v, want step %q", decision.Retry, step)
 	}
+
 	if decision.Retry.Counts[pair] != count {
 		t.Fatalf("retry lineage = %+v, want pair %q count %d", decision.Retry, pair, count)
 	}
@@ -477,9 +492,11 @@ func assertRetryStep(t *testing.T, decision Decision, step, pair string, count i
 
 	want := Decision{Kind: DecisionRetryStep, Step: step, RunStatus: RunStatusRunning}
 	assertDecision(t, decision, want)
+
 	if decision.Retry.Step != step {
 		t.Fatalf("retry lineage = %+v, want step %q", decision.Retry, step)
 	}
+
 	if decision.Retry.Counts[pair] != count {
 		t.Fatalf("retry lineage = %+v, want pair %q count %d", decision.Retry, pair, count)
 	}

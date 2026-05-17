@@ -19,6 +19,7 @@ func Evaluate(workflow config.Workflow, state RunState) (Decision, error) {
 		if state.Status == "" {
 			return Decision{}, stableerr.Errorf("run status is required")
 		}
+
 		return Decision{}, stableerr.Errorf("unsupported run status %q", state.Status)
 	}
 
@@ -26,9 +27,11 @@ func Evaluate(workflow config.Workflow, state RunState) (Decision, error) {
 		if state.SelectedStep != "" {
 			return Decision{}, stableerr.Errorf("running state has both selected step %q and active attempt", state.SelectedStep)
 		}
+
 		if state.Outcome != nil {
 			return Decision{}, stableerr.Errorf("running state has both active attempt and terminal outcome")
 		}
+
 		return Decision{Kind: DecisionWaitActiveAttempt, RunStatus: RunStatusRunning}, nil
 	}
 
@@ -37,12 +40,15 @@ func Evaluate(workflow config.Workflow, state RunState) (Decision, error) {
 		if step == "" {
 			step = workflow.Start
 		}
+
 		if _, ok := workflow.Steps[step]; !ok {
 			return Decision{}, stableerr.Errorf("selected step %q is not declared", step)
 		}
+
 		if err := validateRetryLineage(state.Retry, step); err != nil {
 			return Decision{}, err
 		}
+
 		return Decision{Kind: DecisionSelectStep, Step: step, RunStatus: RunStatusRunning, Retry: state.Retry}, nil
 	}
 
@@ -53,25 +59,31 @@ func evaluateOutcome(workflow config.Workflow, state RunState) (Decision, error)
 	if state.SelectedStep == "" {
 		return Decision{}, stableerr.Errorf("selected step is required when evaluating an outcome")
 	}
+
 	outcome := *state.Outcome
 	if outcome.Step == "" {
 		return Decision{}, stableerr.Errorf("outcome step is required")
 	}
+
 	if outcome.Step != state.SelectedStep {
 		return Decision{}, stableerr.Errorf("outcome step %q does not match selected step %q", outcome.Step, state.SelectedStep)
 	}
+
 	step, ok := workflow.Steps[outcome.Step]
 	if !ok {
 		return Decision{}, stableerr.Errorf("outcome step %q is not declared", outcome.Step)
 	}
+
 	pair := pairKey(outcome.Status, outcome.Result)
 	if !allowedPair(step, outcome.Status, outcome.Result) {
 		return Decision{}, stableerr.Errorf("step %q outcome %q is not declared in allowed_results", outcome.Step, pair)
 	}
+
 	target, ok := step.On[pair]
 	if !ok {
 		return Decision{}, stableerr.Errorf("step %q outcome %q has no deterministic transition", outcome.Step, pair)
 	}
+
 	if err := validateRetryLineage(state.Retry, outcome.Step); err != nil {
 		return Decision{}, err
 	}
@@ -80,17 +92,20 @@ func evaluateOutcome(workflow config.Workflow, state RunState) (Decision, error)
 	if state.Retry.Step == outcome.Step {
 		retryCount = state.Retry.Counts[pair]
 	}
+
 	maxRetries := workflow.Defaults.Retries[pair]
 	if retryCount < maxRetries {
 		counts := maps.Clone(state.Retry.Counts)
 		if counts == nil {
 			counts = map[string]int{}
 		}
+
 		counts[pair] = retryCount + 1
 		nextRetry := RetryLineage{
 			Step:   outcome.Step,
 			Counts: counts,
 		}
+
 		return Decision{
 			Kind:      DecisionRetryStep,
 			Step:      outcome.Step,
@@ -102,9 +117,11 @@ func evaluateOutcome(workflow config.Workflow, state RunState) (Decision, error)
 	if _, targetIsStep := workflow.Steps[target]; targetIsStep {
 		return Decision{Kind: DecisionSelectStep, Step: target, RunStatus: RunStatusRunning}, nil
 	}
+
 	if isTerminalRunStatus(target) {
 		return Decision{Kind: DecisionTerminal, RunStatus: target}, nil
 	}
+
 	return Decision{}, stableerr.Errorf("step %q outcome %q targets unknown step or terminal state %q", outcome.Step, pair, target)
 }
 
@@ -112,14 +129,17 @@ func validateRetryLineage(retry RetryLineage, step string) error {
 	if retry.Step != "" && retry.Step != step {
 		return stableerr.Errorf("retry lineage step %q does not match selected step %q", retry.Step, step)
 	}
+
 	for pair, count := range retry.Counts {
 		if count < 0 {
 			return stableerr.Errorf("retry count for %q must be >= 0, got %d", pair, count)
 		}
 	}
+
 	if retry.Step == "" && len(retry.Counts) > 0 {
 		return stableerr.Errorf("retry lineage step is required when retry counts are present")
 	}
+
 	return nil
 }
 
@@ -128,6 +148,7 @@ func allowedPair(step config.Step, status, result string) bool {
 	if !ok {
 		return false
 	}
+
 	return slices.Contains(results, result)
 }
 

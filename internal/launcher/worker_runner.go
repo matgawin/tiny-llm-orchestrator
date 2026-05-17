@@ -32,6 +32,8 @@ const (
 
 	runtimePromptDeliveryStdin = "stdin"
 	runtimePromptDeliveryFile  = "file"
+
+	reportPollInterval = 10 * time.Millisecond
 )
 
 var runtimeArgPlaceholderRegex = regexp.MustCompile(`\{[^{}]+\}`)
@@ -46,6 +48,7 @@ func runProcess(ctx context.Context, loaded runcontext.Context, opts Options, at
 		at:          at,
 		progressEnv: progressEnv,
 	}
+
 	return runner.run(ctx)
 }
 
@@ -71,27 +74,35 @@ func (r *workerRunner) run(ctx context.Context) (runstore.Attempt, runstore.Arti
 	if finished, err := r.selectCommand(ctx); err != nil {
 		return finished, runstore.ArtifactRef{}, false, err
 	}
+
 	if finished, err := r.openLog(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
+
 	defer func() {
 		_ = r.logFile.Close()
 	}()
+
 	if finished, err := r.prepareWorkerCommand(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
+
 	defer func() {
 		if r.releaseExec != nil {
 			_ = r.releaseExec(false)
 		}
 	}()
+
 	if finished, err := r.startWorker(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
+
 	if finished, err := r.recordProcessAndRelease(ctx); err != nil {
 		return finished, r.logRef, false, err
 	}
+
 	finished, err := r.feedPromptWaitAndFinish(ctx)
+
 	return finished, r.logRef, true, err
 }
 
@@ -99,6 +110,7 @@ func (r *workerRunner) context() context.Context {
 	if r.ctx != nil {
 		return r.ctx
 	}
+
 	return context.Background()
 }
 
@@ -109,18 +121,22 @@ func (r *workerRunner) selectCommand(ctx context.Context) (runstore.Attempt, err
 		if err != nil {
 			return r.finishPreStartContext(ctx, exitStateInvalidCommand, runstore.ArtifactRef{}, err)
 		}
+
 		r.command = command
 		r.promptMode = promptMode
 	} else {
 		r.promptMode = runtimePromptDeliveryStdin
 	}
+
 	if r.command[0] == "" {
 		err := stableerr.New("worker command is required")
 		return r.finishPreStartContext(ctx, exitStateInvalidCommand, runstore.ArtifactRef{}, err)
 	}
+
 	if err := ctx.Err(); err != nil {
 		return r.finishPreStartContext(ctx, exitStateCanceled, runstore.ArtifactRef{}, err)
 	}
+
 	return runstore.Attempt{}, nil
 }
 
@@ -129,18 +145,22 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 	if !ok {
 		return nil, "", stableerr.Errorf("step %q is not configured", r.attempt.StepID)
 	}
+
 	runtimeID := r.loaded.Workflow.EffectiveRuntime(step)
 	if runtimeID == "" {
 		return nil, "", stableerr.Errorf("step %q has no effective runtime", r.attempt.StepID)
 	}
+
 	runtime, ok := r.loaded.Project.Runtimes[runtimeID]
 	if !ok {
 		return nil, "", stableerr.Errorf("step %q references missing runtime %q", r.attempt.StepID, runtimeID)
 	}
+
 	promptMode := runtime.Prompt.Delivery
 	if promptMode != runtimePromptDeliveryStdin && promptMode != runtimePromptDeliveryFile {
 		return nil, "", stableerr.Errorf("runtime %q prompt.delivery %q is unsupported by launcher", runtimeID, promptMode)
 	}
+
 	sandboxMode := r.loaded.Project.Config.Sandbox != nil && verifyWorkerRepoSandbox(r.loaded.Project.Root) == nil
 	values := runtimePlaceholderValues{
 		model:      r.loaded.Workflow.EffectiveModel(step, runtime),
@@ -151,15 +171,18 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 		attemptID:  r.attempt.AttemptID,
 		runID:      r.loaded.Run.ID,
 	}
+
 	runtimeDirs := r.loaded.Workflow.EffectiveRuntimeDirs(step)
 	if err := validateRuntimeCommandRequest(runtimeID, runtime, values, runtimeDirs, sandboxMode); err != nil {
 		return nil, "", err
 	}
+
 	if sandboxMode {
 		if err := r.verifySandboxRuntimeDirs(runtimeID, runtimeDirs); err != nil {
 			return nil, "", err
 		}
 	}
+
 	if promptMode == runtimePromptDeliveryFile && values.promptFile == "" {
 		return nil, "", stableerr.Errorf("runtime %q prompt.delivery=file requires a persisted prompt artifact path", runtimeID)
 	}
@@ -168,6 +191,7 @@ func (r *workerRunner) runtimeCommand() ([]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+
 	return command, promptMode, nil
 }
 
@@ -175,27 +199,35 @@ func validateRuntimeCommandRequest(runtimeID string, runtime config.Runtime, val
 	if sandboxMode && !runtime.Sandbox.Supported {
 		return stableerr.Errorf("runtime %q does not support sandbox worker launches", runtimeID)
 	}
+
 	if !sandboxMode && runtime.Sandbox.Required {
 		return stableerr.Errorf("runtime %q requires sandbox worker launch but Orc sandbox markers are not verified", runtimeID)
 	}
+
 	if runtime.Model.Required && values.model == "" {
 		return stableerr.Errorf("runtime %q requires a model but no effective model resolved", runtimeID)
 	}
+
 	if values.model != "" && !runtime.Model.Supported {
 		return stableerr.Errorf("runtime %q does not support model arguments", runtimeID)
 	}
+
 	if runtime.Reasoning.Required && values.reasoning == "" {
 		return stableerr.Errorf("runtime %q requires reasoning but no effective reasoning resolved", runtimeID)
 	}
+
 	if values.reasoning != "" && !runtime.Reasoning.Supported {
 		return stableerr.Errorf("runtime %q does not support reasoning arguments", runtimeID)
 	}
+
 	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
 		return stableerr.Errorf("runtime %q does not support runtime_dirs", runtimeID)
 	}
+
 	if len(runtimeDirs) > 0 && len(runtime.Directories.Args) == 0 {
 		return stableerr.Errorf("runtime %q directories.args are required for runtime_dirs", runtimeID)
 	}
+
 	return nil
 }
 
@@ -206,48 +238,61 @@ func buildRuntimeCommand(root, runtimeID string, runtime config.Runtime, values 
 	} else {
 		command = append(command, runtime.Command.NormalArgs...)
 	}
+
 	command = append(command, runtime.Command.Args...)
 	if values.model != "" {
 		command = append(command, runtime.Model.Args...)
 	}
+
 	if values.reasoning != "" {
 		command = append(command, runtime.Reasoning.Args...)
 	}
+
 	var err error
+
 	command, err = substituteRuntimePlaceholders(command, values)
 	if err != nil {
 		return nil, fmt.Errorf("runtime %q command args: %w", runtimeID, err)
 	}
+
 	for _, dir := range runtimeDirs {
 		dirValues := values
 		dirValues.dir = effectiveRuntimeDir(root, dir)
+
 		dirArgs, err := substituteRuntimePlaceholders(runtime.Directories.Args, dirValues)
 		if err != nil {
 			return nil, fmt.Errorf("runtime %q directories args: %w", runtimeID, err)
 		}
+
 		command = append(command, dirArgs...)
 	}
+
 	return command, nil
 }
 
 func (r *workerRunner) verifySandboxRuntimeDirs(runtimeID string, runtimeDirs []string) error {
 	coverage, coverageErr := activeSandboxRuntimeDirCoverage()
+
 	for _, dir := range runtimeDirs {
 		resolved := effectiveRuntimeDir(r.loaded.Project.Root, dir)
 		if coverageErr != nil {
 			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, coverageErr.Error())
 		}
+
 		if !pathCoveredByAny(resolved, coverage) {
 			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, "not covered by the repository mount, project sandbox.mounts, or selected runtime sandbox requirements")
 		}
+
 		info, err := os.Stat(resolved)
 		if err != nil {
 			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, fmt.Sprintf("not visible inside the active sandbox: %v", err))
 		}
+
 		if !info.IsDir() {
 			return runtimeDirSandboxCoverageError(r.attempt.StepID, runtimeID, dir, resolved, "visible path is not a directory")
 		}
 	}
+
 	return nil
 }
 
@@ -256,16 +301,19 @@ func activeSandboxRuntimeDirCoverage() ([]string, error) {
 	if value == "" {
 		return nil, stableerr.Errorf("active sandbox runtime_dir coverage marker %s is not set", sandbox.RuntimeDirCoverageEnv)
 	}
+
 	var targets []string
 	if err := json.Unmarshal([]byte(value), &targets); err != nil {
 		return nil, fmt.Errorf("active sandbox runtime_dir coverage marker %s is invalid: %w", sandbox.RuntimeDirCoverageEnv, err)
 	}
+
 	coverage := make([]string, 0, len(targets))
 	for _, target := range targets {
 		if filepath.IsAbs(target) {
 			coverage = append(coverage, filepath.Clean(target))
 		}
 	}
+
 	return coverage, nil
 }
 
@@ -276,6 +324,7 @@ func pathCoveredByAny(path string, coverage []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -284,13 +333,16 @@ func pathCoveredBy(path, root string) bool {
 	if !filepath.IsAbs(cleanRoot) {
 		return false
 	}
+
 	if path == cleanRoot {
 		return true
 	}
+
 	rel, err := filepath.Rel(cleanRoot, path)
 	if err != nil {
 		return false
 	}
+
 	return rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
@@ -313,6 +365,7 @@ func effectiveRuntimeDir(root, dir string) string {
 	if filepath.IsAbs(dir) {
 		return filepath.Clean(dir)
 	}
+
 	return filepath.Join(root, filepath.FromSlash(dir))
 }
 
@@ -320,11 +373,13 @@ func substituteRuntimePlaceholders(args []string, values runtimePlaceholderValue
 	out := make([]string, len(args))
 	for i, arg := range args {
 		var err error
+
 		out[i], err = substituteRuntimeArgPlaceholders(arg, values)
 		if err != nil {
 			return nil, fmt.Errorf("argv[%d]: %w", i, err)
 		}
 	}
+
 	return out, nil
 }
 
@@ -335,14 +390,18 @@ func substituteRuntimeArgPlaceholders(arg string, values runtimePlaceholderValue
 		if !ok {
 			return "", stableerr.Errorf("unknown placeholder %s", placeholder)
 		}
+
 		if value == "" {
 			return "", stableerr.Errorf("placeholder %s has no value", placeholder)
 		}
+
 		result = strings.ReplaceAll(result, placeholder, value)
 	}
+
 	if strings.ContainsAny(runtimeArgPlaceholderRegex.ReplaceAllString(arg, ""), "{}") {
 		return "", stableerr.New("malformed placeholder syntax")
 	}
+
 	return result, nil
 }
 
@@ -374,8 +433,10 @@ func (r *workerRunner) openLog(ctx context.Context) (runstore.Attempt, error) {
 	if err != nil {
 		return r.finishPreStartContext(ctx, exitStateLogStartFailed, runstore.ArtifactRef{}, err)
 	}
+
 	r.logRef = logRef
 	r.logFile = logFile
+
 	return runstore.Attempt{}, nil
 }
 
@@ -383,15 +444,19 @@ func (r *workerRunner) prepareWorkerCommand(ctx context.Context) (runstore.Attem
 	if err := ctx.Err(); err != nil {
 		return r.finishPreStartContext(ctx, exitStateCanceled, r.logRef, err)
 	}
+
 	r.workerEnv = os.Environ()
 	if r.opts.Env != nil {
 		r.workerEnv = r.opts.Env
 	}
+
 	r.workerEnv = mergeEnv(r.workerEnv, r.progressEnv)
+
 	cmd, releaseExec, err := newWorkerCommand(ctx, r.command, r.workerEnv, r.loaded.Project.Root)
 	if err != nil {
 		return r.finishLoggedStartFailure(ctx, exitStateStartFailed, err)
 	}
+
 	r.cmd = cmd
 	r.releaseExec = releaseExec
 	r.cmd.Dir = r.loaded.Project.Root
@@ -399,6 +464,7 @@ func (r *workerRunner) prepareWorkerCommand(ctx context.Context) (runstore.Attem
 	r.cmd.Env = append(filteredExecEnv(append([]string(nil), r.workerEnv...)), r.cmd.Env...)
 	r.cmd.Stdout = r.logFile
 	r.cmd.Stderr = r.logFile
+
 	return runstore.Attempt{}, nil
 }
 
@@ -408,11 +474,14 @@ func (r *workerRunner) startWorker(ctx context.Context) (runstore.Attempt, error
 		if err != nil {
 			return r.finishLoggedStartFailure(ctx, exitStateStartFailed, err)
 		}
+
 		r.stdin = stdin
 	}
+
 	if err := r.cmd.Start(); err != nil {
 		return r.finishLoggedStartFailure(ctx, exitStateStartFailed, err)
 	}
+
 	return runstore.Attempt{}, nil
 }
 
@@ -421,6 +490,7 @@ func (r *workerRunner) recordProcessAndRelease(ctx context.Context) (runstore.At
 	if err != nil {
 		return r.finishStartedProcessErrorWithLog(ctx, err)
 	}
+
 	started, _, err := r.loaded.Store.RecordAttemptProcessContext(ctx, r.loaded.Run.ID, runstore.AttemptProcessRequest{
 		AttemptID:        r.attempt.AttemptID,
 		PID:              r.cmd.Process.Pid,
@@ -430,43 +500,55 @@ func (r *workerRunner) recordProcessAndRelease(ctx context.Context) (runstore.At
 	if err != nil {
 		return r.finishStartedProcessErrorWithLog(ctx, err)
 	}
+
 	if err := ctx.Err(); err != nil {
 		return r.finishStartedProcessErrorSilent(ctx, err)
 	}
+
 	if err := r.releaseExec(true); err != nil {
 		return r.finishStartedProcessErrorWithLog(ctx, err)
 	}
+
 	r.attempt = started
+
 	return runstore.Attempt{}, nil
 }
 
 func (r *workerRunner) feedPromptWaitAndFinish(ctx context.Context) (runstore.Attempt, error) {
 	promptWriteDone := make(chan error, 1)
+
 	if r.promptMode == runtimePromptDeliveryStdin {
 		go func() {
 			_, err := io.Copy(r.stdin, bytes.NewReader(r.prompt.Content))
+
 			closeErr := r.stdin.Close()
 			promptWriteDone <- errors.Join(err, closeErr)
 		}()
 	} else {
 		promptWriteDone <- nil
 	}
+
 	waitResult := r.waitWithTimeoutAndReport(ctx)
+
 	promptWriteErr := <-promptWriteDone
 	if promptWriteErr != nil && waitResult.err != nil {
 		_, _ = r.logFile.WriteString(promptWriteErr.Error() + "\n")
 	}
+
 	logErr := r.logFile.Sync()
 	if terminal, ok, err := r.reportTerminalAttemptAfterWait(ctx); err != nil {
 		return terminal, errors.Join(logErr, err)
 	} else if ok {
 		return terminal, errors.Join(logErr, r.recordPostReportWarning(ctx, terminal, waitResult))
 	}
+
 	finished, finishErr := r.finishWaitOutcome(ctx, waitResult)
+
 	var ctxErr error
 	if waitResult.ctxErr != nil && !waitResult.workflowTimeout {
 		ctxErr = waitResult.ctxErr
 	}
+
 	return finished, errors.Join(logErr, finishErr, ctxErr)
 }
 
@@ -480,7 +562,9 @@ func (r *workerRunner) recordPostReportWarning(ctx context.Context, attempt runs
 		if !errors.As(waitResult.err, &exitErr) {
 			return nil
 		}
+
 		code := exitErr.ExitCode()
+
 		return r.recordAttemptWarning(ctx, attempt, warningKindPostReportProcessExit, &code, exitStateExited, "worker exited nonzero after valid report; report remains authoritative", warningTime)
 	default:
 		return nil
@@ -499,6 +583,7 @@ func (r *workerRunner) recordAttemptWarning(ctx context.Context, attempt runstor
 	if err != nil {
 		return fmt.Errorf("record attempt warning: %w", err)
 	}
+
 	return nil
 }
 
@@ -510,6 +595,7 @@ func (r *workerRunner) pollReportedAttemptIgnoringLoadError() bool {
 	_, ok, err := loadAttemptByID(r.context(), r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, func(attempt runstore.Attempt) bool {
 		return attempt.State == runstore.AttemptStateReported
 	})
+
 	return ok && err == nil
 }
 
@@ -521,6 +607,7 @@ func (r *workerRunner) reportTerminalAttemptAfterWait(ctx context.Context) (runs
 
 func (r *workerRunner) finishWaitOutcome(ctx context.Context, waitResult waitResult) (runstore.Attempt, error) {
 	state, result, exitCode, exitState := outcomeFromWait(waitResult)
+
 	finishReq := runstore.FinishAttemptRequest{
 		AttemptID: r.attempt.AttemptID,
 		State:     state,
@@ -534,10 +621,12 @@ func (r *workerRunner) finishWaitOutcome(ctx context.Context, waitResult waitRes
 	if waitResult.ctxErr != nil && !waitResult.workflowTimeout {
 		return finishAttemptWithCleanupContext(ctx, r.loaded.Store, r.loaded.Run.ID, finishReq)
 	}
+
 	finished, _, err := r.loaded.Store.FinishAttemptContext(ctx, r.loaded.Run.ID, finishReq)
 	if err != nil {
 		return finished, fmt.Errorf("finish wait outcome: %w", err)
 	}
+
 	return finished, nil
 }
 
@@ -562,10 +651,12 @@ func (r *workerRunner) finishStartedProcessErrorSilent(ctx context.Context, err 
 func (r *workerRunner) finishStartedProcessError(ctx context.Context, err, logErr error) (runstore.Attempt, error) {
 	terminateProcessGroup(r.cmd.Process.Pid)
 	_, _ = r.cmd.Process.Wait()
+
 	exitState := exitStateStartFailed
 	if isContextError(err) {
 		exitState = exitStateCanceled
 	}
+
 	return finishProcessErrorAttempt(ctx, r.loaded.Store, r.loaded.Run.ID, r.attempt.AttemptID, exitState, r.logRef, r.at, err, logErr)
 }
 
@@ -581,37 +672,48 @@ func outcomeFromWait(result waitResult) (string, string, *int, string) {
 	if result.workflowTimeout {
 		return runstore.AttemptStateTimedOut, resultTimeout, nil, exitStateTimeout
 	}
+
 	if result.ctxErr != nil {
 		return runstore.AttemptStateProcessError, resultProcessError, nil, exitStateCanceled
 	}
+
 	if result.err == nil {
 		code := 0
 		return runstore.AttemptStateMissingReport, resultMissingReport, &code, exitStateExited
 	}
+
 	var exitErr *exec.ExitError
 	if errors.As(result.err, &exitErr) {
 		code := exitErr.ExitCode()
 		return runstore.AttemptStateProcessError, resultProcessError, &code, exitStateExited
 	}
+
 	return runstore.AttemptStateProcessError, resultProcessError, nil, result.err.Error()
 }
 
 func waitForWorkerProcessWithReport(ctx context.Context, timeout, reportExitGrace time.Duration, cmd *exec.Cmd, reportPersisted func() bool) waitResult {
 	done := make(chan error, 1)
+
 	go func() {
 		done <- cmd.Wait()
 	}()
+
 	workflowTimer := time.NewTimer(timeout)
 	defer workflowTimer.Stop()
-	ticker := time.NewTicker(10 * time.Millisecond)
+
+	ticker := time.NewTicker(reportPollInterval)
 	defer ticker.Stop()
+
 	var graceTimer *time.Timer
+
 	defer func() {
 		if graceTimer != nil {
 			graceTimer.Stop()
 		}
 	}()
+
 	var reportGraceDone <-chan time.Time
+
 	for {
 		select {
 		case err := <-done:
@@ -639,17 +741,22 @@ func startReportExitGrace(workflowTimer *time.Timer, grace time.Duration) (*time
 		default:
 		}
 	}
+
 	graceTimer := time.NewTimer(grace)
+
 	return graceTimer, graceTimer.C
 }
 
 func terminateAndCollectWaitResult(pid int, done <-chan error, result waitResult, fallback error) waitResult {
 	terminateProcessGroup(pid)
+
 	err := <-done
 	if err == nil {
 		err = fallback
 	}
+
 	result.err = err
+
 	return result
 }
 
@@ -663,6 +770,7 @@ func openStreamingLog(ctx context.Context, store *runstore.Store, run *runstore.
 	if err != nil {
 		return runstore.ArtifactRef{}, nil, fmt.Errorf("open streaming log: %w", err)
 	}
+
 	_, _, err = store.RecordAttemptLogContext(ctx, run.ID, runstore.AttemptLogRequest{
 		AttemptID: attempt.AttemptID,
 		LogRef:    ref,
@@ -671,10 +779,12 @@ func openStreamingLog(ctx context.Context, store *runstore.Store, run *runstore.
 	if err != nil {
 		return ref, nil, fmt.Errorf("open streaming log: %w", err)
 	}
+
 	file, err := store.OpenArtifactAppendContext(ctx, run.ID, ref)
 	if err != nil {
 		return ref, nil, fmt.Errorf("open streaming log: %w", err)
 	}
+
 	return ref, file, nil
 }
 
@@ -682,6 +792,7 @@ func loggerOrNop(logger *zap.Logger) *zap.Logger {
 	if logger == nil {
 		return zap.NewNop()
 	}
+
 	return logger
 }
 
@@ -690,18 +801,23 @@ func recoverOrRefuseActiveAttempt(ctx context.Context, store *runstore.Store, ru
 	if attemptStillStarting(active, time.Now().UTC()) {
 		return Result{RunID: run.ID, Attempt: active}, stableerr.Errorf("run %q already has starting attempt %q", run.ID, active.AttemptID)
 	}
+
 	if active.PID > 0 && processIdentityMatches(active.PID, active.ProcessStartTime) {
 		if attemptTimedOut(active, time.Now().UTC()) {
 			terminateProcessGroup(active.PID)
 			recovered, err := recoverActiveAttempt(ctx, store, run, active, runstore.AttemptStateTimedOut, resultTimeout, exitStateTimeout, logger)
+
 			return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
 		}
+
 		return Result{RunID: run.ID, Attempt: active}, stableerr.Errorf("run %q already has active attempt %q", run.ID, active.AttemptID)
 	}
+
 	recovered, err := recoverActiveAttempt(ctx, store, run, active, runstore.AttemptStateProcessError, resultProcessError, exitStateUnknown, logger)
 	if err != nil {
 		return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, err
 	}
+
 	return Result{RunID: run.ID, Attempt: recovered, Recovered: true}, nil
 }
 
@@ -726,9 +842,11 @@ func recoverActiveAttempt(ctx context.Context, store *runstore.Store, run *runst
 			zap.String("exit_state", exitState),
 		)
 	}
+
 	if err != nil {
 		return recovered, fmt.Errorf("recover active attempt: %w", err)
 	}
+
 	return recovered, nil
 }
 
@@ -737,11 +855,13 @@ func loadAttemptByID(ctx context.Context, store *runstore.Store, runID, attemptI
 	if err != nil {
 		return runstore.Attempt{}, false, fmt.Errorf("load attempt by ID: %w", err)
 	}
+
 	for i := len(run.Status.Attempts) - 1; i >= 0; i-- {
 		attempt := run.Status.Attempts[i]
 		if attempt.AttemptID == attemptID && (match == nil || match(attempt)) {
 			return attempt, true, nil
 		}
 	}
+
 	return runstore.Attempt{}, false, nil
 }

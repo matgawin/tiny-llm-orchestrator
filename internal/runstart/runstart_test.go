@@ -33,21 +33,27 @@ func TestStartTaskFilePersistsContextAndSnapshot(t *testing.T) {
 	if got := string(readRunStartFile(t, filepath.Join(result.Path, "task", "context.md"))); got != "# Task\n\nDo the work.\n" {
 		t.Fatalf("task context = %q", got)
 	}
+
 	snapshot := readTaskSnapshot(t, result.Path)
 	if snapshot.SchemaVersion != 1 {
 		t.Fatalf("schema_version = %d, want 1", snapshot.SchemaVersion)
 	}
+
 	if snapshot.Source.Type != SourceTaskFile || snapshot.Source.Path != taskPath {
 		t.Fatalf("source = %+v, want task file %q", snapshot.Source, taskPath)
 	}
+
 	if snapshot.BeadLookup.Attempted {
 		t.Fatalf("bead lookup attempted = true, want false")
 	}
+
 	assertInitialConfigSnapshot(t, result.Path, "implementation")
+
 	vcsSnapshot := readPreRunVCSSnapshot(t, result.Path)
 	if vcsSnapshot.Kind != vcs.KindNone || vcsSnapshot.Dirty {
 		t.Fatalf("vcs snapshot kind/dirty = %s/%t, want none/false", vcsSnapshot.Kind, vcsSnapshot.Dirty)
 	}
+
 	assertLoadedRunHasTaskArtifacts(t, root, result.RunID)
 }
 
@@ -72,6 +78,7 @@ func TestStartRecordsCleanJJPreRunSnapshot(t *testing.T) {
 	if snapshot.Kind != vcs.KindJJ || snapshot.Dirty {
 		t.Fatalf("vcs snapshot kind/dirty = %s/%t, want jj/false", snapshot.Kind, snapshot.Dirty)
 	}
+
 	if !strings.Contains(snapshot.Summary, "The working copy has no changes.") {
 		t.Fatalf("vcs snapshot summary = %q, want clean jj status output", snapshot.Summary)
 	}
@@ -93,9 +100,11 @@ func TestStartRejectsDirtyStartBeforeRunDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatal("Start returned nil error, want dirty-start rejection")
 	}
+
 	if !strings.Contains(err.Error(), "blocks dirty starts") {
 		t.Fatalf("error = %q, want dirty-start rejection", err)
 	}
+
 	assertNoRunDirectories(t, root)
 }
 
@@ -115,10 +124,12 @@ func TestStartAllowsDirtyStartWhenWorkflowAllowsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
+
 	snapshot := readPreRunVCSSnapshot(t, result.Path)
 	if !snapshot.Dirty {
 		t.Fatalf("vcs snapshot dirty = false, want true")
 	}
+
 	if got := snapshot.ChangedPaths; len(got) != 1 || got[0] != "task.md" {
 		t.Fatalf("changed paths = %+v, want task.md", got)
 	}
@@ -140,6 +151,7 @@ func TestStartRejectsNoVCSWhenWorkflowBlocksIt(t *testing.T) {
 	if err == nil {
 		t.Fatal("Start returned nil error, want no-VCS rejection")
 	}
+
 	if !strings.Contains(err.Error(), "requires supported VCS") {
 		t.Fatalf("error = %q, want no-VCS rejection", err)
 	}
@@ -157,19 +169,24 @@ func TestStartRejectsExplicitBeadFailureWithoutFallbackBeforeRunDirectory(t *tes
 	if err == nil {
 		t.Fatal("Start returned nil error, want bead lookup failure")
 	}
+
 	if !strings.Contains(err.Error(), `read bead "missing-bead"`) {
 		t.Fatalf("error = %q, want bead lookup context", err)
 	}
+
 	assertNoRunDirectories(t, root)
 }
 
 func assertNoRunDirectories(t *testing.T, root string) {
 	t.Helper()
+
 	runsDir := filepath.Join(root, ".orc", "runs")
+
 	entries, readErr := os.ReadDir(runsDir)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		t.Fatalf("read runs dir: %v", readErr)
 	}
+
 	if len(entries) != 0 {
 		t.Fatalf("runs dir entries = %d, want no partial run", len(entries))
 	}
@@ -179,6 +196,7 @@ func TestStartUsesFallbackTaskFileAndRecordsBeadFailure(t *testing.T) {
 	root := writeRunStartProject(t, workflowTaskContext("optional", true))
 	fallbackPath := filepath.Join(root, "fallback.md")
 	writeRunStartFile(t, fallbackPath, "# Fallback\n")
+
 	beadsDir := filepath.Join(root, "..", ".beads")
 
 	result, err := Start(context.Background(), Options{
@@ -195,16 +213,20 @@ func TestStartUsesFallbackTaskFileAndRecordsBeadFailure(t *testing.T) {
 	if got := string(readRunStartFile(t, filepath.Join(result.Path, "task", "context.md"))); got != "# Fallback\n" {
 		t.Fatalf("fallback context = %q", got)
 	}
+
 	snapshot := readTaskSnapshot(t, result.Path)
 	if snapshot.Source.Type != SourceFallbackTaskFile || snapshot.Source.Path != fallbackPath {
 		t.Fatalf("source = %+v, want fallback task file %q", snapshot.Source, fallbackPath)
 	}
+
 	if got := snapshot.Source.Env["BEADS_DIR"]; got != beadsDir {
 		t.Fatalf("fallback snapshot BEADS_DIR = %q, want %q", got, beadsDir)
 	}
+
 	if !snapshot.BeadLookup.Attempted || snapshot.BeadLookup.OK || snapshot.BeadLookup.BeadID != "missing-bead" {
 		t.Fatalf("bead lookup = %+v, want failed missing-bead attempt", snapshot.BeadLookup)
 	}
+
 	if snapshot.Fallback != (FallbackInfo{Used: true, SourceType: SourceTaskFile, Path: fallbackPath}) {
 		t.Fatalf("fallback = %+v, want used task file %q", snapshot.Fallback, fallbackPath)
 	}
@@ -217,10 +239,12 @@ func TestCleanupStartedRunRemovesRunDirectory(t *testing.T) {
 	}
 
 	cause := stableerr.New("artifact write failed")
+
 	err := cleanupStartedRun(runPath, cause)
 	if !errors.Is(err, cause) {
 		t.Fatalf("cleanup error = %v, want original cause", err)
 	}
+
 	if _, statErr := os.Stat(runPath); !os.IsNotExist(statErr) {
 		t.Fatalf("partial run stat err = %v, want removed", statErr)
 	}
@@ -235,6 +259,7 @@ func TestCleanupStartedRunReportsCleanupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("cleanupStartedRun returned nil error, want cleanup failure")
 	}
+
 	for _, want := range []string{"artifact write failed", "cleanup run directory"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("cleanup error = %q, want %q", err, want)
@@ -244,21 +269,26 @@ func TestCleanupStartedRunReportsCleanupFailure(t *testing.T) {
 
 func TestConfigSnapshotWriteFailureCleanupRemovesStartedRun(t *testing.T) {
 	root := t.TempDir()
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("open run store: %v", err)
 	}
+
 	run, err := store.Create(runstore.CreateRunRequest{RunID: "snapshot-cleanup-run", Workflow: "implementation"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
+
 	if err := os.Remove(filepath.Join(run.Path, "config")); err != nil {
 		t.Fatalf("remove config dir: %v", err)
 	}
+
 	outside := filepath.Join(root, "outside-config")
 	if err := os.Mkdir(outside, 0o750); err != nil {
 		t.Fatalf("mkdir outside config: %v", err)
 	}
+
 	if err := os.Symlink(outside, filepath.Join(run.Path, "config")); err != nil {
 		t.Fatalf("symlink config dir: %v", err)
 	}
@@ -271,9 +301,11 @@ func TestConfigSnapshotWriteFailureCleanupRemovesStartedRun(t *testing.T) {
 	if writeErr == nil {
 		t.Fatal("WriteInitialConfigSnapshot returned nil error, want symlink failure")
 	}
+
 	if err := cleanupStartedRun(run.Path, writeErr); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("cleanup error = %v, want original snapshot write failure", err)
 	}
+
 	if _, statErr := os.Stat(run.Path); !os.IsNotExist(statErr) {
 		t.Fatalf("run path stat err = %v, want cleanup removal", statErr)
 	}
@@ -316,10 +348,12 @@ func TestStartEnforcesWorkflowTaskContextPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeRunStartProject(t, tt.workflow)
 			tt.opts.Root = root
+
 			_, err := Start(context.Background(), tt.opts)
 			if err == nil {
 				t.Fatal("Start returned nil error, want policy failure")
 			}
+
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %q, want %q", err, tt.want)
 			}
@@ -342,10 +376,12 @@ func TestStartRequiredBeadsAllowsFallbackWhenMarkdownFallbackEnabled(t *testing.
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
+
 	snapshot := readTaskSnapshot(t, result.Path)
 	if snapshot.Source.Type != SourceFallbackTaskFile {
 		t.Fatalf("source type = %q, want %q", snapshot.Source.Type, SourceFallbackTaskFile)
 	}
+
 	if !snapshot.Fallback.Used {
 		t.Fatalf("fallback = %+v, want used fallback", snapshot.Fallback)
 	}
@@ -374,13 +410,16 @@ func TestStartReadableBeadRecordsBEADSDir(t *testing.T) {
 	if !strings.Contains(contextContent, beadID) || !strings.Contains(contextContent, "Readable bead") {
 		t.Fatalf("task context = %q, want bead JSON content", contextContent)
 	}
+
 	snapshot := readTaskSnapshot(t, result.Path)
 	if snapshot.Source.Type != SourceBead || snapshot.Source.BeadID != beadID {
 		t.Fatalf("source = %+v, want readable bead %q", snapshot.Source, beadID)
 	}
+
 	if got := snapshot.Source.Env["BEADS_DIR"]; got != beadsDir {
 		t.Fatalf("snapshot BEADS_DIR = %q, want %q", got, beadsDir)
 	}
+
 	if !snapshot.BeadLookup.Attempted || !snapshot.BeadLookup.OK {
 		t.Fatalf("bead lookup = %+v, want successful attempt", snapshot.BeadLookup)
 	}
@@ -389,16 +428,19 @@ func TestStartReadableBeadRecordsBEADSDir(t *testing.T) {
 func readTaskSnapshot(t *testing.T, runPath string) Snapshot {
 	t.Helper()
 	content := readRunStartFile(t, filepath.Join(runPath, "task", "snapshot.json"))
+
 	var snapshot Snapshot
 	if err := json.Unmarshal(content, &snapshot); err != nil {
 		t.Fatalf("unmarshal task snapshot: %v\n%s", err, string(content))
 	}
+
 	return snapshot
 }
 
 func assertInitialConfigSnapshot(t *testing.T, runPath, workflow string) {
 	t.Helper()
 	currentContent := readRunStartFile(t, filepath.Join(runPath, "config", "current.json"))
+
 	var current struct {
 		SchemaVersion int    `json:"schema_version"`
 		Version       int    `json:"version"`
@@ -407,11 +449,13 @@ func assertInitialConfigSnapshot(t *testing.T, runPath, workflow string) {
 	if err := json.Unmarshal(currentContent, &current); err != nil {
 		t.Fatalf("unmarshal config current.json: %v\n%s", err, string(currentContent))
 	}
+
 	if current.SchemaVersion != 1 || current.Version != 1 || current.VersionDir != "000001" {
 		t.Fatalf("config current = %+v, want schema 1 version 1 dir 000001", current)
 	}
 
 	resolvedContent := readRunStartFile(t, filepath.Join(runPath, "config", "000001", "resolved.json"))
+
 	var resolved struct {
 		SchemaVersion int `json:"schema_version"`
 		Project       struct {
@@ -424,17 +468,21 @@ func assertInitialConfigSnapshot(t *testing.T, runPath, workflow string) {
 	if err := json.Unmarshal(resolvedContent, &resolved); err != nil {
 		t.Fatalf("unmarshal resolved config snapshot: %v\n%s", err, string(resolvedContent))
 	}
+
 	if resolved.SchemaVersion != 1 {
 		t.Fatalf("resolved schema_version = %d, want 1", resolved.SchemaVersion)
 	}
+
 	if _, ok := resolved.Project.Workflows[workflow]; !ok {
 		t.Fatalf("resolved workflows = %+v, want %q", resolved.Project.Workflows, workflow)
 	}
+
 	if len(resolved.Project.Agents) != 1 || len(resolved.Project.Runtimes) != 1 || len(resolved.Project.Config) == 0 {
 		t.Fatalf("resolved project missing config/agents/runtimes: %+v", resolved.Project)
 	}
 
 	manifestContent := readRunStartFile(t, filepath.Join(runPath, "config", "000001", "manifest.json"))
+
 	var manifest struct {
 		SchemaVersion int    `json:"schema_version"`
 		Version       int    `json:"version"`
@@ -452,21 +500,26 @@ func assertInitialConfigSnapshot(t *testing.T, runPath, workflow string) {
 	if err := json.Unmarshal(manifestContent, &manifest); err != nil {
 		t.Fatalf("unmarshal config manifest: %v\n%s", err, string(manifestContent))
 	}
+
 	if manifest.SchemaVersion != 1 || manifest.Version != 1 || manifest.VersionDir != "000001" || manifest.Reason != "run_start" || manifest.Workflow != workflow || manifest.HashAlgorithm != "sha256" {
 		t.Fatalf("manifest metadata = %+v, want initial run_start snapshot metadata", manifest)
 	}
+
 	wantPaths := map[string]bool{
 		".orc/config.yaml":                   true,
 		".orc/workflows/implementation.yaml": true,
 		".orc/agents/planner.md":             true,
 		".orc/runtimes/codex.yaml":           true,
 	}
+
 	for _, source := range manifest.SourceFiles {
 		if len(source.SHA256) != 64 {
 			t.Fatalf("source %s sha256 len = %d, want 64", source.Path, len(source.SHA256))
 		}
+
 		delete(wantPaths, source.Path)
 	}
+
 	if len(wantPaths) != 0 {
 		t.Fatalf("manifest missing source paths: %+v", wantPaths)
 	}
@@ -474,23 +527,29 @@ func assertInitialConfigSnapshot(t *testing.T, runPath, workflow string) {
 
 func assertLoadedRunHasTaskArtifacts(t *testing.T, root, runID string) {
 	t.Helper()
+
 	store, err := runstore.Open(root)
 	if err != nil {
 		t.Fatalf("open run store: %v", err)
 	}
+
 	run, err := store.Load(runID)
 	if err != nil {
 		t.Fatalf("load run %s: %v", runID, err)
 	}
+
 	if run.Status.State != "running" {
 		t.Fatalf("loaded state = %q, want running", run.Status.State)
 	}
+
 	if run.Status.LastSequence != 4 {
 		t.Fatalf("last sequence = %d, want 4", run.Status.LastSequence)
 	}
+
 	if got := len(run.Status.Artifacts); got != 3 {
 		t.Fatalf("artifact refs = %d, want 3", got)
 	}
+
 	want := map[runstore.ArtifactKind]string{
 		runstore.KindTaskContext:  "task/context.md",
 		runstore.KindTaskSnapshot: "task/snapshot.json",
@@ -500,11 +559,14 @@ func assertLoadedRunHasTaskArtifacts(t *testing.T, root, runID string) {
 		if wantPath, ok := want[ref.Kind]; !ok || ref.Path != wantPath {
 			t.Fatalf("unexpected artifact ref = %+v, want task context, task snapshot, and VCS snapshot refs", ref)
 		}
+
 		delete(want, ref.Kind)
 	}
+
 	if len(want) != 0 {
 		t.Fatalf("missing artifact refs: %+v", want)
 	}
+
 	if got := len(run.Events); got != 4 {
 		t.Fatalf("event count = %d, want run.created plus three artifact writes", got)
 	}
@@ -513,20 +575,25 @@ func assertLoadedRunHasTaskArtifacts(t *testing.T, root, runID string) {
 func writeRunStartProject(t *testing.T, workflow string) string {
 	t.Helper()
 	root := t.TempDir()
+
 	orcDir := filepath.Join(root, ".orc")
 	if err := os.MkdirAll(filepath.Join(orcDir, "workflows"), 0o750); err != nil {
 		t.Fatalf("create workflows dir: %v", err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(orcDir, "agents"), 0o750); err != nil {
 		t.Fatalf("create agents dir: %v", err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(orcDir, "runtimes"), 0o750); err != nil {
 		t.Fatalf("create runtimes dir: %v", err)
 	}
+
 	writeRunStartFile(t, filepath.Join(orcDir, "config.yaml"), "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\nruntimes:\n  codex: runtimes/codex.yaml\n")
 	writeRunStartFile(t, filepath.Join(orcDir, "runtimes", "codex.yaml"), testutil.CodexRuntimeYAML())
 	writeRunStartFile(t, filepath.Join(orcDir, "workflows", "implementation.yaml"), workflow)
 	writeRunStartFile(t, filepath.Join(orcDir, "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Test planner.\n---\n\nPlan.\n")
+
 	return root
 }
 
@@ -536,17 +603,22 @@ func workflowTaskContext(beads string, markdownFallback bool) string {
 
 func workflowTaskContextWithVCS(beads string, markdownFallback bool, dirtyStart, noVCS string) string {
 	vcsBlock := ""
+
 	if dirtyStart != "" || noVCS != "" {
 		var b strings.Builder
 		b.WriteString("vcs:\n")
+
 		if dirtyStart != "" {
 			fmt.Fprintf(&b, "  dirty_start: %s\n", dirtyStart)
 		}
+
 		if noVCS != "" {
 			fmt.Fprintf(&b, "  no_vcs: %s\n", noVCS)
 		}
+
 		vcsBlock = b.String()
 	}
+
 	return fmt.Sprintf(`name: implementation
 start: plan
 execution:
@@ -573,6 +645,7 @@ func fakeBDPath(t *testing.T, beadID, beadsDir string) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bd")
+
 	script := fmt.Sprintf(`#!/bin/sh
 if [ "${BEADS_DIR:-}" != %q ]; then
   printf 'unexpected BEADS_DIR: %%s\n' "${BEADS_DIR:-}" >&2
@@ -588,6 +661,7 @@ exit 2
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake bd: %v", err)
 	}
+
 	return dir
 }
 
@@ -595,6 +669,7 @@ func fakeJJPath(t *testing.T, statusOutput string, rootExit int) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "jj")
+
 	script := fmt.Sprintf(`#!/bin/sh
 case "$1" in
   root) if [ %d -ne 0 ]; then exit %d; fi; printf '%%s\n' "$PWD";;
@@ -605,12 +680,14 @@ esac
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatalf("write fake jj: %v", err)
 	}
+
 	return dir
 }
 
 func fakeJJAndGitFailPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+
 	scripts := map[string]string{
 		"jj":  "#!/bin/sh\nprintf 'No jj repo found\\n' >&2\nexit 1\n",
 		"git": "#!/bin/sh\nprintf 'fatal: not a git repository\\n' >&2\nexit 1\n",
@@ -621,46 +698,56 @@ func fakeJJAndGitFailPath(t *testing.T) string {
 			t.Fatalf("write fake %s: %v", name, err)
 		}
 	}
+
 	return dir
 }
 
 func readPreRunVCSSnapshot(t *testing.T, runPath string) vcs.Snapshot {
 	t.Helper()
 	content := readRunStartFile(t, filepath.Join(runPath, filepath.FromSlash(preRunVCSSnapshotRef(t, runPath).Path)))
+
 	var snapshot vcs.Snapshot
 	if err := json.Unmarshal(content, &snapshot); err != nil {
 		t.Fatalf("unmarshal VCS snapshot: %v\n%s", err, string(content))
 	}
+
 	return snapshot
 }
 
 func preRunVCSSnapshotRef(t *testing.T, runPath string) runstore.ArtifactRef {
 	t.Helper()
 	content := readRunStartFile(t, filepath.Join(runPath, "status.json"))
+
 	var status runstore.Status
 	if err := json.Unmarshal(content, &status); err != nil {
 		t.Fatalf("unmarshal status: %v\n%s", err, string(content))
 	}
+
 	for _, ref := range status.Artifacts {
 		if ref.Kind == runstore.KindSnapshot && ref.Name == "vcs-pre-run" {
 			return ref
 		}
 	}
+
 	t.Fatalf("vcs-pre-run snapshot ref not found in status artifacts: %+v", status.Artifacts)
+
 	return runstore.ArtifactRef{}
 }
 
 func readRunStartFile(t *testing.T, path string) []byte {
 	t.Helper()
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
+
 	return content
 }
 
 func writeRunStartFile(t *testing.T, path, content string) {
 	t.Helper()
+
 	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}

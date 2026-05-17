@@ -15,12 +15,15 @@ func executeRunInspect(command string, args []string, stdout, stderr io.Writer, 
 		if _, err := fmt.Fprintf(stderr, "%s run %s: requires <run-id>\n", appName, command); err != nil {
 			return fmt.Errorf("execute run inspect: %w", err)
 		}
+
 		return stableerr.Errorf("run %s requires run id", command)
 	}
+
 	root, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("execute run inspect: %w", err)
 	}
+
 	opts := runinspect.Options{
 		Root:   root,
 		RunID:  args[0],
@@ -30,7 +33,9 @@ func executeRunInspect(command string, args []string, stdout, stderr io.Writer, 
 		if _, writeErr := fmt.Fprintf(stderr, "%s run %s: %v\n", appName, command, err); writeErr != nil {
 			return fmt.Errorf("execute run inspect: %w", writeErr)
 		}
+
 		return err
 	}
+
 	return nil
 }
