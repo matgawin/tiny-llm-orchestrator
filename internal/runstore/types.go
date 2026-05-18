@@ -475,7 +475,6 @@ type RecordReportRequest struct {
 	State                string
 	ReportContent        []byte
 	ReportContentSet     bool
-	ReportName           string
 	ExitCode             *int
 	ExitState            string
 	LogRef               *ArtifactRef

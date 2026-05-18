@@ -277,6 +277,9 @@ Orc writes command/script reports itself; subprocesses do not call
 
 The generated outcome must be declared in the step's `allowed_results`; normal
 workflow evaluation rejects undeclared outcomes instead of silently routing.
+Generated command/script reports are recorded through the same Run Store
+reported-attempt boundary as worker-authored reports, so accepted command/script
+attempts also receive canonical full Markdown `report` artifacts.
 
 ## Logs
 

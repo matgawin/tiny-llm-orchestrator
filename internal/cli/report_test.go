@@ -70,8 +70,26 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 		t.Fatalf("embedded report ref = %+v, want %+v", attempt.Report.ReportRef, attempt.ReportRef)
 	}
 
-	if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path)))); got != "## Detail\n" {
-		t.Fatalf("report detail = %q, want copied markdown", got)
+	reportContent := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path))))
+	assertCLIOutputContainsAll(t, reportContent, []string{
+		"# Worker Report\n",
+		"## Metadata\n",
+		"- run_id: `" + result.runID + "`",
+		"- step_id: `plan`",
+		"- agent_id: `planner`",
+		"- attempt_id: `attempt-001`",
+		"- status/result: `done/ready`",
+		"## Summary\n\nPlan is ready.",
+		"## Commands\n\n- go test ./internal/cli",
+		"## Tests\n\n- go test ./internal/cli",
+		"## Risks\n\n- none",
+		"## Changed Paths\n\n- README.md\n- internal/cli/report.go",
+		"## Follow-ups\n\n- Document report summaries",
+		"## Report Detail\n\n## Detail\n",
+	})
+
+	if !strings.HasSuffix(reportContent, "## Report Detail\n\n## Detail\n") {
+		t.Fatalf("report content suffix = %q, want exact report-file content after detail heading", reportContent)
 	}
 
 	followups := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "followups.md")))
@@ -82,6 +100,46 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 		"Agent: planner",
 		"Attempt: attempt-001",
 	})
+}
+
+func TestExecuteReportFlagsPersistsStructuredOnlyCanonicalReport(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+
+	output := executeCLICommand(t, []string{
+		"report",
+		"--run=" + result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "attempt-001",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Plan is ready.",
+	})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
+
+	loaded, err := openCLIStore(t, root).Load(result.runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
+	if attempt.ReportRef == nil || attempt.Report == nil || attempt.Report.ReportRef == nil || *attempt.Report.ReportRef != *attempt.ReportRef {
+		t.Fatalf("report refs = %+v/%+v, want canonical report refs", attempt.ReportRef, attempt.Report)
+	}
+
+	reportContent := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path))))
+	assertCLIOutputContainsAll(t, reportContent, []string{
+		"# Worker Report\n",
+		"## Metadata\n",
+		"## Summary\n\nPlan is ready.",
+	})
+
+	if strings.Contains(reportContent, "## Report Detail") {
+		t.Fatalf("report content = %q, want no detail section for structured-only report", reportContent)
+	}
 }
 
 func TestExecuteReportHelp(t *testing.T) {
@@ -649,8 +707,16 @@ func TestExecuteReportJSONFileCopiesMarkdownDetail(t *testing.T) {
 		t.Fatalf("embedded report ref = %+v, want %+v", attempt.Report, attempt.ReportRef)
 	}
 
-	if got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path)))); got != "" {
-		t.Fatalf("report detail = %q, want empty copied file", got)
+	got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path))))
+	assertCLIOutputContainsAll(t, got, []string{
+		"# Worker Report\n",
+		"## Metadata\n",
+		"## Summary\n\nPlan is ready.",
+		"## Report Detail\n\n",
+	})
+
+	if !strings.HasSuffix(got, "## Report Detail\n\n") {
+		t.Fatalf("report content = %q, want empty detail after Report Detail heading", got)
 	}
 }
 

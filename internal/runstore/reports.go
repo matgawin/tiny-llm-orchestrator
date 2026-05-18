@@ -81,8 +81,8 @@ func (s *Store) commitAttemptReport(ctx context.Context, runID string, req Recor
 		return Status{}, Event{}, err
 	}
 
-	if !req.ReportContentSet && report.ReportRef != nil {
-		return Status{}, Event{}, stableerr.New("report_ref cannot be supplied by callers; provide report content for the run store to stage")
+	if report.ReportRef != nil {
+		return Status{}, Event{}, stableerr.New("report_ref cannot be supplied by callers; the run store owns report artifact creation")
 	}
 
 	prepared, err := s.prepareAttemptReportEvent(run, req, state, report)
@@ -120,14 +120,25 @@ func (s *Store) prepareAttemptReportEvent(run *Run, req RecordReportRequest, sta
 	eventTime := normalizeTime(req.Time)
 	eventSequence := nextEventSequence(run)
 
+	if err := applyAttemptReport(run.Status, &attempt, state, report, req); err != nil {
+		return preparedAttemptReportEvent{}, err
+	}
+
 	staged, report, err := s.stageReportArtifacts(run, req, state, report, eventTime, eventSequence)
 	if err != nil {
 		return preparedAttemptReportEvent{}, err
 	}
 
-	if err := applyAttemptReport(run.Status, &attempt, state, report, req); err != nil {
-		cleanupStagedArtifacts(staged.staged)
-		return preparedAttemptReportEvent{}, err
+	if report.ReportRef != nil {
+		ref := *report.ReportRef
+
+		attempt.ReportRef = &ref
+
+		if attempt.Report != nil {
+			attemptReport := *attempt.Report
+			attemptReport.ReportRef = &ref
+			attempt.Report = &attemptReport
+		}
 	}
 
 	payload, err := marshalPayload(attemptReportedPayload{
@@ -160,8 +171,10 @@ type stagedReportArtifacts struct {
 func (s *Store) stageReportArtifacts(run *Run, req RecordReportRequest, state string, report Report, eventTime time.Time, eventSequence int) (stagedReportArtifacts, Report, error) {
 	var staged []stagedArtifact
 
-	if req.ReportContentSet {
-		ref, stagedReport, err := s.stageReportArtifactForEvent(run, req.ReportName, req.ReportContent, eventSequence)
+	if state == AttemptStateReported {
+		content := canonicalReportMarkdown(report, req.ReportContent, req.ReportContentSet)
+
+		ref, stagedReport, err := s.stageReportArtifactForEvent(run, report.StepID, content, eventSequence)
 		if err != nil {
 			return stagedReportArtifacts{}, report, err
 		}

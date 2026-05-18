@@ -166,7 +166,6 @@ func recordValidReport(ctx context.Context, store *runstore.Store, report runsto
 		req.Report = report
 		req.ReportContent = reportContent
 		req.ReportContentSet = true
-		req.ReportName = report.StepID
 	}
 
 	callBeforeRecord(beforeRecord)

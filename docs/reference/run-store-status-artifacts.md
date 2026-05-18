@@ -218,18 +218,24 @@ the Run Store owns only artifact path allocation and event references. See
 [../features/run-start.md](../features/run-start.md#vcs-snapshot-schema) for
 the snapshot fields.
 
-`report` artifacts are usually written by `attempt.reported` when `orc report`
-copies Markdown details, so the report attempt event owns both the terminal
-attempt state and the report artifact reference.
+`report` artifacts are canonical full worker reports written by
+`attempt.reported` for every accepted valid `state=reported` attempt, including
+structured-only reports and Orc-authored command/script reports. The report
+attempt event owns both the terminal attempt state and the report artifact
+reference.
 
 The file is committed before the event append. Definite append failures roll the
 file back, but a process or host crash between file commit and event append can
 leave an unreferenced artifact file for later cleanup tooling. Retrying the same
-report detail is tolerated when the expected report artifact path already exists
-with identical content; different existing content remains an error.
+canonical report is tolerated when the expected report artifact path already
+exists with identical content; different existing content remains an error.
 
 `RecordAttemptReport` rejects caller-supplied `report_ref` values, so report refs
-are added only when the store stages report content for that event.
+are assigned only by the store. The canonical Markdown starts with generated
+structured sections (`# Worker Report`, metadata, summary, and any non-empty
+commands, tests, risks, changed paths, and follow-ups). If `--report-file` or
+JSON `report_file` supplied Markdown detail, the exact supplied content is
+appended under `## Report Detail`.
 
 `followup` appends new content by rewriting `followups.md`. Follow-up entries
 are formatted by the typed Run Store follow-up API rather than by callers.

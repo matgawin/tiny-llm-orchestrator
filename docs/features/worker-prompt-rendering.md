@@ -78,12 +78,17 @@ cap, hard cap, prior statuses when recorded by workflow state-entry metadata,
 and guidance to break the loop or escalate instead of repeating the same
 outcome.
 
-Prior report context includes structured reports persisted on completed
-attempts, so loopback prompts for coder steps include tester failure summaries
-and reviewer requested-change summaries even when the worker did not attach a
-separate report file. When report artifacts exist, the renderer also includes
-bounded Markdown excerpts. If a recorded report artifact cannot be read through
-the Run Store, rendering fails instead of silently omitting recorded context.
+Prior report context includes bounded excerpts of canonical report artifacts for
+completed attempts, so loopback prompts for coder steps include tester failure
+summaries and reviewer requested-change summaries even when the worker did not
+attach a separate report file. Every prior attempt report section includes the
+project-relative full report path under `.orc/runs/<run-id>/reports/`. When an
+excerpt is truncated, the prompt explicitly tells the worker to read the full
+report before using that prior report as implementation, review, or correction
+input. If a prior attempt report is missing `report_ref`, or if the referenced
+artifact cannot be read through the Run Store, rendering fails instead of
+silently omitting recorded context. Skipped-step context is not an attempt
+report and does not require a report artifact path.
 
 ## Report Contract
 
@@ -109,6 +114,11 @@ Rendered prompts also list optional structured report fields: repeatable
 not to combine `--json-file` with report field flags. The command validates
 required identity fields against the current `active_attempt` in attempt state
 `active` before persisting the structured report through the Run Store.
+Accepted valid reports always receive one canonical Markdown `report` artifact.
+When `--report-file` or JSON `report_file` is supplied, that file's Markdown is
+appended under `## Report Detail` after Orc-generated structured report
+sections; structured-only reports still receive the same canonical artifact
+without a detail section.
 
 Live worker-authored progress is a separate prompt guidance surface from final
 reports. Rendered prompts tell workers they may use `orc progress <short

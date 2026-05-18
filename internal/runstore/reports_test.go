@@ -52,6 +52,14 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 		t.Fatalf("reported attempt report = %+v, want structured report", recorded.Report)
 	}
 
+	if recorded.ReportRef == nil || recorded.ReportRef.Kind != KindReport {
+		t.Fatalf("report ref = %+v, want canonical report artifact", recorded.ReportRef)
+	}
+
+	if recorded.Report.ReportRef == nil || *recorded.Report.ReportRef != *recorded.ReportRef {
+		t.Fatalf("embedded report ref = %+v, want %+v", recorded.Report.ReportRef, recorded.ReportRef)
+	}
+
 	var payload attemptReportedPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal report payload: %v", err)
@@ -59,6 +67,10 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 
 	if payload.State != AttemptStateReported || payload.Report.Summary != "Plan is ready." {
 		t.Fatalf("report payload = %+v, want reported payload", payload)
+	}
+
+	if payload.Report.ReportRef == nil || *payload.Report.ReportRef != *recorded.ReportRef {
+		t.Fatalf("payload report ref = %+v, want %+v", payload.Report.ReportRef, recorded.ReportRef)
 	}
 
 	if len(payload.FollowupRefs) != 1 || payload.FollowupRefs[0].Kind != KindFollowup {
@@ -79,9 +91,44 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 		t.Fatalf("replayed report = %+v, want structured changed path", replayed.Report)
 	}
 
+	if replayed.ReportRef == nil || *replayed.ReportRef != *recorded.ReportRef {
+		t.Fatalf("replayed report ref = %+v, want %+v", replayed.ReportRef, recorded.ReportRef)
+	}
+
+	reportContent := string(readFile(t, filepath.Join(run.Path, filepath.FromSlash(recorded.ReportRef.Path))))
+	assertContainsAll(t, reportContent, []string{
+		"# Worker Report\n",
+		"## Metadata\n",
+		"- run_id: `record-report-run`",
+		"- step_id: `plan`",
+		"- agent_id: `planner`",
+		"- attempt_id: `attempt-001`",
+		"- status/result: `done/ready`",
+		"## Summary\n\nPlan is ready.",
+		"## Commands\n\n- go test ./internal/runstore",
+		"## Tests\n\n- go test ./internal/runstore",
+		"## Risks\n\n- none",
+		"## Changed Paths\n\n- README.md",
+		"## Follow-ups\n\n- Document report summaries\n  Details: Later summary work.",
+	})
+	assertReportSectionOrder(t, reportContent, []string{
+		"# Worker Report",
+		"## Metadata",
+		"## Summary",
+		"## Commands",
+		"## Tests",
+		"## Risks",
+		"## Changed Paths",
+		"## Follow-ups",
+	})
+
 	followups := string(readFile(t, filepath.Join(run.Path, followupsName)))
 	if !strings.Contains(followups, "## Document report summaries") || !strings.Contains(followups, "Source: report") {
 		t.Fatalf("followups.md = %q, want report-sourced followup", followups)
+	}
+
+	if got := loaded.Status.Artifacts[len(loaded.Status.Artifacts)-2]; got.Kind != KindReport || got.EventSequence != event.Sequence {
+		t.Fatalf("report artifact = %+v, want report ref owned by attempt.reported event %d", got, event.Sequence)
 	}
 
 	if got := loaded.Status.Artifacts[len(loaded.Status.Artifacts)-1]; got.Kind != KindFollowup || got.EventSequence != event.Sequence {
@@ -198,7 +245,6 @@ func TestRecordAttemptReportRejectsStartingAttempt(t *testing.T) {
 			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
-		ReportName:       "plan",
 		ReportContent:    []byte("# Should not persist\n"),
 		ReportContentSet: true,
 	})
@@ -223,6 +269,45 @@ func TestRecordAttemptReportRejectsStartingAttempt(t *testing.T) {
 	}
 }
 
+func TestRecordAttemptInvalidReportCreatesNoReportArtifact(t *testing.T) {
+	store := openStore(t, t.TempDir())
+	run := createManualRun(t, store, "record-invalid-report-run")
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
+
+	recorded, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+		State: AttemptStateInvalidReport,
+		Report: Report{
+			RunID:     run.ID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
+			Status:    attemptStatusFailed,
+			Result:    AttemptResultInvalidReport,
+			Summary:   "invalid report: bad result",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RecordAttemptReport returned error: %v", err)
+	}
+
+	if recorded.ReportRef != nil || recorded.Report == nil || recorded.Report.ReportRef != nil {
+		t.Fatalf("report refs = %+v/%+v, want none for invalid report", recorded.ReportRef, recorded.Report)
+	}
+
+	loaded, err := store.Load(run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	for _, artifact := range loaded.Status.Artifacts {
+		if artifact.Kind == KindReport {
+			t.Fatalf("artifact = %+v, want no report artifact for invalid report", artifact)
+		}
+	}
+}
+
 func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-artifact-run")
@@ -241,7 +326,6 @@ func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
-		ReportName:       "plan",
 		ReportContent:    []byte("# Detail\n"),
 		ReportContentSet: true,
 	})
@@ -257,8 +341,17 @@ func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 		t.Fatalf("embedded report ref = %+v, want %+v", recorded.Report, recorded.ReportRef)
 	}
 
-	if got := string(readFile(t, filepath.Join(run.Path, filepath.FromSlash(recorded.ReportRef.Path)))); got != "# Detail\n" {
-		t.Fatalf("report detail = %q, want copied detail", got)
+	got := string(readFile(t, filepath.Join(run.Path, filepath.FromSlash(recorded.ReportRef.Path))))
+	assertContainsAll(t, got, []string{
+		"# Worker Report\n",
+		"## Metadata\n",
+		"## Summary\n\nPlan is ready.",
+		"## Report Detail\n\n# Detail\n",
+	})
+	assertReportSectionOrder(t, got, []string{"# Worker Report", "## Metadata", "## Summary", "## Report Detail"})
+
+	if !strings.HasSuffix(got, "## Report Detail\n\n# Detail\n") {
+		t.Fatalf("report content suffix = %q, want exact supplied detail after Report Detail heading", got)
 	}
 }
 
@@ -344,7 +437,17 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 		t.Fatalf("mkdir report dir: %v", err)
 	}
 
-	if err := os.WriteFile(orphanPath, []byte("# Detail\n"), 0o600); err != nil {
+	orphanContent := canonicalReportMarkdown(Report{
+		RunID:     run.ID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
+		Status:    reportStatusDone,
+		Result:    reportResultReady,
+		Summary:   "Plan is ready.",
+	}, []byte("# Detail\n"), true)
+
+	if err := os.WriteFile(orphanPath, orphanContent, 0o600); err != nil {
 		t.Fatalf("write orphan report: %v", err)
 	}
 
@@ -359,7 +462,6 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 			Result:    reportResultReady,
 			Summary:   "Plan is ready.",
 		},
-		ReportName:       "plan",
 		ReportContent:    []byte("# Detail\n"),
 		ReportContentSet: true,
 	})
@@ -375,8 +477,8 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 		t.Fatalf("embedded report ref = %+v, want %+v", recorded.Report, recorded.ReportRef)
 	}
 
-	if got := string(readFile(t, orphanPath)); got != "# Detail\n" {
-		t.Fatalf("report detail = %q, want reused orphan content", got)
+	if got := string(readFile(t, orphanPath)); got != string(orphanContent) {
+		t.Fatalf("report content = %q, want reused orphan content", got)
 	}
 }
 
@@ -451,4 +553,33 @@ func TestLoadRejectsIgnoredReportRunIDMismatch(t *testing.T) {
 
 	_, err = store.Load(run.ID)
 	requireErrorContains(t, err, "report ignored run_id", "other-run", "does not match")
+}
+
+func assertContainsAll(t *testing.T, got string, wants []string) {
+	t.Helper()
+
+	for _, want := range wants {
+		if !strings.Contains(got, want) {
+			t.Fatalf("content missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func assertReportSectionOrder(t *testing.T, got string, sections []string) {
+	t.Helper()
+
+	last := -1
+
+	for _, section := range sections {
+		next := strings.Index(got, section)
+		if next == -1 {
+			t.Fatalf("content missing section %q:\n%s", section, got)
+		}
+
+		if next <= last {
+			t.Fatalf("section %q is out of order in:\n%s", section, got)
+		}
+
+		last = next
+	}
 }

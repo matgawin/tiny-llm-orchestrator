@@ -463,13 +463,15 @@ func TestStatusRoutesValidReportedOutcomeToBlockedForHuman(t *testing.T) {
 	assertContainsAll(t, "status", status, []string{
 		"state: blocked_for_human\n",
 		"terminal_reason: blocked_for_human\n",
-		"human_attention: blocked_for_human; report details not available\n",
+		"recent_reports:\n  - reports/000008-plan.md\n",
+		"human_attention: blocked_for_human; see recent_reports\n",
 	})
 	assertContainsAll(t, "next", next, []string{
 		"state: blocked_for_human\n",
 		"decision: terminal\n",
 		"terminal_reason: blocked_for_human\n",
-		"human_attention: blocked_for_human; report details not available\n",
+		"recent_reports:\n  - reports/000008-plan.md\n",
+		"human_attention: blocked_for_human; see recent_reports\n",
 	})
 }
 
@@ -744,7 +746,6 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		Commands:     []string{"go test ./internal/cli"},
 		Tests:        []string{"go test ./internal/cli"},
 	}, fixedTime().Add(3*time.Minute), summaryContextReportContent{
-		name:    "plan",
 		content: []byte("## Plan Report\n"),
 	})
 
@@ -780,7 +781,6 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 }
 
 type summaryContextReportContent struct {
-	name    string
 	content []byte
 }
 
@@ -795,7 +795,6 @@ func recordSummaryContextReport(t *testing.T, store *runstore.Store, runID strin
 	if len(content) > 0 {
 		request.ReportContent = content[0].content
 		request.ReportContentSet = true
-		request.ReportName = content[0].name
 	}
 
 	if _, _, err := store.RecordAttemptReport(runID, request); err != nil {

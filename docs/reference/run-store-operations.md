@@ -108,9 +108,10 @@ unless the caller adds its own idempotency key in a future event contract.
 Attempt lifecycle APIs follow the same status-backed write failure contract:
 ambiguous append and status refresh failures return the candidate attempt/event
 when the event may have committed, and callers should reload before retrying.
-`RecordAttemptReport` with report content is the exception to pure
-append-then-status ordering: it commits the report artifact before appending
-`attempt.reported`, as described in [Artifacts](run-store-status-artifacts.md#artifacts).
+`RecordAttemptReport` for a valid `reported` attempt is the exception to pure
+append-then-status ordering: it commits the canonical report artifact before
+appending `attempt.reported`, as described in
+[Artifacts](run-store-status-artifacts.md#artifacts).
 
 ### API Families
 
@@ -119,7 +120,7 @@ append-then-status ordering: it commits the report artifact before appending
   `RecordAttemptProcess`, `RecordAttemptProcessContext`, `FinishAttempt`,
   `RecoverAttempt`, `RecordAttemptReport`, `RecordAttemptWarning`, and
   `RecordIgnoredReport` take a run-level lock, append their event, then refresh
-  `status.json`, except for the report-content commit-order case described in
+  `status.json`, except for the canonical report commit-order case described in
   [Artifacts](run-store-status-artifacts.md#artifacts).
 - `WriteInitialConfigSnapshot` takes the run-level lock and commits the current
   pointer after the version directory files are durable.
@@ -146,8 +147,10 @@ append-then-status ordering: it commits the report artifact before appending
   `failed/missing_report`, `failed/process_error`, or `failed/timeout`.
 - `RecordAttemptReport` accepts report terminal states `reported` and
   `invalid_report` for the current `active` attempt. `invalid_report` must use
-  `failed/invalid_report`. Callers cannot supply `report_ref`; report refs are
-  assigned only when `RecordAttemptReport` stages report content.
+  `failed/invalid_report`. Callers cannot supply `report_ref`; for valid
+  `reported` attempts, `RecordAttemptReport` assigns a canonical Markdown
+  report artifact even when the report has only structured fields. Invalid and
+  ignored reports do not receive canonical report artifacts.
 - `missing_report` and `timed_out` terminal states require prior
   `attempt.process_started`; pre-process terminalization is limited to
   `process_error`.

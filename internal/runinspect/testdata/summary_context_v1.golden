@@ -44,7 +44,7 @@ Implement summary context.
 - outcome_status: "done"
 - outcome_result: "ready"
 - summary: "Code changed."
-- report_artifact: none
+- report_artifact: "reports/000010-code.md"
 
 ## Changes
 ### Worker Reported

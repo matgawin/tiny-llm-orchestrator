@@ -43,7 +43,25 @@ func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 		t.Fatalf("report = %+v, want system command report", result.Attempt.Report)
 	}
 
+	if result.Attempt.ReportRef == nil || result.Attempt.Report.ReportRef == nil || *result.Attempt.Report.ReportRef != *result.Attempt.ReportRef {
+		t.Fatalf("report refs = %+v/%+v, want canonical report artifact refs", result.Attempt.ReportRef, result.Attempt.Report)
+	}
+
 	loaded := loadLauncherRun(t, root, runID)
+
+	reportContent := string(readLauncherArtifact(t, root, runID, *result.Attempt.ReportRef))
+	for _, want := range []string{
+		"# Worker Report\n",
+		"## Metadata\n",
+		"## Summary\n\ncommand step finished with done/passed",
+		"## Commands\n\n- sh -c printf stdout-$ORC_TEST; printf stderr >&2",
+		"## Tests\n\n- command step finished with done/passed",
+	} {
+		if !strings.Contains(reportContent, want) {
+			t.Fatalf("report content missing %q:\n%s", want, reportContent)
+		}
+	}
+
 	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "stdout-override")
 	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stderr", "stderr")
 }

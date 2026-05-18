@@ -180,7 +180,7 @@ func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
 	}
 }
 
-func TestRenderIncludesStructuredPriorReportWithoutReportArtifact(t *testing.T) {
+func TestRenderIncludesStructuredPriorReportCanonicalArtifactPath(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
@@ -217,20 +217,23 @@ func TestRenderIncludesStructuredPriorReportWithoutReportArtifact(t *testing.T) 
 	assertPromptContainsAll(t, prompt, []string{
 		"## Prior Report Context",
 		"### attempt attempt-plan (plan done/ready)",
+		"Full report: `.orc/runs/prompt-run/reports/000009-plan.md`",
+		"# Worker Report",
+		"## Metadata",
+		"- run_id: `prompt-run`",
 		"- step_id: `plan`",
 		"- agent_id: `planner`",
 		"- status/result: `done/ready`",
-		"- summary: Plan is ready for verification.",
-		"- command: go test ./internal/promptrender",
-		"- test: prompt renderer package tests passed",
-		"- risk: none",
-		"- changed_path: internal/promptrender/promptrender.go",
-		"- follow_up: Document prompt report context",
-		"- follow_up_details: Keep docs aligned with renderer behavior.",
+		"## Summary\n\nPlan is ready for verification.",
+		"## Commands\n\n- go test ./internal/promptrender",
+		"## Tests\n\n- prompt renderer package tests passed",
+		"## Risks\n\n- none",
+		"## Changed Paths\n\n- internal/promptrender/promptrender.go",
+		"## Follow-ups\n\n- Document prompt report context\n  Details: Keep docs aligned with renderer behavior.",
 	})
 
 	if strings.Contains(prompt, "### reports/") {
-		t.Fatalf("prompt includes report artifact context, want structured report only:\n%s", prompt)
+		t.Fatalf("prompt renders canonical attempt report as a duplicate artifact context:\n%s", prompt)
 	}
 }
 
@@ -372,14 +375,86 @@ func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
 	prompt := string(result.Content)
 	assertPromptContainsAll(t, prompt, []string{
 		"### attempt attempt-plan (plan done/ready)",
-		"- summary: Plan is ready for verification.",
-		"Report detail:",
+		"Full report: `.orc/runs/prompt-run/reports/000009-plan.md`",
+		"## Summary\n\nPlan is ready for verification.",
+		"## Report Detail",
 		"# Detail\n\nUse the focused test surface.",
 	})
 
 	if strings.Contains(prompt, "### reports/") {
 		t.Fatalf("prompt renders report artifact as a duplicate context entry:\n%s", prompt)
 	}
+}
+
+func TestRenderRequiresPriorAttemptReportRef(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	recordReportedAttempt(t, store, runID, runstore.Report{
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-plan",
+		Status:    "done",
+		Result:    "ready",
+		Summary:   "Plan is ready.",
+	}, nil)
+	removeAttemptReportedReportRef(t, root, runID)
+
+	_, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "test",
+		AgentID:   "tester",
+		AttemptID: "attempt-test",
+		Time:      fixedPromptTime().Add(8 * time.Minute),
+	})
+	if err == nil {
+		t.Fatal("Render returned nil error, want missing report_ref error")
+	}
+
+	for _, want := range []string{`run "prompt-run"`, `attempt "attempt-plan"`, `step "plan"`, "missing report_ref"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Render error = %q, want %q", err, want)
+		}
+	}
+}
+
+func TestRenderTruncatedPriorReportRequiresReadingFullReport(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	recordReportedAttempt(t, store, runID, runstore.Report{
+		RunID:     runID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-plan",
+		Status:    "done",
+		Result:    "ready",
+		Summary:   strings.Repeat("long summary ", 160),
+	}, nil)
+
+	result, err := Render(context.Background(), Options{
+		Root:      root,
+		RunID:     runID,
+		StepID:    "test",
+		AgentID:   "tester",
+		AttemptID: "attempt-test",
+		Time:      fixedPromptTime().Add(8 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	assertPromptContainsAll(t, string(result.Content), []string{
+		"Full report: `.orc/runs/prompt-run/reports/000009-plan.md`",
+		"[excerpt truncated]",
+		"This excerpt is truncated. Read the full report before using this prior report as implementation, review, or correction input: `.orc/runs/prompt-run/reports/000009-plan.md`",
+	})
 }
 
 func TestRenderRefusesNonSelectedStepUnlessAllowed(t *testing.T) {
@@ -779,7 +854,6 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID string, re
 		Time:   fixedPromptTime().Add(7 * time.Minute),
 	}
 	if reportContent != nil {
-		req.ReportName = report.StepID
 		req.ReportContent = reportContent
 		req.ReportContentSet = true
 	}
@@ -936,6 +1010,68 @@ func readPromptFile(t *testing.T, path string) []byte {
 	}
 
 	return content
+}
+
+func removeAttemptReportedReportRef(t *testing.T, root, runID string) {
+	t.Helper()
+
+	eventsPath := filepath.Join(root, ".orc", "runs", runID, "events.jsonl")
+	content := readPromptFile(t, eventsPath)
+	lines := bytes.Split(content, []byte("\n"))
+
+	var out bytes.Buffer
+
+	removed := false
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+
+		var event runstore.Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+
+		if event.Type == "attempt.reported" && !removed {
+			var payload map[string]any
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatalf("unmarshal attempt.reported payload: %v", err)
+			}
+
+			report, ok := payload["report"].(map[string]any)
+			if !ok {
+				t.Fatalf("attempt.reported payload missing report object: %+v", payload)
+			}
+
+			delete(report, "report_ref")
+
+			nextPayload, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("marshal attempt.reported payload: %v", err)
+			}
+
+			event.Payload = nextPayload
+
+			removed = true
+		}
+
+		nextLine, err := json.Marshal(event)
+		if err != nil {
+			t.Fatalf("marshal event: %v", err)
+		}
+
+		out.Write(nextLine)
+		out.WriteByte('\n')
+	}
+
+	if !removed {
+		t.Fatal("attempt.reported event not found")
+	}
+
+	if err := os.WriteFile(eventsPath, out.Bytes(), 0o600); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
 }
 
 func readPromptTestdata(t *testing.T, name string) []byte {

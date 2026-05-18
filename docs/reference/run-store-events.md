@@ -113,9 +113,9 @@ states are counted for auditability; loop cap enforcement applies only to
 worker-selecting transitions.
 
 `artifact.written` is written when the store persists a standalone artifact.
-Markdown report details accepted with `orc report` are the exception: their
-artifact reference is embedded in the `attempt.reported` payload instead of a
-separate `artifact.written` event.
+Canonical report artifacts for accepted valid reported attempts are the
+exception: their artifact reference is embedded in the `attempt.reported`
+payload instead of a separate `artifact.written` event.
 
 ```json
 {
@@ -445,8 +445,11 @@ process metadata can be recorded.
 ```
 
 Valid reports use `state=reported` and preserve the workflow `status/result`
-pair. Current-attempt reports that fail schema or allowed-pair validation use
-`state=invalid_report`, `status=failed`, and `result=invalid_report`.
+pair. Every accepted valid reported attempt includes `report.report_ref`
+pointing at the canonical full Markdown report artifact. Current-attempt reports
+that fail schema or allowed-pair validation use `state=invalid_report`,
+`status=failed`, and `result=invalid_report`; invalid reports do not receive
+canonical report artifacts.
 For CLI JSON input, `--json-file` is mutually exclusive with report field flags;
 when the JSON payload identifies the current active attempt, that mix is
 schema-invalid report input. Unknown JSON fields, nested unknown JSON fields,
