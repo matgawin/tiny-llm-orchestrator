@@ -44,6 +44,10 @@ exit 9
 		t.Fatalf("kind = %q, want %q", snapshot.Kind, KindJJ)
 	}
 
+	if snapshot.RepositoryRoot != filepath.Clean(root) {
+		t.Fatalf("repository root = %q, want %q", snapshot.RepositoryRoot, filepath.Clean(root))
+	}
+
 	if snapshot.Dirty {
 		t.Fatalf("dirty = true, want false")
 	}
@@ -99,6 +103,10 @@ esac
 
 	if snapshot.Kind != KindGit || !snapshot.Dirty {
 		t.Fatalf("snapshot kind/dirty = %s/%t, want git/true", snapshot.Kind, snapshot.Dirty)
+	}
+
+	if snapshot.RepositoryRoot != filepath.Clean(root) {
+		t.Fatalf("repository root = %q, want %q", snapshot.RepositoryRoot, filepath.Clean(root))
 	}
 
 	want := []string{"docs/features/run-start.md", "docs/space path.md", "internal/runstart/runstart.go", "new.md", "old.md"}
@@ -174,6 +182,10 @@ exit 1
 
 	if snapshot.Kind != KindNone || snapshot.Dirty {
 		t.Fatalf("snapshot kind/dirty = %s/%t, want none/false", snapshot.Kind, snapshot.Dirty)
+	}
+
+	if snapshot.RepositoryRoot != "" {
+		t.Fatalf("repository root = %q, want empty for no VCS", snapshot.RepositoryRoot)
 	}
 
 	if snapshot.Summary != "No supported VCS detected." {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"tiny-llm-orchestrator/orc/internal/config"
@@ -23,6 +24,9 @@ const (
 	gitignorePath = ".gitignore"
 	agentsPath    = "AGENTS.md"
 	runsDirPath   = ".orc/runs"
+
+	defaultLoopSoftCap = 2
+	defaultLoopHardCap = 4
 )
 
 // Plan reads the live project setup and returns a no-write upgrade plan.
@@ -129,15 +133,20 @@ func (p *planner) planConfigMigration0To1() {
 	if p.config.hasNested("defaults", "max_loops") && !p.config.hasNested("defaults", "loop_caps") {
 		value := strings.TrimSpace(p.config.scalarNested("defaults", "max_loops"))
 		if value == "" {
-			value = "2"
+			value = strconv.Itoa(defaultLoopSoftCap)
+		}
+
+		hard := strconv.Itoa(defaultLoopHardCap)
+		if parsed, err := strconv.Atoi(value); err == nil {
+			hard = strconv.Itoa(parsed + 1)
 		}
 
 		edits = append(edits,
 			SurgicalEdit{Kind: EditRemoveYAMLField, Path: "defaults.max_loops"},
-			SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + value + "\nhard: " + value},
+			SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + value + "\nhard: " + hard},
 		)
 	} else if !p.config.hasNested("defaults", "loop_caps") {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: 2\nhard: 4"})
+		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + strconv.Itoa(defaultLoopSoftCap) + "\nhard: " + strconv.Itoa(defaultLoopHardCap)})
 	}
 
 	if p.config.hasNested("defaults", "legacy_runtime") {

@@ -211,6 +211,7 @@ The VCS inspector owns the JSON schema for VCS snapshot artifacts:
   "schema_version": 1,
   "phase": "pre_run",
   "kind": "jj",
+  "repository_root": "/repo",
   "dirty": false,
   "summary": "The working copy has no changes.",
   "changed_paths": [],
@@ -219,8 +220,10 @@ The VCS inspector owns the JSON schema for VCS snapshot artifacts:
 ```
 
 `phase` is `pre_run`, `post_run`, or `config_refresh`. `kind` is `jj`, `git`,
-or `none`.
-`changed_paths` are deterministic observations for summary context; they are
-not enforcement rules and are never used to modify the working copy. `error` is
-optional and reserved for future persisted degraded-inspection summaries; run
-start currently fails rather than persisting broken VCS probe errors.
+or `none`. `repository_root` is present for recognized VCS snapshots and is the
+absolute root used to interpret `changed_paths`.
+`changed_paths` are deterministic observations for summary context in persisted
+run artifacts. Features that need a live dirty-file safety check run a fresh VCS
+inspection instead of reusing a persisted snapshot. `error` is optional and
+reserved for future persisted degraded-inspection summaries; run start currently
+fails rather than persisting broken VCS probe errors.

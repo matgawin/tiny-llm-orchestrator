@@ -47,14 +47,15 @@ type Options struct {
 
 // Snapshot is the stable JSON contract persisted for VCS observations.
 type Snapshot struct {
-	SchemaVersion int        `json:"schema_version"`
-	Phase         string     `json:"phase"`
-	Kind          string     `json:"kind"`
-	Dirty         bool       `json:"dirty"`
-	Summary       string     `json:"summary"`
-	ChangedPaths  []string   `json:"changed_paths"`
-	Commands      [][]string `json:"commands"`
-	Error         string     `json:"error,omitempty"`
+	SchemaVersion  int        `json:"schema_version"`
+	Phase          string     `json:"phase"`
+	Kind           string     `json:"kind"`
+	RepositoryRoot string     `json:"repository_root,omitempty"`
+	Dirty          bool       `json:"dirty"`
+	Summary        string     `json:"summary"`
+	ChangedPaths   []string   `json:"changed_paths"`
+	Commands       [][]string `json:"commands"`
+	Error          string     `json:"error,omitempty"`
 }
 
 // InspectPreRun records the working-copy state before a run starts.
@@ -120,16 +121,16 @@ func inspect(ctx context.Context, opts Options, phase string) (Snapshot, error) 
 		env = os.Environ()
 	}
 
-	if ok, err := probeVCS(ctx, opts.Root, env, jjRootCommand); err != nil {
+	if repoRoot, ok, err := probeVCS(ctx, opts.Root, env, jjRootCommand); err != nil {
 		return Snapshot{}, err
 	} else if ok {
-		return inspectJJ(ctx, opts.Root, env, phase)
+		return inspectJJ(ctx, opts.Root, env, phase, repoRoot)
 	}
 
-	if ok, err := probeVCS(ctx, opts.Root, env, gitRootCommand); err != nil {
+	if repoRoot, ok, err := probeVCS(ctx, opts.Root, env, gitRootCommand); err != nil {
 		return Snapshot{}, err
 	} else if ok {
-		return inspectGit(ctx, opts.Root, env, phase)
+		return inspectGit(ctx, opts.Root, env, phase, repoRoot)
 	}
 
 	return Snapshot{
@@ -146,20 +147,21 @@ func inspect(ctx context.Context, opts Options, phase string) (Snapshot, error) 
 	}, nil
 }
 
-func probeVCS(ctx context.Context, root string, env, command []string) (bool, error) {
+func probeVCS(ctx context.Context, root string, env, command []string) (string, bool, error) {
 	output, err := runCommand(ctx, root, env, command)
 	if err == nil {
-		return strings.TrimSpace(output) != "", nil
+		repoRoot := strings.TrimSpace(output)
+		return repoRoot, repoRoot != "", nil
 	}
 
 	if vcsProbeUnavailable(err) {
-		return false, nil
+		return "", false, nil
 	}
 
-	return false, err
+	return "", false, err
 }
 
-func inspectJJ(ctx context.Context, root string, env []string, phase string) (Snapshot, error) {
+func inspectJJ(ctx context.Context, root string, env []string, phase, repoRoot string) (Snapshot, error) {
 	output, err := runCommand(ctx, root, env, jjStatusCommand)
 	if err != nil {
 		return Snapshot{}, err
@@ -169,12 +171,13 @@ func inspectJJ(ctx context.Context, root string, env []string, phase string) (Sn
 	dirty := len(changed) > 0 || !strings.Contains(output, "The working copy has no changes.")
 
 	return Snapshot{
-		SchemaVersion: schemaVersion,
-		Phase:         phase,
-		Kind:          KindJJ,
-		Dirty:         dirty,
-		Summary:       strings.TrimSpace(output),
-		ChangedPaths:  changed,
+		SchemaVersion:  schemaVersion,
+		Phase:          phase,
+		Kind:           KindJJ,
+		RepositoryRoot: cleanSnapshotRoot(repoRoot),
+		Dirty:          dirty,
+		Summary:        strings.TrimSpace(output),
+		ChangedPaths:   changed,
 		Commands: [][]string{
 			jjRootCommand,
 			jjStatusCommand,
@@ -182,7 +185,7 @@ func inspectJJ(ctx context.Context, root string, env []string, phase string) (Sn
 	}, nil
 }
 
-func inspectGit(ctx context.Context, root string, env []string, phase string) (Snapshot, error) {
+func inspectGit(ctx context.Context, root string, env []string, phase, repoRoot string) (Snapshot, error) {
 	output, err := runCommand(ctx, root, env, gitStatusCommand)
 	if err != nil {
 		return Snapshot{}, err
@@ -191,12 +194,13 @@ func inspectGit(ctx context.Context, root string, env []string, phase string) (S
 	changed := parseGitChangedPathsZ(output)
 
 	return Snapshot{
-		SchemaVersion: schemaVersion,
-		Phase:         phase,
-		Kind:          KindGit,
-		Dirty:         len(changed) > 0,
-		Summary:       gitSummary(changed),
-		ChangedPaths:  changed,
+		SchemaVersion:  schemaVersion,
+		Phase:          phase,
+		Kind:           KindGit,
+		RepositoryRoot: cleanSnapshotRoot(repoRoot),
+		Dirty:          len(changed) > 0,
+		Summary:        gitSummary(changed),
+		ChangedPaths:   changed,
 		Commands: [][]string{
 			jjRootCommand,
 			gitRootCommand,
@@ -242,6 +246,18 @@ func runCommand(ctx context.Context, root string, env, command []string) (string
 	}
 
 	return string(out), nil
+}
+
+func cleanSnapshotRoot(root string) string {
+	if root == "" {
+		return ""
+	}
+
+	if abs, err := filepath.Abs(root); err == nil {
+		return filepath.Clean(abs)
+	}
+
+	return filepath.Clean(root)
 }
 
 type commandError struct {
