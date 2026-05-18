@@ -161,11 +161,11 @@ func TestLoadDefaultScaffoldSkippablePolicy(t *testing.T) {
 	}
 
 	nonSkippable := map[string][]string{
-		"implementation":     {"plan", "test", "test-redundancy", "test-readability"},
-		"bugfix":             {"reproduce", "plan", "test"},
-		"mechanical-change":  {"plan", "test"},
-		"test-only":          {"plan", "test-design", "test-run"},
-		"review-fix":         {"test", "test-redundancy", "test-readability"},
+		"implementation":     {"plan", "lsp", "test", "lsp-redundancy", "test-redundancy", "lsp-readability", "test-readability"},
+		"bugfix":             {"reproduce", "plan", "lsp", "test"},
+		"mechanical-change":  {"plan", "lsp", "test"},
+		"test-only":          {"plan", "test-design", "lsp", "test-run"},
+		"review-fix":         {"lsp", "test", "lsp-redundancy", "test-redundancy", "lsp-readability", "test-readability"},
 		"review-mechanical":  {},
 		"review-readability": {},
 		"review-redundancy":  {},

@@ -15,6 +15,21 @@ tasks:
     cmds:
       - go test -race ./... -count=1
 
+  lsp:
+    desc: Run gopls diagnostics on changed Go files.
+    cmds:
+      - orc-gopls-check changed
+
+  lsp-all:
+    desc: Run gopls diagnostics on all Go files.
+    cmds:
+      - orc-gopls-check all
+
+  lsp-stats:
+    desc: Print gopls workspace statistics.
+    cmds:
+      - gopls stats
+
   build:
     aliases: ["b"]
     cmds:

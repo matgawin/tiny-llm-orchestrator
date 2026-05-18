@@ -58,6 +58,7 @@ Common checks:
 task fix
 task format
 task lint
+task lsp
 task tests
 task build
 task check
@@ -82,6 +83,7 @@ go run ./cmd/orc version
 
 - `task build` builds `cmd/orc` to `bin/orc` with the `dev` version.
 - `orc` in the Nix development shell is the flake-built CLI used for project orchestration.
+- `task lsp` runs `gopls` diagnostics on changed Go files through the Nix shell helper.
 - `task tests` runs `go test ./...`.
 - `task tests-race` runs `go test -race ./...` through `task test-unit-race`.
 - `task check` runs fix, format, lint, tests, and build.

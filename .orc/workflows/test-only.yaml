@@ -55,13 +55,25 @@ steps:
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
-      done/ready: test-run
+      done/ready: lsp
       done/skipped: ready_for_human
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
       failed/missing_report: blocked_for_human
       failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  lsp:
+    kind: command
+    command:
+      argv: ["timeout", "--kill-after=5s", "2m", "task", "lsp"]
+    allowed_results:
+      done: [passed, failed]
+      failed: [timeout, process_error]
+    on:
+      done/passed: test-run
+      done/failed: test-code
+      failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   test-run:
     kind: command

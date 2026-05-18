@@ -41,12 +41,16 @@ Use `docs-sync` whenever a change affects durable behavior, contracts, or workfl
 - `jj-workflow`: when workspace state, unrelated diffs, or stacked changes could affect verification or handoff
 - `verify-change`: after code or docs changes, before handoff
 
+### Go semantic navigation
+- `go-lsp-workflow`: when inspecting, editing, reviewing, or verifying Go code where `gopls` can provide semantic navigation, symbol references, definitions, implementations, call hierarchy, workspace symbols, or edited-file diagnostics
+
 ## Global Rules
 
 - If a change affects generated sources, edit the canonical inputs first and regenerate derived artifacts instead of patching generated outputs directly.
 - Human docs are canonical for durable repository policy. If code and docs disagree, trust the code and fix the stale doc in the same change.
 - Use `jj` for repository operations instead of `git`.
 - Prefer `nix develop -c ...` and `task` commands so checks and generators use the pinned toolchain.
+- For Go code, prefer `gopls` through the `go-lsp-workflow` skill for semantic navigation and edited-file diagnostics. Run `task lsp` after Go edits. Use `rg` for text, docs, configs, literals, and broad repository discovery; use `grep` only as a fallback or simple command-pipeline filter.
 - Prefer narrow owner packages over generic helper buckets.
 - Prefer pure helpers and real integration coverage over mock-heavy seam tests.
 

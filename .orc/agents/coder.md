@@ -41,10 +41,9 @@ prior reports.
 3. Make the smallest coherent change that satisfies the task.
 4. Preserve existing style, package boundaries, naming, and helper patterns.
 5. Run formatting or focused checks when they are cheap and clearly relevant.
-6. Report changed paths, commands run, risks, and follow-ups.
-7. Use direct Taskfile commands for code fixing, linting, testing and building.
-8. Before reporting run `task check` to run all of the required checks.
-9. Report changed paths, commands run, risks, and follow-ups.
+6. Use direct Taskfile commands for code fixing, linting, testing and building.
+7. Before reporting run `task check` to run all of the required checks.
+8. Report changed paths, commands run, risks, and follow-ups.
 
 ## Boundaries
 

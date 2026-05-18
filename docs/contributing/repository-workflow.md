@@ -25,6 +25,9 @@ Contributors preparing, validating, and packaging repository changes.
 - `task tests`: run `go test ./...`.
 - `task tests-race`: run the race-detector test suite through `task test-unit-race`.
 - `task test-unit-race`: run `go test -race ./...`.
+- `task lsp`: run `gopls` diagnostics on changed Go files.
+- `task lsp-all`: run `gopls` diagnostics on all Go files.
+- `task lsp-stats`: print `gopls` workspace statistics for troubleshooting.
 - `task fix`: run `go fix ./...`.
 - `task format`: run `goimports` and `gofumpt` on Go files.
 - `task lint`: run `golangci-lint` with `.golangci.yml`.
@@ -45,6 +48,9 @@ The repository uses beads for tracked work.
 ## Workflow Rules
 
 - Prefer the `task` commands over ad hoc local command variants.
+- Use the repo-local `go-lsp-workflow` skill for Go semantic navigation and
+  edited-file diagnostics. Prefer `gopls` for Go symbols and references, `rg`
+  for text search, and `grep` only as a fallback or simple pipeline filter.
 - Use race checks when changing shared mutable state, watcher loops, worker launch/supervision, or run-state coordination.
 - If cache permissions under `$HOME/.cache` break `go test` or `golangci-lint`, rerun with workspace-safe cache env vars before treating the failure as a code issue.
 - If durable behavior changes, update the matching permanent doc in the same change.

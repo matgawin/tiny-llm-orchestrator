@@ -16,9 +16,53 @@
     exec "$real_codex" --add-dir "$BEADS_DIR" "$@"
   '';
 
+  goplsCheck = pkgs.writeShellScriptBin "orc-gopls-check" ''
+    set -euo pipefail
+
+    mode="''${1:-changed}"
+
+    case "$mode" in
+      changed)
+        mapfile -t files < <(
+          jj diff --name-only |
+            while IFS= read -r file; do
+              case "$file" in
+                *.go)
+                  if [ -f "$file" ]; then
+                    printf '%s\n' "$file"
+                  fi
+                  ;;
+              esac
+            done
+        )
+        ;;
+      all)
+        mapfile -t files < <(
+          find . -type f -name '*.go' \
+            -not -path './vendor/*' \
+            -not -path './.direnv/*' \
+            -not -path './.orc/runs/*' \
+            -print
+        )
+        ;;
+      *)
+        echo "usage: orc-gopls-check [changed|all]" >&2
+        exit 2
+        ;;
+    esac
+
+    if [ "''${#files[@]}" -eq 0 ]; then
+      echo "gopls: no Go files to check"
+      exit 0
+    fi
+
+    gopls check "''${files[@]}"
+  '';
+
   packages = with pkgs;
     [
       codexWithBeads
+      goplsCheck
       bubblewrap
       go
       gofumpt
@@ -26,6 +70,7 @@
       go-tools
       gotools
       go-task
+      gopls
       jq
       jujutsu
     ]

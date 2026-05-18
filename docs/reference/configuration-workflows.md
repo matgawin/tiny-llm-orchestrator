@@ -176,9 +176,14 @@ commands are not supported in v1; argv entries are passed directly to process
 execution without shell parsing, expansion, or interpolation.
 
 The bundled implementation, bugfix, mechanical-change, test-only, and
-review-fix workflows run `task check` through GNU `timeout` with a 5-minute
-wall-clock limit and a 10-second forced-kill grace. This keeps hung package
-tests from occupying a run until the broader workflow attempt timeout expires.
+review-fix workflows run a fast `task lsp` command step before `task check`.
+The LSP step uses GNU `timeout` with a 2-minute wall-clock limit and a 5-second
+forced-kill grace, and routes diagnostic failures back to the same coding step
+that would handle check failures. The later `task check` step still runs
+through GNU `timeout` with a 5-minute wall-clock limit and a 10-second
+forced-kill grace. This keeps hung package tests from occupying a run until the
+broader workflow attempt timeout expires while giving Go diagnostic failures a
+shorter feedback loop.
 
 The bundled `docs-update` workflow is intentionally lighter: it edits durable
 docs and routes directly to docs review. It does not run a command verification
@@ -254,8 +259,22 @@ steps:
     allowed_results:
       done: [ready, skipped]
     on:
-      done/ready: test-redundancy
+      done/ready: lsp-redundancy
       done/skipped: readability-review
+  lsp-redundancy:
+    kind: command
+    command:
+      argv: ["timeout", "--kill-after=5s", "2m", "task", "lsp"]
+    allowed_results:
+      done: [passed, failed]
+      blocked: [blocked]
+      failed: [timeout, process_error]
+    on:
+      done/passed: test-redundancy
+      done/failed: code_fixer
+      blocked/blocked: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/process_error: blocked_for_human
 ```
 
 Worker-authored reports may use workflow-declared outcome pairs except reserved

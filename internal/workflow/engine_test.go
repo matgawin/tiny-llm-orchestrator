@@ -30,6 +30,16 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 		{
 			name:     "code ready",
 			outcome:  Outcome{Step: "code", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "lsp",
+		},
+		{
+			name:     "lsp failed",
+			outcome:  Outcome{Step: "lsp", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code",
+		},
+		{
+			name:     "lsp passed",
+			outcome:  Outcome{Step: "lsp", Status: ReportStatusDone, Result: "passed"},
 			wantStep: "test",
 		},
 		{
@@ -70,6 +80,16 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 		{
 			name:     "code fixer ready",
 			outcome:  Outcome{Step: "code_fixer", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "lsp-redundancy",
+		},
+		{
+			name:     "redundancy lsp failed",
+			outcome:  Outcome{Step: "lsp-redundancy", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_fixer",
+		},
+		{
+			name:     "redundancy lsp passed",
+			outcome:  Outcome{Step: "lsp-redundancy", Status: ReportStatusDone, Result: "passed"},
 			wantStep: "test-redundancy",
 		},
 		{
@@ -105,6 +125,16 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 		{
 			name:     "code cleaner ready",
 			outcome:  Outcome{Step: "code_cleaner", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "lsp-readability",
+		},
+		{
+			name:     "readability lsp failed",
+			outcome:  Outcome{Step: "lsp-readability", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_cleaner",
+		},
+		{
+			name:     "readability lsp passed",
+			outcome:  Outcome{Step: "lsp-readability", Status: ReportStatusDone, Result: "passed"},
 			wantStep: "test-readability",
 		},
 		{
@@ -191,7 +221,7 @@ func TestEvaluateRoutesTrustedSkippedOutcome(t *testing.T) {
 
 func TestEvaluateImplementationWorkflowBlocksForHumanOnAnyStep(t *testing.T) {
 	workflow := implementationWorkflow(t)
-	for _, step := range []string{stepPlan, "code", "test", "review", "redundancy-review", "code_fixer", "test-redundancy", "readability-review", "code_cleaner", "test-readability"} {
+	for _, step := range []string{stepPlan, "code", "lsp", "test", "review", "redundancy-review", "code_fixer", "lsp-redundancy", "test-redundancy", "readability-review", "code_cleaner", "lsp-readability", "test-readability"} {
 		t.Run(step, func(t *testing.T) {
 			outcome := Outcome{Step: step, Status: ReportStatusBlocked, Result: "blocked"}
 

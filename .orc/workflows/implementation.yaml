@@ -44,13 +44,27 @@ steps:
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
-      done/ready: test
+      done/ready: lsp
       done/skipped: redundancy-review
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
       failed/missing_report: blocked_for_human
       failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  lsp:
+    kind: command
+    command:
+      argv: ["timeout", "--kill-after=5s", "2m", "task", "lsp"]
+    allowed_results:
+      done: [passed, failed]
+      blocked: [blocked]
+      failed: [timeout, process_error]
+    on:
+      done/passed: test
+      done/failed: code
+      blocked/blocked: blocked_for_human
+      failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   test:
     kind: command
@@ -108,13 +122,27 @@ steps:
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
-      done/ready: test-redundancy
+      done/ready: lsp-redundancy
       done/skipped: readability-review
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
       failed/missing_report: blocked_for_human
       failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  lsp-redundancy:
+    kind: command
+    command:
+      argv: ["timeout", "--kill-after=5s", "2m", "task", "lsp"]
+    allowed_results:
+      done: [passed, failed]
+      blocked: [blocked]
+      failed: [timeout, process_error]
+    on:
+      done/passed: test-redundancy
+      done/failed: code_fixer
+      blocked/blocked: blocked_for_human
+      failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   test-redundancy:
     kind: command
@@ -155,13 +183,27 @@ steps:
       blocked: [blocked]
       failed: [error, timeout, missing_report, invalid_report, process_error]
     on:
-      done/ready: test-readability
+      done/ready: lsp-readability
       done/skipped: ready_for_human
       blocked/blocked: blocked_for_human
       failed/error: blocked_for_human
       failed/timeout: blocked_for_human
       failed/missing_report: blocked_for_human
       failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  lsp-readability:
+    kind: command
+    command:
+      argv: ["timeout", "--kill-after=5s", "2m", "task", "lsp"]
+    allowed_results:
+      done: [passed, failed]
+      blocked: [blocked]
+      failed: [timeout, process_error]
+    on:
+      done/passed: test-readability
+      done/failed: code_cleaner
+      blocked/blocked: blocked_for_human
+      failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   test-readability:
     kind: command

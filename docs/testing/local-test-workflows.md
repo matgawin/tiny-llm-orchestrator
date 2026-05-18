@@ -40,6 +40,19 @@ Run package-level tests directly when narrowing a change:
 go test ./internal/...
 ```
 
+Run `gopls` diagnostics on changed Go files:
+
+```bash
+task lsp
+```
+
+Run `gopls` diagnostics across the Go workspace when a change spans broad
+package structure:
+
+```bash
+task lsp-all
+```
+
 Run a single package or test when narrowing behavior:
 
 ```bash
@@ -70,6 +83,7 @@ task check
 - run-store persistence: `go test ./internal/runstore`
 - worker launching, active-attempt inspection, or process supervision: `go test ./internal/launcher ./internal/runstore ./internal/runinspect ./internal/cli`
 - worker-launching race coverage: add `go test -race ./internal/launcher ./internal/runstore ./internal/cli` when active-attempt coordination, timeout cleanup, public launch wiring, signal propagation, or process recovery changes
+- Go semantic navigation or edited-file diagnostics: `task lsp`
 - package boundaries or shared behavior: `go test ./internal/...`
 - task commands, toolchain docs, or build behavior: `task build` and `task tests`
 - concurrency-sensitive runtime behavior: `task tests-race`
