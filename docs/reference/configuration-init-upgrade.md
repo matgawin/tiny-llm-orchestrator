@@ -142,6 +142,7 @@ unambiguous migrations and additions.
 Safe changes include:
 
 - adding a missing `setup_version` marker
+- advancing an older `setup_version` marker to the target setup version
 - adding structurally unambiguous missing fields
 - creating required scaffold files when the target path does not exist
 - replacing an exact known scaffold baseline
@@ -216,9 +217,11 @@ not load live config only to warn.
 
 ## Initial Migration: 0 To 1
 
-Version `0` means `.orc/config.yaml` lacks top-level `setup_version`. Version
-`1` is the first setup-upgrade-aware scaffold version and corresponds to the
-current embedded scaffold plus `setup_version: 1`.
+Version `0` means legacy setup. It is usually represented by a
+`.orc/config.yaml` that lacks top-level `setup_version`, but an explicit
+`setup_version: 0` is also planned as legacy setup. Version `1` is the first
+setup-upgrade-aware scaffold version and corresponds to the current embedded
+scaffold plus `setup_version: 1`.
 
 The `0 -> 1` migration must make an explicit plan decision for these surfaces:
 
@@ -232,8 +235,8 @@ The `0 -> 1` migration must make an explicit plan decision for these surfaces:
 
 Safe `0 -> 1` rules:
 
-- Add `setup_version: 1` when `.orc/config.yaml` is otherwise loadable and the
-  marker is absent.
+- Add or advance `setup_version: 1` when `.orc/config.yaml` is otherwise
+  loadable and the marker is absent or older.
 - Add `defaults.loop_caps` only when the field is missing and no existing
   defaults shape conflicts with the built-in default semantics.
 - Add `runtimes.codex` and create `.orc/runtimes/codex.yaml` only when Codex is

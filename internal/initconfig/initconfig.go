@@ -163,6 +163,13 @@ type scaffoldFile struct {
 	content []byte
 }
 
+// ScaffoldFile exposes one embedded project scaffold file for read-only
+// planning code. Content is copied by ScaffoldFiles.
+type ScaffoldFile struct {
+	Path    string
+	Content []byte
+}
+
 type targetKind int
 
 const (
@@ -720,6 +727,44 @@ func scaffoldFiles() []scaffoldFile {
 	}
 
 	return files
+}
+
+// ScaffoldFiles returns the embedded project scaffold files in deterministic
+// order. Callers must treat the returned content as read-only.
+func ScaffoldFiles() []ScaffoldFile {
+	files := scaffoldFiles()
+
+	out := make([]ScaffoldFile, 0, len(files))
+	for _, file := range files {
+		out = append(out, ScaffoldFile{
+			Path:    file.path,
+			Content: append([]byte(nil), file.content...),
+		})
+	}
+
+	return out
+}
+
+// RunsIgnoreEntry is the canonical .gitignore entry for Orc run state.
+func RunsIgnoreEntry() string {
+	return runsIgnoreEntry
+}
+
+// InstructionsHeading is the Tiny Orc guidance heading used in AGENTS.md.
+func InstructionsHeading() string {
+	return instructionsHeading
+}
+
+// InstructionsContent returns the default Tiny Orc guidance section.
+func InstructionsContent() string {
+	return instructionsContent()
+}
+
+// AnalyzeRunsIgnoreContent reports whether content already ignores .orc/runs
+// or broadly ignores persistent .orc config.
+func AnalyzeRunsIgnoreContent(content string) (hasRunsEntry, hasBroadOrcIgnore bool, broadPattern string) {
+	analysis := analyzeIgnoreContent(content, runsIgnoreEntry)
+	return analysis.hasRunsEntry, analysis.hasBroadOrcIgnore, analysis.broadPattern
 }
 
 func instructionsContent() string {
