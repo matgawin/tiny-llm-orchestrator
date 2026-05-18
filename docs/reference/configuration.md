@@ -19,12 +19,14 @@ Contributors and maintainers changing config loading, validation, scaffold sourc
 - [../getting-started/local-development.md](../getting-started/local-development.md)
 - [../operations/runtime-stack.md](../operations/runtime-stack.md)
 - [configuration-init.md](configuration-init.md)
+- [configuration-init-upgrade.md](configuration-init-upgrade.md)
 - [configuration-project.md](configuration-project.md)
 - [configuration-workflows.md](configuration-workflows.md)
 
 ## Contract Pages
 
 - [configuration-init.md](configuration-init.md): `orc init` scaffold files, overwrite prompts, `.gitignore`, `.orc/runs/`, and scaffolded workflow and agent inventory.
+- [configuration-init-upgrade.md](configuration-init-upgrade.md): `orc init upgrade` plan/apply contract, setup version marker, migration scope, safety rules, and initial `0 -> 1` migration.
 - [configuration-project.md](configuration-project.md): `.orc/config.yaml`, project config validation, loop caps, and sandbox config schema.
 - [configuration-runtimes.md](configuration-runtimes.md): `.orc/runtimes/*.yaml` descriptor schema, runtime selection, descriptor-built argv, prompt delivery, capabilities, sandbox requirements, and Codex migration.
 - [configuration-workflows.md](configuration-workflows.md): workflow files, step contracts, report outcomes, terminal states, and agent descriptor files.
@@ -39,6 +41,11 @@ It reads:
 - workflow files referenced by `workflows` entries
 - agent descriptor files referenced by `agents` entries
 - runtime descriptor files referenced by `runtimes` entries
+
+`.orc/config.yaml` contains both `version`, the project config schema version,
+and optional `setup_version`, the `orc init upgrade` setup/scaffold version.
+Missing `setup_version` is treated as legacy setup version `0`; new scaffolds
+write `setup_version: 1`.
 
 Agents are prompt/persona descriptors. Runtimes are executable descriptors.
 `internal/config` validates both inventories, keeps them separate, and validates

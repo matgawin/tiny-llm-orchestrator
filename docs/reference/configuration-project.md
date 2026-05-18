@@ -18,6 +18,7 @@ Contributors and maintainers changing project config loading, validation, loop c
 
 - [configuration.md](configuration.md)
 - [configuration-init.md](configuration-init.md)
+- [configuration-init-upgrade.md](configuration-init-upgrade.md)
 - [configuration-workflows.md](configuration-workflows.md)
 - [../features/sandbox-run.md](../features/sandbox-run.md)
 
@@ -29,6 +30,19 @@ Required fields:
 - `workflows`: map of workflow name to either a legacy `.orc`-relative
   workflow file path scalar or an object with `path` and optional `loop_caps`
 - `agents`: map of agent id to `.orc`-relative descriptor file path
+
+Optional setup-upgrade field:
+
+- `setup_version`: project setup/scaffold version for `orc init upgrade`;
+  current value is `1`
+
+Missing `setup_version` means legacy setup version `0` for upgrade planning and
+older-setup warnings. It is not invalid config by itself. `setup_version` is
+validated separately from `version`: `version` is the project config schema
+version, while `setup_version` is the project-local setup/scaffold migration
+version. It is not a run-store `schema_version`, a run config snapshot schema
+version, or an Orc binary semantic version. See
+[configuration-init-upgrade.md](configuration-init-upgrade.md).
 
 The `workflows` and `agents` maps must each contain at least one entry.
 Referenced paths must be relative to `.orc`; absolute paths, traversal outside `.orc`, and symlink escapes are rejected.

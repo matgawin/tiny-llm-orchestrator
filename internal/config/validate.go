@@ -37,6 +37,14 @@ func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 		return stableerr.Errorf("config version = %d, want %d", cfg.Version, schemaVersion)
 	}
 
+	if cfg.SetupVersion < 0 {
+		return stableerr.Errorf("setup_version = %d, want >= 0", cfg.SetupVersion)
+	}
+
+	if cfg.SetupVersion > CurrentSetupVersion {
+		return stableerr.Errorf("setup_version = %d, want <= %d", cfg.SetupVersion, CurrentSetupVersion)
+	}
+
 	if len(cfg.Workflows) == 0 {
 		return stableerr.New("config must declare at least one workflow")
 	}

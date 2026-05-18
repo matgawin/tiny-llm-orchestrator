@@ -17,6 +17,10 @@ const (
 	schemaVersion           = 1
 	executionModeSequential = "sequential"
 
+	// CurrentSetupVersion is the latest project setup/scaffold version supported
+	// by this binary.
+	CurrentSetupVersion = 1
+
 	StepKindAgent   = "agent"
 	StepKindCommand = "command"
 	StepKindScript  = "script"
@@ -76,12 +80,13 @@ type Project struct {
 
 // ProjectConfig is the schema stored in .orc/config.yaml.
 type ProjectConfig struct {
-	Version   int                          `yaml:"version" json:"Version"`
-	Defaults  ProjectDefaults              `yaml:"defaults" json:"Defaults"`
-	Workflows map[string]WorkflowReference `yaml:"workflows" json:"Workflows"`
-	Agents    map[string]string            `yaml:"agents" json:"Agents"`
-	Runtimes  map[string]string            `yaml:"runtimes" json:"Runtimes"`
-	Sandbox   *SandboxConfig               `yaml:"sandbox" json:"Sandbox"`
+	Version      int                          `yaml:"version" json:"Version"`
+	SetupVersion int                          `yaml:"setup_version" json:"SetupVersion"`
+	Defaults     ProjectDefaults              `yaml:"defaults" json:"Defaults"`
+	Workflows    map[string]WorkflowReference `yaml:"workflows" json:"Workflows"`
+	Agents       map[string]string            `yaml:"agents" json:"Agents"`
+	Runtimes     map[string]string            `yaml:"runtimes" json:"Runtimes"`
+	Sandbox      *SandboxConfig               `yaml:"sandbox" json:"Sandbox"`
 }
 
 // ProjectDefaults contains project-wide config defaults.

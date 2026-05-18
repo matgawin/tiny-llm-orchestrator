@@ -120,6 +120,70 @@ func TestLoadCurrentRepositoryConfigUsesExplicitCodexRuntime(t *testing.T) {
 	}
 }
 
+func TestLoadSetupVersion(t *testing.T) {
+	project, err := Load(validScaffoldPath())
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if got := project.Config.SetupVersion; got != CurrentSetupVersion {
+		t.Fatalf("setup_version = %d, want %d", got, CurrentSetupVersion)
+	}
+
+	legacyRoot := writeMinimalProject(t, projectFixture{config: configForAgents(map[string]string{"planner": validAgentDescriptor("planner")})})
+
+	legacyProject, err := Load(legacyRoot)
+	if err != nil {
+		t.Fatalf("Load legacy config returned error: %v", err)
+	}
+
+	if got := legacyProject.Config.SetupVersion; got != 0 {
+		t.Fatalf("legacy setup_version = %d, want 0", got)
+	}
+}
+
+func TestLoadRejectsInvalidSetupVersion(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{
+			name: "negative",
+			config: `version: 1
+setup_version: -1
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+runtimes:
+  codex: runtimes/codex.yaml
+`,
+			want: "setup_version = -1, want >= 0",
+		},
+		{
+			name: "newer than supported",
+			config: `version: 1
+setup_version: 2
+workflows:
+  implementation: workflows/implementation.yaml
+agents:
+  planner: agents/planner.md
+runtimes:
+  codex: runtimes/codex.yaml
+`,
+			want: "setup_version = 2, want <= 1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{config: tt.config})
+			assertLoadErrorContains(t, root, tt.want)
+		})
+	}
+}
+
 func TestLoadDefaultScaffoldSkippablePolicy(t *testing.T) {
 	project, err := Load(validScaffoldPath())
 	if err != nil {

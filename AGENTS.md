@@ -111,5 +111,5 @@ Important:
 - Project-local orchestration config lives under `.orc/`.
 - Persistent workflow and role descriptor files are user-owned and reviewable.
 - Runtime run state belongs under `.orc/runs/`, which should stay ignored by VCS.
-- Use `orc init --dry-run` before changing an existing scaffold.
+- Use `orc init --dry-run` before creating a scaffold, and `orc init upgrade` to inspect setup upgrades.
 - In this project, use `orc` for orchestration, it should be available in PATH; do not use `go run`, or `./bin/*` builds, to execute it.

@@ -17,6 +17,7 @@ Contributors and maintainers changing scaffold source, init behavior, or generat
 ## Related Docs
 
 - [configuration.md](configuration.md)
+- [configuration-init-upgrade.md](configuration-init-upgrade.md)
 - [configuration-project.md](configuration-project.md)
 - [configuration-workflows.md](configuration-workflows.md)
 - [run-store-layout.md](run-store-layout.md)
@@ -40,6 +41,10 @@ directory:
 - If `.gitignore` broadly ignores `.orc`, `orc init` fails and asks you to
   replace that broad rule with `.orc/runs/` so persistent config remains
   trackable.
+- `orc init upgrade` owns later setup upgrades. Bare `orc init upgrade` is
+  plan-only and writes nothing; `orc init upgrade --apply` writes safe changes.
+  V1 has no `--dry-run` flag for upgrade because the bare command is the dry-run
+  behavior. See [configuration-init-upgrade.md](configuration-init-upgrade.md).
 
 The scaffold includes these workflows:
 
@@ -123,7 +128,9 @@ This descriptor, not a launcher special case, preserves Codex argv behavior for
 new projects. It also declares Codex config-home behavior through generic
 runtime sandbox requirements; the schema is documented in
 [configuration-runtimes.md](configuration-runtimes.md). Existing user-owned
-`.orc` directories are not automatically migrated when scaffold output changes.
+`.orc` directories are not automatically migrated by plain `orc init` when
+scaffold output changes. Future setup changes are handled through explicit
+versioned `orc init upgrade` migrations.
 
 The scaffolded `.orc/config.yaml` includes a commented sandbox example. The
 example includes commented `sandbox.protected_paths` entries for common

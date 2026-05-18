@@ -727,5 +727,5 @@ func instructionsContent() string {
 		"- Project-local orchestration config lives under `.orc/`.\n" +
 		"- Persistent workflow and role descriptor files are user-owned and reviewable.\n" +
 		"- Runtime run state belongs under `.orc/runs/`, which should stay ignored by VCS.\n" +
-		"- Use `orc init --dry-run` before changing an existing scaffold.\n"
+		"- Use `orc init --dry-run` before creating a scaffold, and `orc init upgrade` to inspect setup upgrades.\n"
 }
