@@ -281,6 +281,7 @@ func writeCLIImplementationProject(t *testing.T, root string) {
 
 	writeCLIRuntime(t, orcDir)
 	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+setup_version: 1
 workflows:
   implementation: workflows/implementation.yaml
 agents:
@@ -312,6 +313,7 @@ func writeCLISkipStepProject(t *testing.T, root string, reviewSkippable bool) {
 
 	writeCLIRuntime(t, orcDir)
 	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+setup_version: 1
 workflows:
   implementation: workflows/implementation.yaml
 agents:
@@ -383,6 +385,7 @@ func writeCLIAdvanceCommandProject(t *testing.T, root, reviewStep, loopCaps stri
 
 	writeCLIRuntime(t, orcDir)
 	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+setup_version: 1
 workflows:
   implementation: workflows/implementation.yaml
 agents:

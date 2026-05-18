@@ -49,8 +49,9 @@ type Options struct {
 
 // Result describes the created run.
 type Result struct {
-	RunID string
-	Path  string
+	RunID    string
+	Path     string
+	Warnings []string
 }
 
 // Snapshot is the stable metadata persisted as task/snapshot.json.
@@ -131,7 +132,16 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("start: %w", err)
 	}
 
-	return createRun(ctx, opts, project, store, workflow.Start, task, vcsSnapshot)
+	result, err := createRun(ctx, opts, project, store, workflow.Start, task, vcsSnapshot)
+	if err != nil {
+		return Result{}, err
+	}
+
+	if warning, ok := config.OlderSetupWarning(project.Config); ok {
+		result.Warnings = append(result.Warnings, warning)
+	}
+
+	return result, nil
 }
 
 func createRun(ctx context.Context, opts Options, project *config.Project, store *runstore.Store, initialState string, task resolvedTask, vcsSnapshot vcs.Snapshot) (Result, error) {

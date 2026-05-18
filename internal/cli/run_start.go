@@ -38,6 +38,12 @@ func executeRunStart(opts runstart.Options, stdout, stderr io.Writer) error {
 		return fmt.Errorf("execute run start: %w", err)
 	}
 
+	for _, warning := range result.Warnings {
+		if _, err := fmt.Fprintln(stderr, warning); err != nil {
+			return fmt.Errorf("execute run start: %w", err)
+		}
+	}
+
 	if _, err := fmt.Fprintf(stdout, "started run %s\n", result.RunID); err != nil {
 		return fmt.Errorf("execute run start: %w", err)
 	}

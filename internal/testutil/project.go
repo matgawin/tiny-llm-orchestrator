@@ -55,7 +55,7 @@ func WriteProject(t *testing.T, root string, opts ProjectOptions) {
 		t.Fatalf("create runtimes dir: %v", err)
 	}
 
-	configYAML := "version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n"
+	configYAML := "version: 1\nsetup_version: 1\nworkflows:\n  implementation: workflows/implementation.yaml\nagents:\n  planner: agents/planner.md\n"
 	if opts.TwoStep {
 		configYAML += "  coder: agents/coder.md\n"
 	}

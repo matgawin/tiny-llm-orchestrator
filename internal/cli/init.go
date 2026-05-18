@@ -36,6 +36,7 @@ func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return initFlagError(cmd, stderr, err)
 	})
+	cmd.AddCommand(newInitUpgradeCommand(stdout, stderr))
 
 	return cmd
 }

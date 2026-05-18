@@ -854,14 +854,36 @@ func identityMatches(content []byte, want FileIdentity) bool {
 	return got.Size == want.Size && got.SHA256 == want.SHA256
 }
 
+// ConflictError reports conflicts that prevented an upgrade apply from writing.
+type ConflictError struct {
+	conflicts []Conflict
+}
+
+// Conflicts returns the apply conflicts in stable display order.
+func (err *ConflictError) Conflicts() []Conflict {
+	if err == nil {
+		return nil
+	}
+
+	return append([]Conflict(nil), err.conflicts...)
+}
+
+func (err *ConflictError) Error() string {
+	if err == nil {
+		return ""
+	}
+
+	parts := make([]string, 0, len(err.conflicts))
+	for _, conflict := range err.conflicts {
+		parts = append(parts, conflict.Path+" "+conflict.Code+": "+conflict.Message)
+	}
+
+	return fmt.Sprintf("init upgrade apply refused due to %d conflict(s): %s", len(err.conflicts), strings.Join(parts, "; "))
+}
+
 func conflictsError(conflicts []Conflict) error {
 	ordered := append([]Conflict(nil), conflicts...)
 	slices.SortFunc(ordered, func(a, b Conflict) int { return strings.Compare(a.Path+a.Code, b.Path+b.Code) })
 
-	parts := make([]string, 0, len(ordered))
-	for _, conflict := range ordered {
-		parts = append(parts, conflict.Path+" "+conflict.Code+": "+conflict.Message)
-	}
-
-	return stableerr.Errorf("init upgrade apply refused due to %d conflict(s): %s", len(ordered), strings.Join(parts, "; "))
+	return &ConflictError{conflicts: ordered}
 }

@@ -74,8 +74,8 @@ func (p *planner) plan() error {
 	p.result.ConfigSchemaVersion = cfg.schemaVersion
 	p.result.CurrentSetupVersion = cfg.setupVersion
 
-	if cfg.setupVersion < p.result.TargetSetupVersion {
-		p.warn("", "older-setup", fmt.Sprintf("warning: project Tiny Orc setup version %d is older than this orc supports (%d); run \"orc init upgrade\" to inspect the upgrade plan", cfg.setupVersion, p.result.TargetSetupVersion), "")
+	if warning, ok := config.OlderSetupWarning(cfg.data); ok {
+		p.warn("", "older-setup", warning, "")
 	}
 
 	if cfg.setupVersion == 0 {

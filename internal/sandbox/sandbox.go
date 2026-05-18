@@ -80,6 +80,10 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("load project config: %w", err)
 	}
 
+	if warning, ok := config.OlderSetupWarning(project.Config); ok && opts.Stderr != nil {
+		_, _ = fmt.Fprintln(opts.Stderr, warning)
+	}
+
 	spec, err := BuildSpec(project, opts)
 	if err != nil {
 		return err

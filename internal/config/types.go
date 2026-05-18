@@ -39,6 +39,16 @@ const (
 	SystemSkipPair   = SystemSkipStatus + "/" + SystemSkipResult
 )
 
+// OlderSetupWarning returns the operator warning for project setup versions
+// older than this binary supports.
+func OlderSetupWarning(cfg ProjectConfig) (string, bool) {
+	if cfg.SetupVersion >= CurrentSetupVersion {
+		return "", false
+	}
+
+	return fmt.Sprintf("warning: project Tiny Orc setup version %d is older than this orc supports (%d); run \"orc init upgrade\" to inspect the upgrade plan", cfg.SetupVersion, CurrentSetupVersion), true
+}
+
 var (
 	allowedReportStatuses = map[string]struct{}{
 		"done":    {},

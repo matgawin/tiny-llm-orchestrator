@@ -33,6 +33,12 @@ func executeRunRefreshConfig(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("execute run refresh config: %w", err)
 	}
 
+	for _, warning := range result.Warnings {
+		if _, err := fmt.Fprintln(stderr, warning); err != nil {
+			return fmt.Errorf("execute run refresh config: %w", err)
+		}
+	}
+
 	_, err = fmt.Fprintf(stdout, "refreshed run %s config %s -> %s\nmanifest %s:%s\n", result.RunID, result.OldVersionDir, result.NewVersionDir, result.ManifestHashAlgorithm, result.ManifestHash)
 	if err != nil {
 		return fmt.Errorf("execute run refresh config: %w", err)

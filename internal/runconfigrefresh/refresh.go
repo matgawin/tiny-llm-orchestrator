@@ -43,6 +43,7 @@ type Result struct {
 	ManifestHash          string
 	Source                string
 	Event                 runstore.Event
+	Warnings              []string
 }
 
 // Refresh loads live .orc config, validates compatibility, and publishes the next run snapshot.
@@ -122,7 +123,7 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("refresh: %w", err)
 	}
 
-	return Result{
+	result := Result{
 		RunID:                 opts.RunID,
 		OldVersion:            refresh.OldVersion,
 		OldVersionDir:         refresh.OldVersionDir,
@@ -132,7 +133,13 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 		ManifestHash:          refresh.ManifestHash,
 		Source:                refresh.Source,
 		Event:                 refresh.Event,
-	}, nil
+	}
+
+	if warning, ok := config.OlderSetupWarning(project.Config); ok {
+		result.Warnings = append(result.Warnings, warning)
+	}
+
+	return result, nil
 }
 
 func validateCompatibility(run *runstore.Run, oldProject, newProject *config.Project) error {
