@@ -39,10 +39,11 @@ type initUpgradeJSON struct {
 }
 
 type initUpgradeActionJSON struct {
-	Kind   initupgrade.ActionKind     `json:"kind"`
-	Path   string                     `json:"path"`
-	Reason string                     `json:"reason"`
-	Edits  []initupgrade.SurgicalEdit `json:"edits,omitempty"`
+	Kind      initupgrade.ActionKind     `json:"kind"`
+	Path      string                     `json:"path"`
+	Reason    string                     `json:"reason"`
+	DependsOn []string                   `json:"depends_on,omitempty"`
+	Edits     []initupgrade.SurgicalEdit `json:"edits,omitempty"`
 }
 
 type initUpgradeApplyRefusalJSON struct {
@@ -82,7 +83,7 @@ func newInitUpgradeCommand(stdout, stderr io.Writer) *cobra.Command {
 func initUpgradeHelpLong() string {
 	return appName + ` init upgrade plans and applies persistent project-local Tiny Orc setup upgrades.
 
-Bare orc init upgrade is plan-only and writes nothing. Use --apply to write safe planned changes. No separate dry-run flag exists for this command because the bare command is the dry-run behavior.
+Bare orc init upgrade is plan-only and writes nothing. Use --apply to write safe independent planned changes; conflicts block only their own path and dependent actions when the rest of the plan is safe. No separate dry-run flag exists for this command because the bare command is the dry-run behavior.
 
 The upgrade scope is .orc/config.yaml setup_version, .orc/runtimes/*.yaml, .orc/workflows/*.yaml, .orc/agents/*.md, .gitignore only for .orc/runs/, and managed Tiny Orc guidance in AGENTS.md. It never modifies .orc/runs/**. Existing runs keep pinned config snapshots; after applying live setup changes, run orc run refresh-config <run-id> for runs that should adopt the new setup.`
 }
@@ -110,15 +111,11 @@ func executeInitUpgrade(opts initUpgradeOptions, stdout, stderr io.Writer) error
 		return printInitUpgradePlan(stdout, plan)
 	}
 
-	if len(plan.Conflicts) > 0 {
-		return refuseInitUpgradeConflicts(opts, stdout, stderr, plan)
-	}
-
 	applied, err := initupgrade.Apply(context.Background(), plan, initupgrade.ApplyOptions{Env: os.Environ()})
 	if err != nil {
 		var conflictErr *initupgrade.ConflictError
 		if errors.As(err, &conflictErr) {
-			return refuseInitUpgradeApplyConflicts(opts, stdout, stderr, plan, conflictErr.Conflicts())
+			return handleInitUpgradeApplyConflicts(opts, stdout, stderr, plan, applied, conflictErr.Conflicts())
 		}
 
 		if _, writeErr := fmt.Fprintf(stderr, "%s init upgrade: %v\n", appName, err); writeErr != nil {
@@ -133,28 +130,6 @@ func executeInitUpgrade(opts initUpgradeOptions, stdout, stderr io.Writer) error
 	}
 
 	return printInitUpgradeApply(stdout, applied)
-}
-
-func refuseInitUpgradeConflicts(opts initUpgradeOptions, stdout, stderr io.Writer, plan *initupgrade.Result) error {
-	if opts.JSON {
-		payload := initUpgradePlanJSON(plan)
-		payload.Refused = true
-
-		payload.ApplyRefusal = &initUpgradeApplyRefusalJSON{
-			Reason: "plan contains conflicts; --apply will not write until conflicts are resolved",
-		}
-		if err := encodeInitUpgradeJSON(stdout, payload); err != nil {
-			return err
-		}
-	} else if err := printInitUpgradePlan(stdout, plan); err != nil {
-		return err
-	}
-
-	if _, writeErr := fmt.Fprintf(stderr, "%s init upgrade: conflicts must be resolved before --apply can write\n", appName); writeErr != nil {
-		return fmt.Errorf("execute init upgrade: %w", writeErr)
-	}
-
-	return stableerr.New("init upgrade conflicts must be resolved before apply")
 }
 
 func refuseInitUpgradeApplyConflicts(opts initUpgradeOptions, stdout, stderr io.Writer, plan *initupgrade.Result, conflicts []initupgrade.Conflict) error {
@@ -182,6 +157,32 @@ func refuseInitUpgradeApplyConflicts(opts initUpgradeOptions, stdout, stderr io.
 	return stableerr.New("init upgrade apply detected conflicts")
 }
 
+func handleInitUpgradeApplyConflicts(opts initUpgradeOptions, stdout, stderr io.Writer, plan *initupgrade.Result, applied *initupgrade.ApplyResult, conflicts []initupgrade.Conflict) error {
+	if applied == nil {
+		return refuseInitUpgradeApplyConflicts(opts, stdout, stderr, plan, conflicts)
+	}
+
+	if opts.JSON {
+		payload := initUpgradeApplyJSON(plan, applied)
+		payload.Refused = true
+		payload.ApplyRefusal = &initUpgradeApplyRefusalJSON{
+			Reason: "apply completed with unresolved conflicts",
+		}
+
+		if err := encodeInitUpgradeJSON(stdout, payload); err != nil {
+			return err
+		}
+	} else if err := printInitUpgradeApply(stdout, applied); err != nil {
+		return err
+	}
+
+	if _, writeErr := fmt.Fprintf(stderr, "%s init upgrade: applied safe changes but unresolved conflicts remain\n", appName); writeErr != nil {
+		return fmt.Errorf("execute init upgrade: %w", writeErr)
+	}
+
+	return stableerr.New("init upgrade apply completed with unresolved conflicts")
+}
+
 func encodeInitUpgradeJSON(stdout io.Writer, payload initUpgradeJSON) error {
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
@@ -197,10 +198,11 @@ func initUpgradePlanJSON(plan *initupgrade.Result) initUpgradeJSON {
 	actions := make([]initUpgradeActionJSON, 0, len(plan.Actions))
 	for _, action := range plan.Actions {
 		actions = append(actions, initUpgradeActionJSON{
-			Kind:   action.Kind,
-			Path:   action.Path,
-			Reason: action.Reason,
-			Edits:  append([]initupgrade.SurgicalEdit(nil), action.Edits...),
+			Kind:      action.Kind,
+			Path:      action.Path,
+			Reason:    action.Reason,
+			DependsOn: append([]string(nil), action.DependsOn...),
+			Edits:     append([]initupgrade.SurgicalEdit(nil), action.Edits...),
 		})
 	}
 
@@ -223,6 +225,7 @@ func initUpgradeApplyJSON(plan *initupgrade.Result, applied *initupgrade.ApplyRe
 	payload.Applied = true
 
 	payload.Warnings = append([]initupgrade.Warning(nil), applied.Warnings...)
+	payload.Conflicts = append([]initupgrade.Conflict(nil), applied.Conflicts...)
 	payload.StaleFiles = append([]initupgrade.StaleFile(nil), applied.StaleFiles...)
 	payload.FollowUps = append([]initupgrade.FollowUp(nil), applied.FollowUps...)
 	payload.CreatedPaths = append([]string(nil), applied.CreatedPaths...)
@@ -273,7 +276,7 @@ func printInitUpgradePlan(stdout io.Writer, plan *initupgrade.Result) error {
 	}
 
 	if len(plan.Conflicts) > 0 {
-		if _, err := fmt.Fprintln(stdout, "\napply: --apply will not write until conflicts are resolved"); err != nil {
+		if _, err := fmt.Fprintln(stdout, "\napply: run orc init upgrade --apply to write safe independent changes; conflicting paths and dependent actions will be skipped"); err != nil {
 			return fmt.Errorf("print init upgrade plan: %w", err)
 		}
 
@@ -320,7 +323,12 @@ func printInitUpgradeApplyRefusal(stdout io.Writer, plan *initupgrade.Result, co
 }
 
 func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) error {
-	if _, err := fmt.Fprintf(stdout, "orc init upgrade applied\n\nsetup version: %d -> %d\nconfig schema version: %d\n", applied.PreviousSetupVersion, applied.TargetSetupVersion, applied.ConfigSchemaVersion); err != nil {
+	title := "orc init upgrade applied"
+	if len(applied.Conflicts) > 0 {
+		title = "orc init upgrade partially applied"
+	}
+
+	if _, err := fmt.Fprintf(stdout, "%s\n\nsetup version: %d -> %d\nconfig schema version: %d\n", title, applied.PreviousSetupVersion, applied.TargetSetupVersion, applied.ConfigSchemaVersion); err != nil {
 		return fmt.Errorf("print init upgrade apply: %w", err)
 	}
 
@@ -336,6 +344,10 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 		return err
 	}
 
+	if err := printInitUpgradeConflicts(stdout, applied.Conflicts); err != nil {
+		return err
+	}
+
 	if err := printInitUpgradeStaleFiles(stdout, applied.StaleFiles); err != nil {
 		return err
 	}
@@ -345,14 +357,24 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 	}
 
 	if len(applied.CreatedPaths) == 0 && len(applied.ModifiedPaths) == 0 {
-		if _, err := fmt.Fprintln(stdout, "\nresult: no files changed"); err != nil {
+		result := "result: no files changed"
+		if len(applied.Conflicts) > 0 {
+			result = "result: no files changed; unresolved conflicts remain"
+		}
+
+		if _, err := fmt.Fprintln(stdout, "\n"+result); err != nil {
 			return fmt.Errorf("print init upgrade apply: %w", err)
 		}
 
 		return nil
 	}
 
-	if _, err := fmt.Fprintln(stdout, "\nresult: safe planned changes were written"); err != nil {
+	result := "result: safe planned changes were written"
+	if len(applied.Conflicts) > 0 {
+		result = "result: safe independent changes were written; unresolved conflicts remain"
+	}
+
+	if _, err := fmt.Fprintln(stdout, "\n"+result); err != nil {
 		return fmt.Errorf("print init upgrade apply: %w", err)
 	}
 

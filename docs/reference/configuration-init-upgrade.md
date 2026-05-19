@@ -39,9 +39,10 @@ project setup and reports planned safe changes, warnings, conflicts, stale
 managed files, affected paths, and follow-up guidance. V1 intentionally has no
 `--dry-run` flag because the bare command is the dry-run behavior.
 
-`orc init upgrade --apply` writes only safe changes from the upgrade plan.
-Writes require the explicit `--apply` flag. Apply must refuse ambiguous or risky
-writes instead of overwriting whole files.
+`orc init upgrade --apply` writes the safe independent subset of the upgrade
+plan. Writes require the explicit `--apply` flag. Apply must refuse ambiguous
+or risky path-specific writes instead of overwriting whole files, but one
+path-specific conflict must not block unrelated safe actions.
 
 `orc init upgrade --json` emits the same planning information as structured
 JSON. `orc init upgrade --apply --json` emits structured apply results as well.
@@ -57,8 +58,10 @@ JSON output must include at least:
 - `affected_paths`
 - `follow_ups`
 
-Apply JSON must also include written paths and skipped or refused writes. JSON
-and human output must describe the same decisions.
+Apply JSON must also include written paths and unresolved skipped or refused
+writes. JSON and human output must describe the same decisions. Human output
+must not claim a fully clean upgrade when any action was skipped or conflicted;
+it must report partial apply and list the remaining work.
 
 ## Version Marker
 
@@ -154,6 +157,15 @@ historical shape when the migration cannot enumerate a safe rule for it.
 
 Conflict behavior:
 
+- Global fatal errors prevent all writes. These include invalid input or plan
+  shape, unreadable required planning state, inability to determine a safe
+  actionable subset, internal edit construction errors, or filesystem/VCS
+  failures that prevent deciding action safety.
+- Action-scoped conflicts block only the affected action and actions that
+  depend on it. These include dirty affected paths, changed-during-apply
+  identity mismatches, unsafe target paths, symlink parents or targets,
+  non-regular existing files, semantic config conflicts that apply to a
+  specific config edit, and `.orc/runs/**` exclusions.
 - Customized or unknown existing scaffold files become conflicts or warnings
   unless a migration has a narrow structural rule for them.
 - Path conflicts for missing new files become conflicts.
@@ -165,7 +177,12 @@ Conflict behavior:
 Missing-file behavior:
 
 - Missing required scaffold files are planned as creates when no path conflict
-  exists.
+  exists and the corresponding `.orc/config.yaml` reference is safe.
+- A scaffold file create may proceed only when the config already points to the
+  scaffold path, or when the config action that establishes the reference is
+  also safe and will be applied. If the config reference edit is skipped or
+  conflicted, the dependent scaffold create is skipped instead of created
+  blindly.
 - New file content comes from the current embedded scaffold.
 
 Stale-file behavior:
@@ -176,17 +193,32 @@ Stale-file behavior:
 
 Local-edit behavior:
 
-- Before `--apply`, inspect VCS state for files the plan would write.
-- If an affected existing file is dirty before apply, refuse with a stable
-  conflict.
+- Before `--apply`, inspect VCS state for existing files in the safe actionable
+  subset.
+- If an actionable existing file is dirty before apply, skip or refuse that
+  path with a stable path-specific conflict.
 - Do not require a clean repository globally.
+- Unrelated dirty files must not block apply.
 - A newly created untracked target that does not exist yet is not a dirty-file
   conflict.
 - Planning must work without VCS.
 - `--apply` may proceed without a recognized VCS because `--apply` is explicit,
   but it must warn that affected-file dirtiness could not be checked.
-- Changed-during-apply content verification still applies.
+- Changed-during-apply content verification still applies per action. If one
+  target changes after planning, reject that write and continue with unrelated
+  safe writes. Earlier successful writes are not rolled back.
 - Do not create backup files by default.
+
+Apply ordering:
+
+- Compute the safe actionable subset and dependency-skipped subset before
+  writing.
+- Write actions in stable path order.
+- If a later action fails a changed-during-apply or filesystem safety check
+  after earlier independent writes succeeded, report partial failure with both
+  the written paths and the unresolved conflict.
+- `.gitignore` and `AGENTS.md` append/create actions are independent of
+  `.orc/config.yaml` unless their own path-specific safety checks fail.
 
 ## AGENTS.md Policy
 
@@ -240,7 +272,12 @@ Safe `0 -> 1` rules:
 - Add `defaults.loop_caps` only when the field is missing and no existing
   defaults shape conflicts with the built-in default semantics.
 - Add `runtimes.codex` and create `.orc/runtimes/codex.yaml` only when Codex is
-  the intended effective runtime and the runtime path is absent.
+  the intended effective runtime and the runtime path is absent or already
+  points at `runtimes/codex.yaml`.
+- A true `runtimes.codex` semantic conflict, such as an existing value that
+  points somewhere other than `runtimes/codex.yaml`, blocks `.orc/config.yaml`
+  edits and dependent `.orc/runtimes/codex.yaml` creation, but does not block
+  unrelated safe actions such as `.gitignore` updates or `AGENTS.md` creation.
 - Create missing current scaffold workflow or agent files only when they are
   referenced or explicitly required by the migration and the target path is
   absent.

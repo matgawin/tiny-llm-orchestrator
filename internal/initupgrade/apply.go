@@ -36,6 +36,7 @@ type ApplyResult struct {
 	CreatedPaths         []string    `json:"created_paths"`
 	ModifiedPaths        []string    `json:"modified_paths"`
 	Warnings             []Warning   `json:"warnings"`
+	Conflicts            []Conflict  `json:"conflicts,omitempty"`
 	StaleFiles           []StaleFile `json:"stale_files"`
 	FollowUps            []FollowUp  `json:"follow_ups"`
 }
@@ -50,18 +51,24 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 		return nil, stableerr.New("project root is required")
 	}
 
-	if len(plan.Conflicts) > 0 {
-		return nil, conflictsError(plan.Conflicts)
-	}
-
 	root, err := filepath.Abs(plan.ProjectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("apply init upgrade: %w", err)
 	}
 
 	warnings := append([]Warning(nil), plan.Warnings...)
+	conflicts := append([]Conflict(nil), plan.Conflicts...)
+	blocked := blockedConflictPaths(conflicts)
 
-	warning, hasWarning, err := checkAffectedPathDirtiness(ctx, root, plan.AffectedPaths, opts)
+	actions, depConflicts, err := actionableSubset(plan.Actions, blocked)
+	if err != nil {
+		return nil, err
+	}
+
+	conflicts = append(conflicts, depConflicts...)
+	addBlockedConflicts(blocked, depConflicts)
+
+	warning, hasWarning, dirtyConflicts, err := checkAffectedPathDirtiness(ctx, root, affectedPathsForActions(actions), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -70,16 +77,28 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 		warnings = append(warnings, warning)
 	}
 
-	writes, err := prepareWrites(root, plan.Actions)
+	conflicts = append(conflicts, dirtyConflicts...)
+	addBlockedConflicts(blocked, dirtyConflicts)
+
+	actions, depConflicts, err = actionableSubset(actions, blocked)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, write := range writes {
-		if err := writePreparedFile(write); err != nil {
-			return nil, err
-		}
+	conflicts = append(conflicts, depConflicts...)
+	addBlockedConflicts(blocked, depConflicts)
+
+	writes, prepareConflicts, err := prepareWritesPartial(root, actions)
+	if err != nil {
+		return nil, err
 	}
+
+	conflicts = append(conflicts, prepareConflicts...)
+	addBlockedConflicts(blocked, prepareConflicts)
+
+	writes, depConflicts = filterPreparedWritesByDependencies(writes, actions, blocked)
+	conflicts = append(conflicts, depConflicts...)
+	addBlockedConflicts(blocked, depConflicts)
 
 	result := &ApplyResult{
 		ProjectRoot:          root,
@@ -92,12 +111,37 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 	}
 
 	for _, write := range writes {
+		if blockedByDependency(write.relPath, actions, blocked) {
+			conflict := dependencyConflict(write.relPath, actions)
+			conflicts = append(conflicts, conflict)
+			addBlockedConflict(blocked, conflict)
+
+			continue
+		}
+
+		if err := writePreparedFile(write); err != nil {
+			conflict, ok := actionConflict(write.relPath, err)
+			if !ok {
+				return nil, err
+			}
+
+			conflicts = append(conflicts, conflict)
+			addBlockedConflict(blocked, conflict)
+
+			continue
+		}
+
 		switch write.kind {
 		case ActionCreate:
 			result.CreatedPaths = append(result.CreatedPaths, write.relPath)
 		case ActionModify:
 			result.ModifiedPaths = append(result.ModifiedPaths, write.relPath)
 		}
+	}
+
+	result.Conflicts = orderedConflicts(conflicts)
+	if len(result.Conflicts) > 0 {
+		return result, conflictsError(result.Conflicts)
 	}
 
 	return result, nil
@@ -112,31 +156,31 @@ type preparedWrite struct {
 	next     []byte
 }
 
-func checkAffectedPathDirtiness(ctx context.Context, root string, affected []AffectedPath, opts ApplyOptions) (Warning, bool, error) {
+func checkAffectedPathDirtiness(ctx context.Context, root string, affected []AffectedPath, opts ApplyOptions) (Warning, bool, []Conflict, error) {
 	existing, err := existingAffectedPlanPaths(affected)
 	if err != nil {
-		return Warning{}, false, err
+		return Warning{}, false, nil, err
 	}
 
 	if len(existing) == 0 {
-		return Warning{}, false, nil
+		return Warning{}, false, nil, nil
 	}
 
 	snapshot, err := vcs.InspectPreRun(ctx, vcs.Options{Root: root, Env: opts.Env})
 	if err != nil {
-		return Warning{}, false, fmt.Errorf("check affected path dirtiness: %w", err)
+		return Warning{}, false, nil, fmt.Errorf("check affected path dirtiness: %w", err)
 	}
 
 	if snapshot.Kind == vcs.KindNone {
 		return Warning{
 			Code:    "no-vcs-dirty-check",
 			Message: "no supported VCS detected; skipped affected-file dirty precheck before applying upgrade",
-		}, true, nil
+		}, true, nil, nil
 	}
 
 	changedKeys, err := changedPathKeys(root, snapshot.RepositoryRoot, existing)
 	if err != nil {
-		return Warning{}, false, err
+		return Warning{}, false, nil, err
 	}
 
 	var dirty []Conflict
@@ -153,11 +197,279 @@ func checkAffectedPathDirtiness(ctx context.Context, root string, affected []Aff
 		}
 	}
 
-	if len(dirty) > 0 {
-		return Warning{}, false, conflictsError(dirty)
+	return Warning{}, false, dirty, nil
+}
+
+func affectedPathsForActions(actions []Action) []AffectedPath {
+	affected := make([]AffectedPath, 0, len(actions))
+	for _, action := range actions {
+		if action.Kind != ActionModify {
+			continue
+		}
+
+		affected = append(affected, AffectedPath{Path: action.Path, Exists: true, FileIdentity: action.FileIdentity})
 	}
 
-	return Warning{}, false, nil
+	return affected
+}
+
+func actionableSubset(actions []Action, blocked map[string]struct{}) ([]Action, []Conflict, error) {
+	var (
+		out       []Action
+		conflicts []Conflict
+	)
+
+	for _, action := range actions {
+		rel, err := cleanPlanPath(action.Path)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if _, ok := blocked[rel]; ok {
+			continue
+		}
+
+		var blockedDep string
+
+		for _, dep := range action.DependsOn {
+			cleanDep, err := cleanPlanPath(dep)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if _, ok := blocked[cleanDep]; ok {
+				blockedDep = cleanDep
+				break
+			}
+		}
+
+		if blockedDep != "" {
+			conflicts = append(conflicts, Conflict{
+				Path:     rel,
+				Code:     "dependency-skipped",
+				Message:  fmt.Sprintf("planned action depends on %s, which was not safe to apply", blockedDep),
+				Guidance: "resolve the dependency conflict and rerun orc init upgrade",
+			})
+
+			continue
+		}
+
+		copyAction := action
+		copyAction.Path = rel
+		out = append(out, copyAction)
+	}
+
+	slices.SortFunc(out, func(a, b Action) int { return strings.Compare(a.Path, b.Path) })
+
+	return out, orderedConflicts(conflicts), nil
+}
+
+func prepareWritesPartial(root string, actions []Action) ([]preparedWrite, []Conflict, error) {
+	ordered := append([]Action(nil), actions...)
+	slices.SortFunc(ordered, func(a, b Action) int { return strings.Compare(a.Path, b.Path) })
+
+	var (
+		writes    = make([]preparedWrite, 0, len(ordered))
+		conflicts []Conflict
+	)
+
+	for _, action := range ordered {
+		rel, err := cleanPlanPath(action.Path)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if isRunsPath(rel) {
+			conflicts = append(conflicts, Conflict{
+				Path:     rel,
+				Code:     "runs-path-excluded",
+				Message:  ".orc/runs is excluded from setup upgrade apply",
+				Guidance: "do not plan setup upgrades under .orc/runs",
+			})
+
+			continue
+		}
+
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+
+		switch action.Kind {
+		case ActionCreate:
+			write, err := prepareCreateWrite(root, rel, abs, action)
+			if err != nil {
+				conflict, ok := actionConflict(rel, err)
+				if !ok {
+					return nil, nil, err
+				}
+
+				conflicts = append(conflicts, conflict)
+
+				continue
+			}
+
+			writes = append(writes, write)
+		case ActionModify:
+			write, err := prepareModifyWrite(root, rel, abs, action)
+			if err != nil {
+				conflict, ok := actionConflict(rel, err)
+				if !ok {
+					return nil, nil, err
+				}
+
+				conflicts = append(conflicts, conflict)
+
+				continue
+			}
+
+			writes = append(writes, write)
+		default:
+			return nil, nil, stableerr.Errorf("%s has unsupported init upgrade action kind %q", rel, action.Kind)
+		}
+	}
+
+	return writes, orderedConflicts(conflicts), nil
+}
+
+func filterPreparedWritesByDependencies(writes []preparedWrite, actions []Action, blocked map[string]struct{}) ([]preparedWrite, []Conflict) {
+	actionByPath := make(map[string]Action, len(actions))
+	for _, action := range actions {
+		actionByPath[action.Path] = action
+	}
+
+	var (
+		out       []preparedWrite
+		conflicts []Conflict
+	)
+
+	for _, write := range writes {
+		action := actionByPath[write.relPath]
+
+		var blockedDep string
+
+		for _, dep := range action.DependsOn {
+			cleanDep, err := cleanPlanPath(dep)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := blocked[cleanDep]; ok {
+				blockedDep = cleanDep
+				break
+			}
+		}
+
+		if blockedDep != "" {
+			conflicts = append(conflicts, dependencyConflictFor(write.relPath, blockedDep))
+			continue
+		}
+
+		out = append(out, write)
+	}
+
+	return out, orderedConflicts(conflicts)
+}
+
+func blockedByDependency(path string, actions []Action, blocked map[string]struct{}) bool {
+	for _, action := range actions {
+		if action.Path != path {
+			continue
+		}
+
+		for _, dep := range action.DependsOn {
+			cleanDep, err := cleanPlanPath(dep)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := blocked[cleanDep]; ok {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func dependencyConflict(path string, actions []Action) Conflict {
+	for _, action := range actions {
+		if action.Path != path {
+			continue
+		}
+
+		for _, dep := range action.DependsOn {
+			cleanDep, err := cleanPlanPath(dep)
+			if err == nil {
+				return dependencyConflictFor(path, cleanDep)
+			}
+		}
+	}
+
+	return dependencyConflictFor(path, "a prerequisite action")
+}
+
+func dependencyConflictFor(path, dep string) Conflict {
+	return Conflict{
+		Path:     path,
+		Code:     "dependency-skipped",
+		Message:  fmt.Sprintf("planned action depends on %s, which was not safe to apply", dep),
+		Guidance: "resolve the dependency conflict and rerun orc init upgrade",
+	}
+}
+
+func blockedConflictPaths(conflicts []Conflict) map[string]struct{} {
+	blocked := make(map[string]struct{}, len(conflicts))
+	addBlockedConflicts(blocked, conflicts)
+
+	return blocked
+}
+
+func addBlockedConflicts(blocked map[string]struct{}, conflicts []Conflict) {
+	for _, conflict := range conflicts {
+		addBlockedConflict(blocked, conflict)
+	}
+}
+
+func addBlockedConflict(blocked map[string]struct{}, conflict Conflict) {
+	if conflict.Path == "" {
+		return
+	}
+
+	if rel, err := cleanPlanPath(conflict.Path); err == nil {
+		blocked[rel] = struct{}{}
+	}
+}
+
+func actionConflict(path string, err error) (Conflict, bool) {
+	message := err.Error()
+
+	var (
+		code     string
+		guidance string
+	)
+
+	switch {
+	case strings.Contains(message, "changed during init upgrade apply"):
+		code = "changed-during-apply"
+		guidance = "rerun orc init upgrade after resolving concurrent changes to this path"
+	case strings.Contains(message, "unsafe symlink parent"):
+		code = "unsafe-symlink-parent"
+		guidance = "replace the symlink parent with a real project-local directory before applying the upgrade"
+	case strings.Contains(message, "unsafe symlink target"):
+		code = "unsafe-symlink-target"
+		guidance = "replace the symlink target with a regular project-local file before applying the upgrade"
+	case strings.Contains(message, "not a regular file"):
+		code = "non-regular-file"
+		guidance = "replace the target with a regular file before applying the upgrade"
+	case strings.Contains(message, "non-directory parent"):
+		code = "non-directory-parent"
+		guidance = "replace the parent path with a directory before applying the upgrade"
+	case strings.Contains(message, "excluded from setup upgrade apply"):
+		code = "runs-path-excluded"
+		guidance = "do not plan setup upgrades under .orc/runs"
+	default:
+		return Conflict{}, false
+	}
+
+	return Conflict{Path: path, Code: code, Message: message, Guidance: guidance}, true
 }
 
 func existingAffectedPlanPaths(affected []AffectedPath) ([]string, error) {
@@ -214,46 +526,6 @@ func changedPathKeys(projectRoot, repositoryRoot string, planPaths []string) (ma
 	}
 
 	return keys, nil
-}
-
-func prepareWrites(root string, actions []Action) ([]preparedWrite, error) {
-	ordered := append([]Action(nil), actions...)
-	slices.SortFunc(ordered, func(a, b Action) int { return strings.Compare(a.Path, b.Path) })
-
-	writes := make([]preparedWrite, 0, len(ordered))
-	for _, action := range ordered {
-		rel, err := cleanPlanPath(action.Path)
-		if err != nil {
-			return nil, err
-		}
-
-		if isRunsPath(rel) {
-			return nil, stableerr.Errorf("%s is excluded from setup upgrade apply", rel)
-		}
-
-		abs := filepath.Join(root, filepath.FromSlash(rel))
-
-		switch action.Kind {
-		case ActionCreate:
-			write, err := prepareCreateWrite(root, rel, abs, action)
-			if err != nil {
-				return nil, err
-			}
-
-			writes = append(writes, write)
-		case ActionModify:
-			write, err := prepareModifyWrite(root, rel, abs, action)
-			if err != nil {
-				return nil, err
-			}
-
-			writes = append(writes, write)
-		default:
-			return nil, stableerr.Errorf("%s has unsupported init upgrade action kind %q", rel, action.Kind)
-		}
-	}
-
-	return writes, nil
 }
 
 func prepareCreateWrite(root, rel, abs string, action Action) (preparedWrite, error) {
@@ -882,8 +1154,12 @@ func (err *ConflictError) Error() string {
 }
 
 func conflictsError(conflicts []Conflict) error {
+	return &ConflictError{conflicts: orderedConflicts(conflicts)}
+}
+
+func orderedConflicts(conflicts []Conflict) []Conflict {
 	ordered := append([]Conflict(nil), conflicts...)
 	slices.SortFunc(ordered, func(a, b Conflict) int { return strings.Compare(a.Path+a.Code, b.Path+b.Code) })
 
-	return &ConflictError{conflicts: ordered}
+	return ordered
 }

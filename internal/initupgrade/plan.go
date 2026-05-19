@@ -41,6 +41,7 @@ type Action struct {
 	Kind         ActionKind     `json:"kind"`
 	Path         string         `json:"path"`
 	Reason       string         `json:"reason"`
+	DependsOn    []string       `json:"depends_on,omitempty"`
 	Content      []byte         `json:"content,omitempty"`
 	Edits        []SurgicalEdit `json:"edits,omitempty"`
 	FileIdentity *FileIdentity  `json:"file_identity,omitempty"`

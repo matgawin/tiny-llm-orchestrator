@@ -107,7 +107,7 @@ func TestExecuteInitUpgradeApplyWritesSafePlan(t *testing.T) {
 	})
 }
 
-func TestExecuteInitUpgradeApplyRefusesConflicts(t *testing.T) {
+func TestExecuteInitUpgradeApplyPartiallyAppliesWithConflicts(t *testing.T) {
 	root := withTempCwd(t)
 	executeCLICommand(t, []string{"init", "--yes"})
 	removeCLISetupVersion(t, root)
@@ -119,17 +119,20 @@ func TestExecuteInitUpgradeApplyRefusesConflicts(t *testing.T) {
 	}
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
+		"orc init upgrade partially applied",
+		"modified files:",
+		".orc/config.yaml",
 		"conflicts:",
 		"customized-scaffold-file",
-		"--apply will not write until conflicts are resolved",
+		"result: safe independent changes were written; unresolved conflicts remain",
 	})
 	assertCLIOutputContainsAll(t, stderr.String(), []string{
 		"orc init upgrade",
-		"conflicts must be resolved before --apply can write",
+		"applied safe changes but unresolved conflicts remain",
 	})
 
-	if strings.Contains(string(readCLIFile(t, filepath.Join(root, ".orc", "config.yaml"))), "setup_version") {
-		t.Fatalf("config gained setup_version despite conflict refusal")
+	if !strings.Contains(string(readCLIFile(t, filepath.Join(root, ".orc", "config.yaml"))), "setup_version: 1\n") {
+		t.Fatalf("config did not gain setup_version during partial apply")
 	}
 }
 
@@ -146,16 +149,17 @@ func TestExecuteInitUpgradeApplyReportsDirtyAffectedPathConflict(t *testing.T) {
 	}
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
-		"orc init upgrade apply refused",
-		"planned changes:",
+		"orc init upgrade partially applied",
+		"created files:",
+		"AGENTS.md",
 		"conflicts:",
 		".orc/config.yaml",
 		"dirty-affected-path",
-		"--apply did not write because conflicts were detected during apply",
+		"result: safe independent changes were written; unresolved conflicts remain",
 	})
 	assertCLIOutputContainsAll(t, stderr.String(), []string{
 		"orc init upgrade",
-		"apply detected conflicts and did not write",
+		"applied safe changes but unresolved conflicts remain",
 	})
 
 	if strings.Contains(string(readCLIFile(t, filepath.Join(root, ".orc", "config.yaml"))), "setup_version") {
@@ -215,20 +219,20 @@ func TestExecuteInitUpgradeJSONApplyReportsDirtyAffectedPathConflict(t *testing.
 		t.Fatal("Execute returned nil error, want dirty affected path refusal")
 	}
 
-	if !strings.Contains(stderr.String(), "apply detected conflicts and did not write") {
-		t.Fatalf("stderr = %q, want apply conflict refusal", stderr.String())
+	if !strings.Contains(stderr.String(), "applied safe changes but unresolved conflicts remain") {
+		t.Fatalf("stderr = %q, want partial apply conflict", stderr.String())
 	}
 
 	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
-	if payload.Applied || !payload.Refused {
-		t.Fatalf("applied/refused = %t/%t, want false/true", payload.Applied, payload.Refused)
+	if !payload.Applied || !payload.Refused {
+		t.Fatalf("applied/refused = %t/%t, want true/true", payload.Applied, payload.Refused)
 	}
 
 	if !hasInitUpgradeConflict(payload.Conflicts, "dirty-affected-path") {
 		t.Fatalf("conflicts = %#v, want dirty-affected-path", payload.Conflicts)
 	}
 
-	if payload.ApplyRefusal == nil || payload.ApplyRefusal.Reason != "apply detected conflicts; --apply did not write" {
+	if payload.ApplyRefusal == nil || payload.ApplyRefusal.Reason != "apply completed with unresolved conflicts" {
 		t.Fatalf("apply_refusal = %#v, want refusal reason", payload.ApplyRefusal)
 	}
 

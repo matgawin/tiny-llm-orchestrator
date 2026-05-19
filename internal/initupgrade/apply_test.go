@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,29 +13,37 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 )
 
-func TestApplyRefusesPlanConflictsBeforeWriting(t *testing.T) {
+func TestApplyWritesIndependentActionsDespitePlanConflicts(t *testing.T) {
 	root := legacyScaffold(t)
 	configPath := filepath.Join(root, ".orc", "config.yaml")
-	before := readFile(t, configPath)
 
-	writeFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "custom planner\n")
+	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")
+	writeFile(t, plannerPath, "custom planner\n")
 	result := mustPlan(t, root)
 
-	_, err := Apply(context.Background(), result, ApplyOptions{})
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
 	if err == nil {
-		t.Fatal("Apply returned nil error, want conflict refusal")
+		t.Fatal("Apply returned nil error, want unresolved conflict")
 	}
 
 	if !strings.Contains(err.Error(), "customized-scaffold-file") {
 		t.Fatalf("Apply error = %v, want customized-scaffold-file", err)
 	}
 
-	if got := readFile(t, configPath); got != before {
-		t.Fatalf("config changed after conflict refusal:\n%s", got)
+	if applied == nil || !slices.Contains(applied.ModifiedPaths, ".orc/config.yaml") {
+		t.Fatalf("applied = %#v, want config modified despite unrelated scaffold conflict", applied)
+	}
+
+	if got := readFile(t, plannerPath); got != "custom planner\n" {
+		t.Fatalf("planner changed to %q, want preserved customization", got)
+	}
+
+	if !strings.Contains(readFile(t, configPath), "setup_version: 1\n") {
+		t.Fatalf("config did not gain setup_version")
 	}
 }
 
-func TestApplyRejectsChangedDuringApplyBeforeAnyWrite(t *testing.T) {
+func TestApplyRejectsChangedDuringApplyButWritesIndependentActions(t *testing.T) {
 	root := legacyScaffold(t)
 
 	runtimePath := filepath.Join(root, ".orc", "runtimes", "codex.yaml")
@@ -45,7 +54,7 @@ func TestApplyRejectsChangedDuringApplyBeforeAnyWrite(t *testing.T) {
 	result := mustPlan(t, root)
 	replaceInFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: 1\n", "version: 1\n# concurrent edit\n")
 
-	_, err := Apply(context.Background(), result, ApplyOptions{})
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
 	if err == nil {
 		t.Fatal("Apply returned nil error, want changed-during-apply rejection")
 	}
@@ -54,8 +63,12 @@ func TestApplyRejectsChangedDuringApplyBeforeAnyWrite(t *testing.T) {
 		t.Fatalf("Apply error = %v, want changed-during-apply message", err)
 	}
 
-	if _, err := os.Stat(runtimePath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("runtime stat error = %v, want still missing", err)
+	if applied == nil || !slices.Contains(applied.CreatedPaths, ".orc/runtimes/codex.yaml") {
+		t.Fatalf("applied = %#v, want independent runtime create", applied)
+	}
+
+	if _, err := os.Stat(runtimePath); err != nil {
+		t.Fatalf("runtime stat error = %v, want created", err)
 	}
 }
 
@@ -123,8 +136,8 @@ func TestApplyRefusesCreateThroughSymlinkedParent(t *testing.T) {
 		t.Fatalf("run target stat error = %v, want no created file under runs", err)
 	}
 
-	if strings.Contains(readFile(t, filepath.Join(root, ".orc", "config.yaml")), "setup_version") {
-		t.Fatalf("config was modified despite unsafe create parent")
+	if !strings.Contains(readFile(t, filepath.Join(root, ".orc", "config.yaml")), "setup_version") {
+		t.Fatalf("config was not modified despite independent unsafe create parent")
 	}
 }
 
@@ -313,6 +326,62 @@ esac
 	}
 }
 
+func TestApplyIgnoresUnrelatedDirtyPath(t *testing.T) {
+	root := legacyScaffold(t)
+	initCleanJJProjectForApply(t, root)
+	writeFile(t, filepath.Join(root, "README.md"), "dirty but unrelated\n")
+
+	result := mustPlan(t, root)
+
+	applied, err := Apply(context.Background(), result, ApplyOptions{Env: os.Environ()})
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	if !slices.Contains(applied.ModifiedPaths, ".orc/config.yaml") {
+		t.Fatalf("modified paths = %#v, want config despite unrelated dirty path", applied.ModifiedPaths)
+	}
+
+	assertCurrentSetupConfig(t, root)
+}
+
+func TestApplySkipsScaffoldCreateWhenConfigDependencyConflicts(t *testing.T) {
+	root := legacyScaffold(t)
+	configPath := filepath.Join(root, ".orc", "config.yaml")
+	runtimePath := filepath.Join(root, ".orc", "runtimes", "codex.yaml")
+
+	replaceInFile(t, configPath, "runtimes:\n  codex: runtimes/codex.yaml\n", "runtimes:\n  codex: runtimes/custom.yaml\n")
+
+	if err := os.Remove(runtimePath); err != nil {
+		t.Fatalf("remove runtime: %v", err)
+	}
+
+	result := mustPlan(t, root)
+
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
+	if err == nil {
+		t.Fatal("Apply returned nil error, want unresolved conflicts")
+	}
+
+	if applied == nil {
+		t.Fatal("Apply result is nil, want partial result")
+	}
+
+	if slices.Contains(applied.CreatedPaths, ".orc/runtimes/codex.yaml") {
+		t.Fatalf("created paths = %#v, want dependent runtime skipped", applied.CreatedPaths)
+	}
+
+	if _, err := os.Stat(runtimePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("runtime stat error = %v, want missing", err)
+	}
+
+	if !slices.ContainsFunc(applied.Conflicts, func(conflict Conflict) bool {
+		return conflict.Path == ".orc/runtimes/codex.yaml" && conflict.Code == "dependency-skipped"
+	}) {
+		t.Fatalf("conflicts = %#v, want runtime dependency-skipped", applied.Conflicts)
+	}
+}
+
 func TestApplyRefusesDirtyAffectedPathInNestedVCSRoot(t *testing.T) {
 	root := legacyScaffold(t)
 	path := fakeVCSPath(t, map[string]string{
@@ -381,4 +450,28 @@ func fakeVCSPath(t *testing.T, scripts map[string]string) string {
 	}
 
 	return dir
+}
+
+func initCleanJJProjectForApply(t *testing.T, root string) {
+	t.Helper()
+
+	if _, err := exec.LookPath("jj"); err != nil {
+		t.Skipf("jj not available: %v", err)
+	}
+
+	runApplyTestCommand(t, root, "jj", "git", "init", "--colocate", ".")
+	runApplyTestCommand(t, root, "jj", "describe", "-m", "test baseline")
+	runApplyTestCommand(t, root, "jj", "new")
+}
+
+func runApplyTestCommand(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+
+	cmd := exec.CommandContext(context.Background(), name, args...)
+	cmd.Dir = dir
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, string(output))
+	}
 }

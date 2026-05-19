@@ -229,9 +229,15 @@ func (p *planner) planRequiredScaffoldFiles() {
 			continue
 		}
 
+		dependsOnConfig, referenceSafe := p.scaffoldReferenceState(path)
+
 		existing, err := p.read(path)
 		if errors.Is(err, os.ErrNotExist) {
-			p.create(path, "create missing setup v1 scaffold file", content)
+			action := p.create(path, "create missing setup v1 scaffold file", content)
+			if action != nil && (dependsOnConfig || !referenceSafe) {
+				action.DependsOn = append(action.DependsOn, configPath)
+			}
+
 			continue
 		}
 
@@ -250,6 +256,56 @@ func (p *planner) planRequiredScaffoldFiles() {
 		}
 
 		p.conflict(path, "customized-scaffold-file", "existing scaffold file differs from known safe setup migration baselines", "review the file manually; the planner will not overwrite customized content")
+	}
+}
+
+func (p *planner) scaffoldReferenceState(path string) (dependsOnConfig, referenceSafe bool) {
+	expected, ok := scaffoldConfigReference(path)
+	if !ok {
+		return false, true
+	}
+
+	actual := p.scaffoldConfigPath(path)
+	switch actual {
+	case expected:
+		return false, true
+	case "":
+		return true, true
+	default:
+		if !p.hasConflict(configPath, "runtime-reference-conflict") {
+			p.conflict(configPath, "scaffold-reference-conflict", fmt.Sprintf("%s is configured as %q instead of %q", path, actual, expected), "review the existing scaffold reference before applying the setup migration")
+		}
+
+		return true, false
+	}
+}
+
+func (p *planner) scaffoldConfigPath(path string) string {
+	switch {
+	case strings.HasPrefix(path, ".orc/runtimes/") && strings.HasSuffix(path, ".yaml"):
+		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/runtimes/"), ".yaml")
+		return p.config.runtimePath(name)
+	case strings.HasPrefix(path, ".orc/workflows/") && strings.HasSuffix(path, ".yaml"):
+		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/workflows/"), ".yaml")
+		return p.config.workflowPath(name)
+	case strings.HasPrefix(path, ".orc/agents/") && strings.HasSuffix(path, ".md"):
+		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/agents/"), ".md")
+		return p.config.agentPath(name)
+	default:
+		return ""
+	}
+}
+
+func scaffoldConfigReference(path string) (string, bool) {
+	switch {
+	case strings.HasPrefix(path, ".orc/runtimes/"):
+		return strings.TrimPrefix(path, ".orc/"), true
+	case strings.HasPrefix(path, ".orc/workflows/"):
+		return strings.TrimPrefix(path, ".orc/"), true
+	case strings.HasPrefix(path, ".orc/agents/"):
+		return strings.TrimPrefix(path, ".orc/"), true
+	default:
+		return "", false
 	}
 }
 
@@ -274,19 +330,21 @@ func (p *planner) planRunsFollowUp() {
 	}
 }
 
-func (p *planner) create(path, reason string, content []byte) {
+func (p *planner) create(path, reason string, content []byte) *Action {
 	if isRunsPath(path) {
 		p.conflict(path, "runs-path-excluded", ".orc/runs is excluded from setup upgrade planning", "do not plan setup upgrades under .orc/runs")
-		return
+		return nil
 	}
 
 	if info, err := os.Stat(filepath.Join(p.root, filepath.FromSlash(path))); err == nil && info.IsDir() {
 		p.conflict(path, "path-conflict", "target path exists as a directory", "move or remove the conflicting directory before applying the upgrade")
-		return
+		return nil
 	}
 
 	p.result.Actions = append(p.result.Actions, Action{Kind: ActionCreate, Path: path, Reason: reason, Content: append([]byte(nil), content...)})
 	p.result.AffectedPaths = append(p.result.AffectedPaths, AffectedPath{Path: path, Exists: false})
+
+	return &p.result.Actions[len(p.result.Actions)-1]
 }
 
 func (p *planner) modify(path, reason string, fileID FileIdentity, edits []SurgicalEdit) {
@@ -306,6 +364,12 @@ func (p *planner) warn(path, code, message, guidance string) {
 
 func (p *planner) conflict(path, code, message, guidance string) {
 	p.result.Conflicts = append(p.result.Conflicts, Conflict{Path: path, Code: code, Message: message, Guidance: guidance})
+}
+
+func (p *planner) hasConflict(path, code string) bool {
+	return slices.ContainsFunc(p.result.Conflicts, func(conflict Conflict) bool {
+		return conflict.Path == path && conflict.Code == code
+	})
 }
 
 func (p *planner) read(path string) ([]byte, error) {
