@@ -19,7 +19,7 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Stdout:  &stdout,
 		Time:    fixedLauncherTime(),
 	})

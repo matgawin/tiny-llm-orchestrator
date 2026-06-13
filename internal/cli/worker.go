@@ -16,7 +16,7 @@ import (
 
 func newWorkerCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "worker",
+		Use:   commandWorker,
 		Short: "Launch and supervise worker attempts",
 		Long:  appName + " worker launches and supervises worker attempts.",
 		Args:  cobra.NoArgs,

@@ -34,8 +34,8 @@ const (
 var (
 	jjRootCommand    = []string{"jj", "root"}
 	jjStatusCommand  = []string{"jj", "status"}
-	gitRootCommand   = []string{"git", "rev-parse", "--show-toplevel"}
-	gitStatusCommand = []string{"git", "status", "--porcelain=v1", "-z", "--untracked-files=all"}
+	gitRootCommand   = []string{KindGit, "rev-parse", "--show-toplevel"}
+	gitStatusCommand = []string{KindGit, "status", "--porcelain=v1", "-z", "--untracked-files=all"}
 )
 
 // Options controls VCS command execution.

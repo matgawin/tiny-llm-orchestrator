@@ -46,7 +46,7 @@ func printRunSkipStepResult(w io.Writer, result runskip.Result, reason string) e
 		return fmt.Errorf("print run skip step result: %w", err)
 	}
 
-	if result.Status.State == "running" && len(result.Status.WorkflowLoop.Entries) > 0 {
+	if result.Status.State == stateRunning && len(result.Status.WorkflowLoop.Entries) > 0 {
 		entry := result.Status.WorkflowLoop.Entries[len(result.Status.WorkflowLoop.Entries)-1]
 
 		_, err := fmt.Fprintf(w, "next selected step: %s\n", entry.State)

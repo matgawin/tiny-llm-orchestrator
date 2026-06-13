@@ -32,6 +32,9 @@ const (
 
 	runtimePromptDeliveryStdin = "stdin"
 	runtimePromptDeliveryFile  = "file"
+	placeholderModel           = "{model}"
+	placeholderReasoning       = "{reasoning}"
+	placeholderDir             = "{dir}"
 
 	reportPollInterval = 10 * time.Millisecond
 )
@@ -407,9 +410,9 @@ func substituteRuntimeArgPlaceholders(arg string, values runtimePlaceholderValue
 
 func runtimePlaceholderValue(placeholder string, values runtimePlaceholderValues) (string, bool) {
 	switch placeholder {
-	case "{model}":
+	case placeholderModel:
 		return values.model, true
-	case "{reasoning}":
+	case placeholderReasoning:
 		return values.reasoning, true
 	case "{prompt_file}":
 		return values.promptFile, true
@@ -421,7 +424,7 @@ func runtimePlaceholderValue(placeholder string, values runtimePlaceholderValues
 		return values.attemptID, true
 	case "{run_id}":
 		return values.runID, true
-	case "{dir}":
+	case placeholderDir:
 		return values.dir, true
 	default:
 		return "", false
@@ -832,7 +835,8 @@ func recoverActiveAttempt(ctx context.Context, store *runstore.Store, run *runst
 		Time:      time.Now().UTC(),
 	})
 	if err == nil {
-		logger.Debug("recovered active attempt",
+		logger.Debug(
+			"recovered active attempt",
 			zap.String("run_id", run.ID),
 			zap.String("step_id", active.StepID),
 			zap.String("agent_id", active.AgentID),

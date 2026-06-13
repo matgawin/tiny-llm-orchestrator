@@ -18,8 +18,10 @@ const (
 	filePermPrivate = 0o600
 	dirPermPrivate  = 0o750
 
-	yamlChildIndent      = 2
-	yamlGrandchildIndent = 4
+	yamlChildIndent       = 2
+	yamlGrandchildIndent  = 4
+	dependencySkippedCode = "dependency-skipped"
+	setupVersionField     = "setup_version"
 )
 
 // ApplyOptions controls upgrade plan application.
@@ -246,7 +248,7 @@ func actionableSubset(actions []Action, blocked map[string]struct{}) ([]Action, 
 		if blockedDep != "" {
 			conflicts = append(conflicts, Conflict{
 				Path:     rel,
-				Code:     "dependency-skipped",
+				Code:     dependencySkippedCode,
 				Message:  fmt.Sprintf("planned action depends on %s, which was not safe to apply", blockedDep),
 				Guidance: "resolve the dependency conflict and rerun orc init upgrade",
 			})
@@ -787,7 +789,7 @@ func addYAMLField(content []byte, path, value string) ([]byte, error) {
 	}
 
 	insert := len(lines)
-	if path == "setup_version" {
+	if path == setupVersionField {
 		if versionLine := yamlTopLevelKeyLine(lines, "version"); versionLine >= 0 {
 			insert = versionLine + 1
 		}

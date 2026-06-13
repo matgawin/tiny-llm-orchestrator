@@ -25,9 +25,12 @@ const (
 	StepKindCommand = "command"
 	StepKindScript  = "script"
 
-	taskContextBeadsDisabled = "disabled"
-	taskContextBeadsOptional = "optional"
-	taskContextBeadsRequired = "required"
+	taskContextBeadsDisabled  = "disabled"
+	taskContextBeadsOptional  = "optional"
+	taskContextBeadsRequired  = "required"
+	runtimeSelectionModel     = "model"
+	runtimeSelectionReasoning = "reasoning"
+	terminalReadyForHuman     = "ready_for_human"
 
 	VCSDirtyStartBlock = "block"
 	VCSDirtyStartAllow = "allow"
@@ -56,9 +59,9 @@ var (
 		"failed":  {},
 	}
 	allowedTerminalStates = map[string]struct{}{
-		"ready_for_human":   {},
-		"blocked_for_human": {},
-		"cancelled":         {},
+		terminalReadyForHuman: {},
+		"blocked_for_human":   {},
+		"cancelled":           {},
 	}
 	allowedTaskContextBeads = map[string]struct{}{
 		taskContextBeadsDisabled: {},

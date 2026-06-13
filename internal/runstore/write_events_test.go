@@ -17,7 +17,7 @@ func TestAppendEventPreservesOrderedLogAndUpdatesStatus(t *testing.T) {
 	beforeFirstLine := bytes.SplitN(beforeContent, []byte("\n"), 2)[0]
 
 	event, err := store.AppendEvent(run.ID, Event{
-		Type:    "workflow.step.selected",
+		Type:    eventWorkflowStepSelected,
 		Time:    time.Date(2026, 5, 2, 15, 0, 0, 0, time.UTC),
 		Payload: payload,
 	})
@@ -41,7 +41,7 @@ func TestAppendEventPreservesOrderedLogAndUpdatesStatus(t *testing.T) {
 		t.Fatalf("first event line changed after append:\nbefore: %s\nafter:  %s", beforeFirstLine, afterFirstLine)
 	}
 
-	if events[0].Type != eventRunCreated || events[1].Type != "workflow.step.selected" {
+	if events[0].Type != eventRunCreated || events[1].Type != eventWorkflowStepSelected {
 		t.Fatalf("event order = %s then %s, want created then selected", events[0].Type, events[1].Type)
 	}
 
@@ -82,10 +82,10 @@ func TestAppendEventReturnsCommittedEventWhenStatusMaterializationFails(t *testi
 	run := createManualRun(t, store, "append-status-failure")
 	denyStatusMaterializationOrSkip(t, run.Path)
 
-	event, err := store.AppendEvent(run.ID, Event{Type: "workflow.step.finished"})
+	event, err := store.AppendEvent(run.ID, Event{Type: eventWorkflowStepFinished})
 	requireStatusMaterializationError(t, err, run.Path)
 
-	if event.Sequence != 2 || event.Type != "workflow.step.finished" {
+	if event.Sequence != 2 || event.Type != eventWorkflowStepFinished {
 		t.Fatalf("committed event = %+v, want sequence 2 workflow.step.finished", event)
 	}
 
@@ -176,14 +176,14 @@ func TestWriteAPIsRecoverFromStaleMaterializedStatus(t *testing.T) {
 		Sequence:      2,
 		Time:          time.Date(2026, 5, 2, 15, 0, 0, 0, time.UTC),
 		RunID:         run.ID,
-		Type:          "workflow.step.selected",
+		Type:          eventWorkflowStepSelected,
 		Payload:       json.RawMessage(`{}`),
 	}
 	if err := appendEvent(runEventsPath(run), staleEvent); err != nil {
 		t.Fatalf("append stale event: %v", err)
 	}
 
-	event, err := store.AppendEvent(run.ID, Event{Type: "workflow.step.finished"})
+	event, err := store.AppendEvent(run.ID, Event{Type: eventWorkflowStepFinished})
 	if err != nil {
 		t.Fatalf("AppendEvent returned error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestWriteAPIsRecoverFromStaleMaterializedStatus(t *testing.T) {
 		t.Fatalf("UpdateStatus sequence/status = %d/%d, want 4/4", event.Sequence, status.LastSequence)
 	}
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
+	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -220,10 +220,10 @@ func TestWriteAPIsRejectWrongStatusRunIDBeforeMutating(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "wrong-status-id")
 	status := readRunStatus(t, run)
-	status.RunID = "other-run"
+	status.RunID = testOtherRunID
 	writeRunStatus(t, run, status)
 
-	_, err := store.AppendEvent(run.ID, Event{Type: "workflow.step.finished"})
+	_, err := store.AppendEvent(run.ID, Event{Type: eventWorkflowStepFinished})
 	requireErrorContains(t, err, "run_id")
 
 	events := readRunEvents(t, run)
@@ -238,7 +238,7 @@ func TestAppendEventRejectsEventsSymlinkBeforeMutating(t *testing.T) {
 	eventsPath := runEventsPath(run)
 	outside := outsideFileSymlink(t, run.Path, eventsPath, "outside-events.jsonl", []byte("outside\n"))
 
-	_, err := store.AppendEvent(run.ID, Event{Type: "workflow.step.finished"})
+	_, err := store.AppendEvent(run.ID, Event{Type: eventWorkflowStepFinished})
 	requireErrorContains(t, err, "symlink")
 
 	if got := string(readFile(t, outside)); got != "outside\n" {

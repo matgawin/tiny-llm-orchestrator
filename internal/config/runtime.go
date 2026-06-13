@@ -138,7 +138,7 @@ func validateRuntimeExecutable(runtime Runtime) error {
 
 func validateRuntimeModel(runtime Runtime) error {
 	return validateRuntimeSelection(runtime, runtimeSelectionValidation{
-		name:        "model",
+		name:        runtimeSelectionModel,
 		supported:   runtime.Model.Supported,
 		required:    runtime.Model.Required,
 		defaultName: runtime.Model.Default,
@@ -150,7 +150,7 @@ func validateRuntimeModel(runtime Runtime) error {
 
 func validateRuntimeReasoning(runtime Runtime) error {
 	return validateRuntimeSelection(runtime, runtimeSelectionValidation{
-		name:        "reasoning",
+		name:        runtimeSelectionReasoning,
 		supported:   runtime.Reasoning.Supported,
 		required:    runtime.Reasoning.Required,
 		defaultName: runtime.Reasoning.Default,

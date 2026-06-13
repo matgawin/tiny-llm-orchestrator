@@ -14,7 +14,7 @@ func TestLaunchNextRoutesExhaustedSynthesizedFailureToBlocked(t *testing.T) {
 	first, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Time:    fixedLauncherTime(),
 	})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestLaunchNextRoutesExhaustedTimeoutToBlocked(t *testing.T) {
 	first, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "sleep 1"},
+		Command: []string{"sh", "-c", launcherCommandSleepOne},
 		Time:    fixedLauncherTime(),
 	})
 	if err != nil {
@@ -50,7 +50,7 @@ func TestLaunchNextRetriesResolvedHumanBlockAfterReload(t *testing.T) {
 	first, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Time:    fixedLauncherTime(),
 	})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestLaunchNextRetriesResolvedHumanBlockAfterReload(t *testing.T) {
 	retry, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Time:    fixedLauncherTime().Add(3 * time.Second),
 	})
 	if err != nil {
@@ -119,7 +119,7 @@ func TestLaunchNextRetriesThenExhaustsSynthesizedFailure(t *testing.T) {
 	first, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Time:    fixedLauncherTime(),
 	})
 	if err != nil {
@@ -129,7 +129,7 @@ func TestLaunchNextRetriesThenExhaustsSynthesizedFailure(t *testing.T) {
 	second, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Time:    fixedLauncherTime().Add(time.Second),
 	})
 	if err != nil {
@@ -163,7 +163,7 @@ func TestLaunchNextRetriesSynthesizedProcessError(t *testing.T) {
 	second, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
 		Time:    fixedLauncherTime().Add(time.Second),
 	})
 	if err != nil {
@@ -203,7 +203,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{TaskContext: true, TwoStep: true})
 	store := openLauncherStore(t, root)
 
-	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-plan", "plan", "planner")
+	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-plan", launcherPlanStep, launcherAgentPlanner)
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -213,7 +213,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 			AttemptID: attempt.AttemptID,
 			Status:    launcherStatusDone,
 			Result:    launcherResultReady,
-			Summary:   "Plan is ready.",
+			Summary:   launcherReportSummaryReady,
 		},
 		Time: fixedLauncherTime().Add(time.Second),
 	}); err != nil {
@@ -223,7 +223,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
 		Time:    fixedLauncherTime().Add(2 * time.Second),
 	})
 	if err != nil {
@@ -247,7 +247,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 1 {
+	if got := loaded.Status.WorkflowLoop.Counts[launcherPlanStep]; got != 1 {
 		t.Fatalf("plan count = %d, want initial count 1", got)
 	}
 
@@ -256,7 +256,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	}
 
 	entries := loaded.Status.WorkflowLoop.Entries
-	if got := entries[len(entries)-1]; got.State != "code" || got.PreviousState != "plan" || got.TriggerStatus != launcherStatusDone || got.TriggerResult != launcherResultReady {
+	if got := entries[len(entries)-1]; got.State != "code" || got.PreviousState != launcherPlanStep || got.TriggerStatus != launcherStatusDone || got.TriggerResult != launcherResultReady {
 		t.Fatalf("last workflow entry = %+v, want code after plan done/ready", got)
 	}
 }
@@ -265,7 +265,7 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 	root, runID := createLauncherRunWithOptions(t, "200ms", launcherRunOptions{TaskContext: true, Retries: map[string]int{"done/ready": 1}})
 	store := openLauncherStore(t, root)
 
-	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-retry", "plan", "planner")
+	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-retry", launcherPlanStep, launcherAgentPlanner)
 	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
@@ -275,7 +275,7 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 			AttemptID: attempt.AttemptID,
 			Status:    launcherStatusDone,
 			Result:    launcherResultReady,
-			Summary:   "Plan is ready.",
+			Summary:   launcherReportSummaryReady,
 		},
 		Time: fixedLauncherTime().Add(time.Second),
 	}); err != nil {
@@ -285,7 +285,7 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat >/dev/null"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
 		Time:    fixedLauncherTime().Add(2 * time.Second),
 	})
 	if err != nil {
@@ -299,7 +299,7 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 1 {
+	if got := loaded.Status.WorkflowLoop.Counts[launcherPlanStep]; got != 1 {
 		t.Fatalf("plan count = %d, want retry to preserve initial workflow count 1", got)
 	}
 }

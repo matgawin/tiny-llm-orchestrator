@@ -15,15 +15,10 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
-const (
-	defaultCodexNormalArgsWithReasoning  = "--ask-for-approval\nnever\nexec\n--skip-git-repo-check\n-\n--config\nmodel_reasoning_effort=\"medium\"\n"
-	defaultCodexSandboxArgsWithReasoning = "--dangerously-bypass-approvals-and-sandbox\nexec\n--skip-git-repo-check\n-\n--config\nmodel_reasoning_effort=\"medium\"\n"
-)
-
 func TestExecuteWorkerHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"worker", "--help"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandWorker, helpFlag}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
@@ -31,13 +26,13 @@ func TestExecuteWorkerHelp(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 
-	assertCLIOutputContainsAll(t, stdout.String(), []string{"orc worker launches", "launch-next"})
+	assertCLIOutputContainsAll(t, stdout.String(), []string{"orc worker launches", cliCommandLaunchNext})
 }
 
 func TestExecuteWorkerLaunchNextHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"worker", "launch-next", "--help"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandWorker, cliCommandLaunchNext, helpFlag}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
@@ -45,13 +40,13 @@ func TestExecuteWorkerLaunchNextHelp(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 
-	assertCLIOutputContainsAll(t, stdout.String(), []string{"Usage:", "launch-next <run-id>"})
+	assertCLIOutputContainsAll(t, stdout.String(), []string{cliUsage, "launch-next <run-id>"})
 }
 
 func TestExecuteWorkerUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"worker", "unknown"}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandWorker, cliCommandUnknown}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown subcommand")
 	}
 
@@ -67,7 +62,7 @@ func TestExecuteWorkerUnknownSubcommand(t *testing.T) {
 func TestExecuteWorkerLaunchNextRequiresRunID(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"worker", "launch-next"}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandWorker, cliCommandLaunchNext}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want missing run id")
 	}
 
@@ -83,7 +78,7 @@ func TestExecuteWorkerLaunchNextRequiresRunID(t *testing.T) {
 func TestExecuteWorkerLaunchNextRejectsExtraArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"worker", "launch-next", "run-1", "extra"}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandWorker, cliCommandLaunchNext, cliRunIDOne, "extra"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want extra arg rejection")
 	}
 
@@ -99,22 +94,22 @@ func TestExecuteWorkerLaunchNextRejectsExtraArgs(t *testing.T) {
 func TestWorkerLaunchNextRoutesValidReportWithoutPendingOutcome(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
-	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
 	executeCLICommand(t, []string{
-		"report",
-		"--run", result.runID,
-		"--step", "plan",
-		"--agent", "planner",
-		"--attempt", "attempt-001",
-		"--status", "done",
-		"--result", "ready",
-		"--summary", "Plan is ready.",
+		commandReport,
+		cliFlagRun, result.runID,
+		cliFlagStep, cliStepPlan,
+		cliFlagAgent, cliAgentPlanner,
+		cliFlagAttempt, cliAttempt001,
+		cliFlagStatus, cliStatusDone,
+		cliFlagResult, cliResultReady,
+		cliFlagSummary, cliSummaryReady,
 	})
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"worker", "launch-next", result.runID}, &stdout, &stderr)
+	err := Execute([]string{commandWorker, cliCommandLaunchNext, result.runID}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want terminal no-launch error")
 	}
@@ -141,13 +136,13 @@ func TestWorkerLaunchNextRoutesValidReportWithoutPendingOutcome(t *testing.T) {
 func TestWorkerLaunchNextAcceptsWorkerReportBeforeExit(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	t.Setenv("PATH", shim.binDir)
 	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
 	t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"result: done/ready"})
 
 	loaded, err := openCLIStore(t, root).Load(result.runID)
@@ -168,14 +163,14 @@ func TestWorkerLaunchNextAcceptsWorkerReportBeforeExit(t *testing.T) {
 func TestWorkerLaunchNextDisplaysLiveProgressFromAgent(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	t.Setenv("PATH", shim.binDir)
 	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
 	t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
 	t.Setenv("ORC_CLI_CODEX_PROGRESS", "analyzing code paths")
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
 	loaded := loadCLIRun(t, root, result.runID)
 	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
 
@@ -192,7 +187,7 @@ func TestWorkerLaunchNextDisplaysLiveProgressFromAgent(t *testing.T) {
 func TestWorkerLaunchNextRoutesImplementationWorkflowReportsEndToEnd(t *testing.T) {
 	run := startCLIImplementationReportRun(t)
 
-	launchCLIWorkerReport(t, run.runID, ready("Plan is ready."))
+	launchCLIWorkerReport(t, run.runID, ready(cliSummaryReady))
 	launchCLIWorkerReport(t, run.runID, ready("Code is ready for tests."))
 	launchCLIWorkerReport(t, run.runID, failed("Tests failed: go test ./..."))
 
@@ -231,7 +226,7 @@ func TestWorkerLaunchNextRoutesImplementationBlockedReportsToHuman(t *testing.T)
 		{
 			name: "tester blocked",
 			prepare: []workerReport{
-				ready("Plan is ready."),
+				ready(cliSummaryReady),
 				ready("Code is ready for tests."),
 			},
 			blockSummary: "Tests require network approval.",
@@ -239,7 +234,7 @@ func TestWorkerLaunchNextRoutesImplementationBlockedReportsToHuman(t *testing.T)
 		{
 			name: "reviewer blocked",
 			prepare: []workerReport{
-				ready("Plan is ready."),
+				ready(cliSummaryReady),
 				ready("Code is ready for tests."),
 				passed("Tests passed."),
 			},
@@ -265,18 +260,18 @@ func TestWorkerLaunchNextRoutesImplementationBlockedReportsToHuman(t *testing.T)
 func TestExecuteWorkerLaunchNextUsesDefaultCodexCommand(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	shim.setDefaultEnv(t)
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
-	if !strings.Contains(output, "result: failed/missing_report") {
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
+	if !strings.Contains(output, cliOutputMissingReport) {
 		t.Fatalf("output missing successful shim missing_report result:\n%s\nlogs:\n%s", output, readCLILaunchLogs(t, root, result.runID))
 	}
 
-	assertCLIOutputContainsAll(t, output, []string{"launched attempt"})
+	assertCLIOutputContainsAll(t, output, []string{cliOutputLaunchedAttempt})
 	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 	assertCLIOutputContainsAll(t, string(readCLIFile(t, shim.stdinPath)), []string{
 		"# Tiny Orc Worker Prompt\n",
@@ -292,12 +287,12 @@ func TestExecuteWorkerLaunchNextUsesNormalDefaultWithSandboxConfigOutsideSandbox
   command:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
 `)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	shim.setDefaultEnv(t)
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
-	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
+	assertCLIOutputContainsAll(t, output, []string{cliOutputLaunchedAttempt, cliOutputMissingReport})
 	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 }
 
@@ -307,14 +302,14 @@ func TestExecuteWorkerLaunchNextUsesSandboxCodexCommandInsideVerifiedSandbox(t *
   command:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
 `)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	shim.setDefaultEnv(t)
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
-	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
+	assertCLIOutputContainsAll(t, output, []string{cliOutputLaunchedAttempt, cliOutputMissingReport})
 	assertCLICodexArgs(t, shim, defaultCodexSandboxArgsWithReasoning)
 }
 
@@ -324,14 +319,14 @@ func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxMarkerDisabled(t *te
   command:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
 `)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	shim.setDefaultEnv(t)
 	t.Setenv("ORC_SANDBOX", "0")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
-	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
+	assertCLIOutputContainsAll(t, output, []string{cliOutputLaunchedAttempt, cliOutputMissingReport})
 	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 }
 
@@ -341,14 +336,14 @@ func TestExecuteWorkerLaunchNextUsesNormalDefaultWhenSandboxRootInvalid(t *testi
   command:
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
 `)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	shim.setDefaultEnv(t)
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", filepath.Join(root, "missing-sandbox-root"))
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
-	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
+	assertCLIOutputContainsAll(t, output, []string{cliOutputLaunchedAttempt, cliOutputMissingReport})
 	assertCLICodexArgs(t, shim, defaultCodexNormalArgsWithReasoning)
 }
 
@@ -359,13 +354,13 @@ func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardMissingMarker(t *testing.
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   require_for_workers: true
 `)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	t.Setenv("ORC_SANDBOX", "")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"worker", "launch-next", result.runID}, &stdout, &stderr)
+	err := Execute([]string{commandWorker, cliCommandLaunchNext, result.runID}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want sandbox guard refusal")
 	}
@@ -393,13 +388,13 @@ func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardRootMismatches(t *testing
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   require_for_workers: true
 `)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", t.TempDir())
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"worker", "launch-next", result.runID}, &stdout, &stderr)
+	err := Execute([]string{commandWorker, cliCommandLaunchNext, result.runID}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want sandbox root mismatch refusal")
 	}
@@ -428,27 +423,27 @@ func TestExecuteWorkerLaunchNextAllowsMatchingSandboxGuard(t *testing.T) {
     argv: ["codex", "--dangerously-bypass-approvals-and-sandbox"]
   require_for_workers: true
 `)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	shim.setDefaultEnv(t)
 	t.Setenv("ORC_SANDBOX", "1")
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", result.runID})
-	assertCLIOutputContainsAll(t, output, []string{"launched attempt", "result: failed/missing_report"})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
+	assertCLIOutputContainsAll(t, output, []string{cliOutputLaunchedAttempt, cliOutputMissingReport})
 	assertCLICodexArgs(t, shim, defaultCodexSandboxArgsWithReasoning)
 }
 
 func TestConcurrentWorkerLaunchNextOnlyStartsOneWorker(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	counterPath := filepath.Join(root, "codex-starts.txt")
 	env := shim.processEnv("count-starts", "ORC_CLI_CODEX_COUNTER="+counterPath)
 
-	first := startCLIProcess(t, root, env, "worker", "launch-next", result.runID)
-	second := startCLIProcess(t, root, env, "worker", "launch-next", result.runID)
+	first := startCLIProcess(t, root, env, commandWorker, cliCommandLaunchNext, result.runID)
+	second := startCLIProcess(t, root, env, commandWorker, cliCommandLaunchNext, result.runID)
 	firstErr := first.wait()
 
 	secondErr := second.wait()
@@ -462,7 +457,7 @@ func TestConcurrentWorkerLaunchNextOnlyStartsOneWorker(t *testing.T) {
 	}
 
 	combined := first.output() + "\n" + second.output()
-	if !strings.Contains(combined, "result: failed/missing_report") {
+	if !strings.Contains(combined, cliOutputMissingReport) {
 		t.Fatalf("combined output missing launched attempt result:\n%s", combined)
 	}
 
@@ -474,10 +469,10 @@ func TestConcurrentWorkerLaunchNextOnlyStartsOneWorker(t *testing.T) {
 func TestWorkerLaunchNextSignalCancelsWorkerProcessGroup(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	childPIDPath := filepath.Join(root, "signal-child.pid")
-	cmd := exec.CommandContext(context.Background(), os.Args[0], "worker", "launch-next", result.runID)
+	cmd := exec.CommandContext(context.Background(), os.Args[0], commandWorker, cliCommandLaunchNext, result.runID)
 	cmd.Dir = root
 	cmd.Env = shim.processEnv("child-pid", "ORC_CLI_CODEX_CHILD_PID="+childPIDPath)
 

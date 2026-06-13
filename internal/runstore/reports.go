@@ -200,7 +200,7 @@ func validateReportTarget(status Status, runID, attemptID string) error {
 	if status.ActiveAttempt == nil {
 		return &ReportTargetError{
 			RunID:  runID,
-			Reason: "report does not target current active attempt",
+			Reason: reportTargetCurrentAttemptReason,
 			Err:    stableerr.Errorf("run %q has no active attempt", runID),
 		}
 	}
@@ -208,7 +208,7 @@ func validateReportTarget(status Status, runID, attemptID string) error {
 	if status.ActiveAttempt.AttemptID != attemptID {
 		return &ReportTargetError{
 			RunID:  runID,
-			Reason: "report does not target current active attempt",
+			Reason: reportTargetCurrentAttemptReason,
 			Err:    stableerr.Errorf("run %q active attempt is %q, not %q", runID, status.ActiveAttempt.AttemptID, attemptID),
 		}
 	}

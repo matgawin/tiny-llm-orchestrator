@@ -18,6 +18,8 @@ const (
 	eventsName     = "events.jsonl"
 	statusName     = "status.json"
 	followupsName  = "followups.md"
+	markdownExt    = ".md"
+	reportsDir     = "reports"
 	maxSlugLength  = 48
 	runDirPerm     = 0o750
 	runFilePerm    = 0o600
@@ -195,11 +197,11 @@ func artifactDirs() []string {
 var artifactSpecs = []artifactSpecEntry{
 	{kind: KindTaskContext, spec: artifactPathSpec{fixedPath: "task/context.md"}},
 	{kind: KindTaskSnapshot, spec: artifactPathSpec{fixedPath: "task/snapshot.json"}},
-	{kind: KindReport, spec: artifactPathSpec{dir: "reports", ext: ".md"}},
-	{kind: KindPrompt, spec: artifactPathSpec{dir: "prompts", ext: ".md"}},
+	{kind: KindReport, spec: artifactPathSpec{dir: reportsDir, ext: markdownExt}},
+	{kind: KindPrompt, spec: artifactPathSpec{dir: "prompts", ext: markdownExt}},
 	{kind: KindLog, spec: artifactPathSpec{dir: "logs", ext: ".log"}},
 	{kind: KindSnapshot, spec: artifactPathSpec{dir: "snapshots", ext: ".json"}},
-	{kind: KindSummary, spec: artifactPathSpec{dir: "summaries", ext: ".md"}},
+	{kind: KindSummary, spec: artifactPathSpec{dir: "summaries", ext: markdownExt}},
 	{kind: KindFollowup, spec: artifactPathSpec{fixedPath: followupsName}},
 }
 

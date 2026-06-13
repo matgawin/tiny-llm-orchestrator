@@ -19,7 +19,7 @@ func newReportCommand(stdout, stderr io.Writer) *cobra.Command {
 	var followupTitles []string
 
 	cmd := &cobra.Command{
-		Use:   "report",
+		Use:   commandReport,
 		Short: "Validate and persist a worker report",
 		Long: appName + ` report validates and persists a worker report.
 

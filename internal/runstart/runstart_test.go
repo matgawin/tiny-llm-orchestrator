@@ -23,7 +23,7 @@ func TestStartTaskFilePersistsContextAndSnapshot(t *testing.T) {
 
 	result, err := Start(context.Background(), Options{
 		Root:     root,
-		Workflow: "implementation",
+		Workflow: runstartWorkflowImplementation,
 		TaskFile: taskPath,
 	})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestStartTaskFilePersistsContextAndSnapshot(t *testing.T) {
 		t.Fatalf("bead lookup attempted = true, want false")
 	}
 
-	assertInitialConfigSnapshot(t, result.Path, "implementation")
+	assertInitialConfigSnapshot(t, result.Path, runstartWorkflowImplementation)
 
 	vcsSnapshot := readPreRunVCSSnapshot(t, result.Path)
 	if vcsSnapshot.Kind != vcs.KindNone || vcsSnapshot.Dirty {
@@ -66,9 +66,9 @@ func TestStartRecordsCleanJJPreRunSnapshot(t *testing.T) {
 
 	result, err := Start(context.Background(), Options{
 		Root:     root,
-		Workflow: "implementation",
+		Workflow: runstartWorkflowImplementation,
 		TaskFile: taskPath,
-		Env:      []string{"PATH=" + path},
+		Env:      []string{runstartEmptyPathEnv + path},
 	})
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -93,9 +93,9 @@ func TestStartRejectsDirtyStartBeforeRunDirectory(t *testing.T) {
 
 	_, err := Start(context.Background(), Options{
 		Root:     root,
-		Workflow: "implementation",
+		Workflow: runstartWorkflowImplementation,
 		TaskFile: taskPath,
-		Env:      []string{"PATH=" + path},
+		Env:      []string{runstartEmptyPathEnv + path},
 	})
 	if err == nil {
 		t.Fatal("Start returned nil error, want dirty-start rejection")
@@ -117,9 +117,9 @@ func TestStartAllowsDirtyStartWhenWorkflowAllowsIt(t *testing.T) {
 
 	result, err := Start(context.Background(), Options{
 		Root:     root,
-		Workflow: "implementation",
+		Workflow: runstartWorkflowImplementation,
 		TaskFile: taskPath,
-		Env:      []string{"PATH=" + path},
+		Env:      []string{runstartEmptyPathEnv + path},
 	})
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -144,9 +144,9 @@ func TestStartRejectsNoVCSWhenWorkflowBlocksIt(t *testing.T) {
 
 	_, err := Start(context.Background(), Options{
 		Root:     root,
-		Workflow: "implementation",
+		Workflow: runstartWorkflowImplementation,
 		TaskFile: taskPath,
-		Env:      []string{"PATH=" + path},
+		Env:      []string{runstartEmptyPathEnv + path},
 	})
 	if err == nil {
 		t.Fatal("Start returned nil error, want no-VCS rejection")
@@ -162,9 +162,9 @@ func TestStartRejectsExplicitBeadFailureWithoutFallbackBeforeRunDirectory(t *tes
 
 	_, err := Start(context.Background(), Options{
 		Root:     root,
-		Workflow: "implementation",
-		BeadID:   "missing-bead",
-		Env:      []string{"PATH="},
+		Workflow: runstartWorkflowImplementation,
+		BeadID:   runstartMissingBeadID,
+		Env:      []string{runstartEmptyPathEnv},
 	})
 	if err == nil {
 		t.Fatal("Start returned nil error, want bead lookup failure")
@@ -201,10 +201,10 @@ func TestStartUsesFallbackTaskFileAndRecordsBeadFailure(t *testing.T) {
 
 	result, err := Start(context.Background(), Options{
 		Root:             root,
-		Workflow:         "implementation",
-		BeadID:           "missing-bead",
+		Workflow:         runstartWorkflowImplementation,
+		BeadID:           runstartMissingBeadID,
 		FallbackTaskFile: fallbackPath,
-		Env:              []string{"PATH=", "BEADS_DIR=" + beadsDir},
+		Env:              []string{runstartEmptyPathEnv, "BEADS_DIR=" + beadsDir},
 	})
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -223,7 +223,7 @@ func TestStartUsesFallbackTaskFileAndRecordsBeadFailure(t *testing.T) {
 		t.Fatalf("fallback snapshot BEADS_DIR = %q, want %q", got, beadsDir)
 	}
 
-	if !snapshot.BeadLookup.Attempted || snapshot.BeadLookup.OK || snapshot.BeadLookup.BeadID != "missing-bead" {
+	if !snapshot.BeadLookup.Attempted || snapshot.BeadLookup.OK || snapshot.BeadLookup.BeadID != runstartMissingBeadID {
 		t.Fatalf("bead lookup = %+v, want failed missing-bead attempt", snapshot.BeadLookup)
 	}
 
@@ -275,7 +275,7 @@ func TestConfigSnapshotWriteFailureCleanupRemovesStartedRun(t *testing.T) {
 		t.Fatalf("open run store: %v", err)
 	}
 
-	run, err := store.Create(runstore.CreateRunRequest{RunID: "snapshot-cleanup-run", Workflow: "implementation"})
+	run, err := store.Create(runstore.CreateRunRequest{RunID: "snapshot-cleanup-run", Workflow: runstartWorkflowImplementation})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -321,25 +321,25 @@ func TestStartEnforcesWorkflowTaskContextPolicy(t *testing.T) {
 		{
 			name:     "beads disabled",
 			workflow: workflowTaskContext("disabled", true),
-			opts:     Options{Workflow: "implementation", BeadID: "main-1"},
+			opts:     Options{Workflow: runstartWorkflowImplementation, BeadID: "main-1"},
 			want:     "disables bead task context",
 		},
 		{
 			name:     "beads required",
 			workflow: workflowTaskContext("required", true),
-			opts:     Options{Workflow: "implementation", TaskText: "local task"},
+			opts:     Options{Workflow: runstartWorkflowImplementation, TaskText: "local task"},
 			want:     "requires bead task context",
 		},
 		{
 			name:     "markdown disabled",
 			workflow: workflowTaskContext("optional", false),
-			opts:     Options{Workflow: "implementation", TaskText: "local task"},
+			opts:     Options{Workflow: runstartWorkflowImplementation, TaskText: "local task"},
 			want:     "disables Markdown task context",
 		},
 		{
 			name:     "fallback disabled",
 			workflow: workflowTaskContext("optional", false),
-			opts:     Options{Workflow: "implementation", BeadID: "main-1", FallbackTaskFile: "task.md"},
+			opts:     Options{Workflow: runstartWorkflowImplementation, BeadID: "main-1", FallbackTaskFile: "task.md"},
 			want:     "disables Markdown fallback task context",
 		},
 	}
@@ -368,10 +368,10 @@ func TestStartRequiredBeadsAllowsFallbackWhenMarkdownFallbackEnabled(t *testing.
 
 	result, err := Start(context.Background(), Options{
 		Root:             root,
-		Workflow:         "implementation",
-		BeadID:           "missing-bead",
+		Workflow:         runstartWorkflowImplementation,
+		BeadID:           runstartMissingBeadID,
 		FallbackTaskFile: fallbackPath,
-		Env:              []string{"PATH="},
+		Env:              []string{runstartEmptyPathEnv},
 	})
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -398,9 +398,9 @@ func TestStartReadableBeadRecordsBEADSDir(t *testing.T) {
 
 	result, err := Start(context.Background(), Options{
 		Root:     root,
-		Workflow: "implementation",
+		Workflow: runstartWorkflowImplementation,
 		BeadID:   beadID,
-		Env:      []string{"PATH=" + path, "BEADS_DIR=" + beadsDir},
+		Env:      []string{runstartEmptyPathEnv + path, "BEADS_DIR=" + beadsDir},
 	})
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)

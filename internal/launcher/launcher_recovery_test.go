@@ -21,8 +21,8 @@ func TestLaunchNextRefusesFreshPIDLessStartingAttempt(t *testing.T) {
 
 	store := openLauncherStore(t, root)
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
-		StepID:          "plan",
-		AgentID:         "planner",
+		StepID:          launcherPlanStep,
+		AgentID:         launcherAgentPlanner,
 		AttemptID:       "starting-attempt",
 		Timeout:         200 * time.Millisecond,
 		ReportExitGrace: 30 * time.Millisecond,
@@ -31,7 +31,7 @@ func TestLaunchNextRefusesFreshPIDLessStartingAttempt(t *testing.T) {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
+	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
 	if err == nil || !strings.Contains(err.Error(), "already has starting attempt") {
 		t.Fatalf("LaunchNext error = %v, want starting attempt refusal", err)
 	}
@@ -54,7 +54,7 @@ func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", "cat"},
+		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Stdout:  &stdout,
 		Logger:  zap.New(core),
 	})
@@ -77,8 +77,8 @@ func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 	entry := singleObservedLog(t, recorded, "recovered active attempt")
 	assertObservedFields(t, entry, map[string]string{
 		"run_id":           runID,
-		"step_id":          "plan",
-		"agent_id":         "planner",
+		"step_id":          launcherPlanStep,
+		"agent_id":         launcherAgentPlanner,
 		"attempt_id":       result.Attempt.AttemptID,
 		"recovered_state":  runstore.AttemptStateProcessError,
 		"recovered_result": resultProcessError,
@@ -109,7 +109,7 @@ func TestLaunchNextRecoveryPreservesExistingLogRef(t *testing.T) {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestLaunchNextRefusesLiveActiveAttempt(t *testing.T) {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
-	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
+	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
 	if err == nil || !strings.Contains(err.Error(), "already has active attempt") {
 		t.Fatalf("LaunchNext error = %v, want active attempt refusal", err)
 	}
@@ -155,7 +155,7 @@ func TestLaunchNextRecoversWhenPIDIdentityDoesNotMatch(t *testing.T) {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestLaunchNextRecoversExpiredLiveAttemptAsTimeout(t *testing.T) {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestLaunchNextRecoversUnverifiableActiveAttempt(t *testing.T) {
 	store := openLauncherStore(t, root)
 	seedLauncherAttempt(t, store, runID, "orphaned-attempt", 200*time.Millisecond, fixedLauncherTime())
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}

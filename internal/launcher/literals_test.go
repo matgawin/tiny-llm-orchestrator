@@ -1,0 +1,36 @@
+package launcher
+
+import "tiny-llm-orchestrator/orc/internal/workflow"
+
+const (
+	launcherWorkflowImplementation = "implementation"
+	launcherPlanStep               = "plan"
+	launcherCodeStep               = "code"
+	launcherAgentPlanner           = "planner"
+	launcherAgentCoder             = "coder"
+	launcherRuntimeCodex           = "codex"
+	launcherRuntimeFileAI          = "fileai"
+	launcherRuntimeRecorder        = "recorder"
+	launcherCommandExec            = "exec"
+	launcherReasoningMedium        = "medium"
+	launcherStatusDone             = workflow.ReportStatusDone
+	launcherResultReady            = "ready"
+	launcherReportSummaryReady     = "Plan is ready."
+	launcherShell                  = "sh"
+	launcherShellFlag              = "-c"
+	launcherCommandCat             = "cat"
+	launcherCommandCatDiscard      = "cat >/dev/null"
+	launcherCommandSleepOne        = "sleep 1"
+	launcherCommandTrue            = "true"
+	launcherArgSkipGitRepoCheck    = "--skip-git-repo-check"
+	launcherArgModel               = "--model"
+	launcherArgReasoning           = "--reasoning"
+	launcherArgDir                 = "--dir"
+	launcherArgAddDir              = "--add-dir"
+	launcherModelRuntimeDefault    = "runtime-default"
+	launcherModelWorkflow          = "workflow-model"
+	launcherModelStep              = "step-model"
+	launcherModelA                 = "model-a"
+	launcherSharedDir              = "shared"
+	launcherTaskArtifactName       = "task"
+)

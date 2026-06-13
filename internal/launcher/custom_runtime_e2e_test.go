@@ -34,7 +34,7 @@ func TestLaunchNextRunsCustomRuntimeWithStdinPromptAndModeArgs(t *testing.T) {
 					DirsSupported:  true,
 				},
 				Workflow: customRuntimeWorkflow{
-					DefaultsRuntime: "recorder",
+					DefaultsRuntime: launcherRuntimeRecorder,
 				},
 			})
 			if tt.sandbox {
@@ -63,7 +63,8 @@ func TestLaunchNextRunsCustomRuntimeWithStdinPromptAndModeArgs(t *testing.T) {
 			}
 
 			record := string(readLauncherFile(t, recordPath))
-			assertRecordContains(t, record,
+			assertRecordContains(
+				t, record,
 				"arg:0=--mode",
 				tt.wantArg,
 				"env:ORC_RUN_ID=custom-runtime-run",
@@ -88,15 +89,15 @@ func TestLaunchNextCustomRuntimeFilePromptStepOverridesModelAndRuntime(t *testin
 		PromptDelivery:     runtimePromptDeliveryFile,
 		Runtime: customRuntimeDescriptor{
 			ModelSupported: true,
-			ModelDefault:   "runtime-default",
+			ModelDefault:   launcherModelRuntimeDefault,
 			DirsSupported:  true,
 		},
 		Workflow: customRuntimeWorkflow{
 			DefaultsRuntime: "fallback",
-			DefaultsModel:   "workflow-model",
-			DefaultsDirs:    []string{"shared"},
-			StepRuntime:     "recorder",
-			StepModel:       "step-model",
+			DefaultsModel:   launcherModelWorkflow,
+			DefaultsDirs:    []string{launcherSharedDir},
+			StepRuntime:     launcherRuntimeRecorder,
+			StepModel:       launcherModelStep,
 			StepDirs:        []string{"/tmp/external-worktree"},
 		},
 	})
@@ -119,19 +120,20 @@ func TestLaunchNextCustomRuntimeFilePromptStepOverridesModelAndRuntime(t *testin
 	}
 
 	record := string(readLauncherFile(t, recordPath))
-	assertRecordContains(t, record,
+	assertRecordContains(
+		t, record,
 		"arg:1=normal",
 		"arg:4=--prompt-file",
 		"arg:6=--model",
 		"arg:7=step-model",
 		"arg:8=--dir",
-		"arg:9="+filepath.Join(root, "shared"),
+		"arg:9="+filepath.Join(root, launcherSharedDir),
 		"arg:10=--dir",
 		"arg:11=/tmp/external-worktree",
 		"prompt_file_content:# Tiny Orc Worker Prompt",
 		"prompt_file_content:Launch a worker.",
 	)
-	assertRecordNotContains(t, record, "workflow-model", "runtime-default", "stdin:")
+	assertRecordNotContains(t, record, launcherModelWorkflow, launcherModelRuntimeDefault, "stdin:")
 }
 
 func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
@@ -144,10 +146,10 @@ func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
 	}{
 		{
 			name:          "workflow default overrides runtime default",
-			runtimeModel:  "runtime-default",
-			workflowModel: "workflow-model",
+			runtimeModel:  launcherModelRuntimeDefault,
+			workflowModel: launcherModelWorkflow,
 			want:          "arg:7=workflow-model",
-			notWant:       []string{"runtime-default"},
+			notWant:       []string{launcherModelRuntimeDefault},
 		},
 		{
 			name:    "model args omitted when no model resolves",
@@ -166,7 +168,7 @@ func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
 					DirsSupported:  true,
 				},
 				Workflow: customRuntimeWorkflow{
-					DefaultsRuntime: "recorder",
+					DefaultsRuntime: launcherRuntimeRecorder,
 					DefaultsModel:   tt.workflowModel,
 				},
 			})
@@ -204,7 +206,7 @@ func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) 
 			name: "live runtime removes model capability",
 			liveUpdate: func(t *testing.T, root, recordPath string) {
 				t.Helper()
-				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
+				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML(launcherRuntimeRecorder, runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
 					ModelSupported: false,
 					DirsSupported:  true,
 				}))
@@ -215,7 +217,7 @@ func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) 
 			name: "live runtime removes directory capability",
 			liveUpdate: func(t *testing.T, root, recordPath string) {
 				t.Helper()
-				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
+				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML(launcherRuntimeRecorder, runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
 					ModelSupported: true,
 					DirsSupported:  false,
 				}))
@@ -234,9 +236,9 @@ func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) 
 					DirsSupported:  true,
 				},
 				Workflow: customRuntimeWorkflow{
-					DefaultsRuntime: "recorder",
+					DefaultsRuntime: launcherRuntimeRecorder,
 					DefaultsModel:   "snapshot-model",
-					DefaultsDirs:    []string{"shared"},
+					DefaultsDirs:    []string{launcherSharedDir},
 				},
 			})
 			tt.liveUpdate(t, root, recordPath)
@@ -320,7 +322,7 @@ runtimes:
 	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), configYAML)
 	writeLauncherFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
 	fixturePath := runtimeRecorderFixturePath(t)
-	writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", fixturePath, project.RecordPath, project.PromptDelivery, project.Runtime))
+	writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "recorder.yaml"), customRuntimeYAML(launcherRuntimeRecorder, fixturePath, project.RecordPath, project.PromptDelivery, project.Runtime))
 
 	if project.FallbackRecordPath != "" {
 		writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "fallback.yaml"), customRuntimeYAML("fallback", fixturePath, project.FallbackRecordPath, project.PromptDelivery, project.Runtime))
@@ -332,8 +334,8 @@ runtimes:
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        "custom-runtime-run",
-		Workflow:     "implementation",
-		InitialState: "code",
+		Workflow:     launcherWorkflowImplementation,
+		InitialState: launcherCodeStep,
 		Time:         fixedLauncherTime(),
 	})
 	if err != nil {
@@ -344,7 +346,7 @@ runtimes:
 
 	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
-		Name:    "task",
+		Name:    launcherTaskArtifactName,
 		Content: []byte("# Task\n\nLaunch a worker.\n"),
 		Time:    fixedLauncherTime(),
 	}); err != nil {
@@ -356,26 +358,37 @@ runtimes:
 
 func customRuntimeYAML(id, executable, recordPath, delivery string, descriptor customRuntimeDescriptor) string {
 	var out strings.Builder
-	out.WriteString("id: " + id + "\n")
+	out.WriteString("id: ")
+	out.WriteString(id)
+	out.WriteString("\n")
 	out.WriteString("command:\n")
-	out.WriteString("  executable: " + strconv.Quote(executable) + "\n")
+	out.WriteString("  executable: ")
+	out.WriteString(strconv.Quote(executable))
+	out.WriteString("\n")
 	out.WriteString("  normal_args: [--mode, normal]\n")
 	out.WriteString("  sandbox_args: [--mode, sandbox]\n")
-	out.WriteString("  args: [--record, " + strconv.Quote(filepath.ToSlash(recordPath)))
+	out.WriteString("  args: [--record, ")
+	out.WriteString(strconv.Quote(filepath.ToSlash(recordPath)))
 
 	if delivery == runtimePromptDeliveryFile {
 		out.WriteString(", --prompt-file, \"{prompt_file}\"")
 	}
 
 	out.WriteString("]\n")
-	out.WriteString("prompt:\n  delivery: " + delivery + "\n")
+	out.WriteString("prompt:\n  delivery: ")
+	out.WriteString(delivery)
+	out.WriteString("\n")
 	out.WriteString("model:\n")
-	out.WriteString("  supported: " + strconv.FormatBool(descriptor.ModelSupported) + "\n")
+	out.WriteString("  supported: ")
+	out.WriteString(strconv.FormatBool(descriptor.ModelSupported))
+	out.WriteString("\n")
 	out.WriteString("  required: false\n")
 
 	if descriptor.ModelSupported {
 		if descriptor.ModelDefault != "" {
-			out.WriteString("  default: " + strconv.Quote(descriptor.ModelDefault) + "\n")
+			out.WriteString("  default: ")
+			out.WriteString(strconv.Quote(descriptor.ModelDefault))
+			out.WriteString("\n")
 		}
 
 		out.WriteString("  allowed: []\n")
@@ -383,7 +396,9 @@ func customRuntimeYAML(id, executable, recordPath, delivery string, descriptor c
 	}
 
 	out.WriteString("directories:\n")
-	out.WriteString("  supported: " + strconv.FormatBool(descriptor.DirsSupported) + "\n")
+	out.WriteString("  supported: ")
+	out.WriteString(strconv.FormatBool(descriptor.DirsSupported))
+	out.WriteString("\n")
 
 	if descriptor.DirsSupported {
 		out.WriteString("  args: [--dir, \"{dir}\"]\n")
@@ -423,22 +438,30 @@ defaults:
 `)
 
 	if workflow.DefaultsRuntime != "" {
-		out.WriteString("  runtime: " + workflow.DefaultsRuntime + "\n")
+		out.WriteString("  runtime: ")
+		out.WriteString(workflow.DefaultsRuntime)
+		out.WriteString("\n")
 	}
 
 	if workflow.DefaultsModel != "" {
-		out.WriteString("  model: " + workflow.DefaultsModel + "\n")
+		out.WriteString("  model: ")
+		out.WriteString(workflow.DefaultsModel)
+		out.WriteString("\n")
 	}
 
 	writeRuntimeDirsYAML(&out, "  ", "runtime_dirs", workflow.DefaultsDirs)
 	out.WriteString("steps:\n  code:\n    agent: coder\n")
 
 	if workflow.StepRuntime != "" {
-		out.WriteString("    runtime: " + workflow.StepRuntime + "\n")
+		out.WriteString("    runtime: ")
+		out.WriteString(workflow.StepRuntime)
+		out.WriteString("\n")
 	}
 
 	if workflow.StepModel != "" {
-		out.WriteString("    model: " + workflow.StepModel + "\n")
+		out.WriteString("    model: ")
+		out.WriteString(workflow.StepModel)
+		out.WriteString("\n")
 	}
 
 	writeRuntimeDirsYAML(&out, "    ", "runtime_dirs", workflow.StepDirs)
@@ -460,10 +483,15 @@ func writeRuntimeDirsYAML(out *strings.Builder, indent, key string, dirs []strin
 		return
 	}
 
-	out.WriteString(indent + key + ":\n")
+	out.WriteString(indent)
+	out.WriteString(key)
+	out.WriteString(":\n")
 
 	for _, dir := range dirs {
-		out.WriteString(indent + "  - " + strconv.Quote(dir) + "\n")
+		out.WriteString(indent)
+		out.WriteString("  - ")
+		out.WriteString(strconv.Quote(dir))
+		out.WriteString("\n")
 	}
 }
 

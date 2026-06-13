@@ -23,12 +23,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
-const (
-	launcherStatusDone  = workflow.ReportStatusDone
-	launcherResultReady = "ready"
-	launcherCodeStep    = "code"
-)
-
 type launchOutcome struct {
 	result Result
 	err    error
@@ -38,8 +32,8 @@ func seedLauncherAttempt(t *testing.T, store *runstore.Store, runID, attemptID s
 	t.Helper()
 
 	attempt, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
-		StepID:          "plan",
-		AgentID:         "planner",
+		StepID:          launcherPlanStep,
+		AgentID:         launcherAgentPlanner,
 		AttemptID:       attemptID,
 		Timeout:         timeout,
 		ReportExitGrace: 30 * time.Millisecond,
@@ -121,7 +115,7 @@ func createCommandLauncherRun(t *testing.T, opts commandWorkflowOptions) (string
 	}
 
 	if opts.Kind == config.StepKindCommand && len(opts.Argv) == 0 {
-		opts.Argv = []string{"sh", "-c", "true"}
+		opts.Argv = []string{"sh", "-c", launcherCommandTrue}
 	}
 
 	root := t.TempDir()
@@ -130,7 +124,7 @@ func createCommandLauncherRun(t *testing.T, opts commandWorkflowOptions) (string
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        "launcher-run",
-		Workflow:     "implementation",
+		Workflow:     launcherWorkflowImplementation,
 		InitialState: "check",
 		Time:         fixedLauncherTime(),
 	})
@@ -151,8 +145,8 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        "launcher-run",
-		Workflow:     "implementation",
-		InitialState: "plan",
+		Workflow:     launcherWorkflowImplementation,
+		InitialState: launcherPlanStep,
 		Time:         fixedLauncherTime(),
 	})
 	if err != nil {
@@ -164,7 +158,7 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	if opts.TaskContext {
 		if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
 			Kind:    runstore.KindTaskContext,
-			Name:    "task",
+			Name:    launcherTaskArtifactName,
 			Content: []byte("# Task\n\nLaunch a worker.\n"),
 			Time:    fixedLauncherTime(),
 		}); err != nil {
@@ -183,8 +177,8 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        "loop-cap-run",
-		Workflow:     "implementation",
-		InitialState: "plan",
+		Workflow:     launcherWorkflowImplementation,
+		InitialState: launcherPlanStep,
 		Time:         fixedLauncherTime(),
 	})
 	if err != nil {
@@ -195,7 +189,7 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 
 	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
-		Name:    "task",
+		Name:    launcherTaskArtifactName,
 		Content: []byte("# Task\n\nBreak the workflow loop.\n"),
 		Time:    fixedLauncherTime(),
 	}); err != nil {
@@ -213,7 +207,7 @@ func writeLauncherConfigSnapshot(t *testing.T, root string, store *runstore.Stor
 		t.Fatalf("Load config returned error: %v", err)
 	}
 
-	snapshot, err := configsnapshot.BuildInitial(project, "implementation", fixedLauncherTime())
+	snapshot, err := configsnapshot.BuildInitial(project, launcherWorkflowImplementation, fixedLauncherTime())
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
@@ -244,7 +238,9 @@ func writeLoopCapLauncherProject(t *testing.T, root, defaultCaps, workflowCaps s
 		configYAML.WriteString("defaults:\n  loop_caps:\n")
 
 		for line := range strings.SplitSeq(strings.TrimRight(defaultCaps, "\n"), "\n") {
-			configYAML.WriteString("    " + line + "\n")
+			configYAML.WriteString("    ")
+			configYAML.WriteString(line)
+			configYAML.WriteString("\n")
 		}
 	}
 
@@ -254,7 +250,9 @@ func writeLoopCapLauncherProject(t *testing.T, root, defaultCaps, workflowCaps s
 		configYAML.WriteString("    loop_caps:\n")
 
 		for line := range strings.SplitSeq(strings.TrimRight(workflowCaps, "\n"), "\n") {
-			configYAML.WriteString("      " + line + "\n")
+			configYAML.WriteString("      ")
+			configYAML.WriteString(line)
+			configYAML.WriteString("\n")
 		}
 	}
 
@@ -290,8 +288,8 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 	t.Helper()
 
 	req := runstore.StartAttemptRequest{
-		StepID:           "plan",
-		AgentID:          "planner",
+		StepID:           launcherPlanStep,
+		AgentID:          launcherAgentPlanner,
 		AttemptID:        attemptID,
 		Timeout:          200 * time.Millisecond,
 		ReportExitGrace:  30 * time.Millisecond,
@@ -300,8 +298,8 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 	}
 	if consumeAttemptID != "" {
 		req.WorkflowStateEntry = runstore.WorkflowStateEntryRequest{
-			State:         "plan",
-			PreviousState: "plan",
+			State:         launcherPlanStep,
+			PreviousState: launcherPlanStep,
 			TriggerStatus: launcherStatusDone,
 			TriggerResult: launcherResultReady,
 		}
@@ -313,7 +311,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 
 	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
-		Name:    "plan",
+		Name:    launcherPlanStep,
 		Content: []byte("prompt\n"),
 		Time:    fixedLauncherTime().Add(250 * time.Millisecond),
 	})
@@ -331,7 +329,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
-		Name:    "plan",
+		Name:    launcherPlanStep,
 		Content: []byte("log\n"),
 		Time:    fixedLauncherTime().Add(350 * time.Millisecond),
 	})
@@ -360,8 +358,8 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    "plan",
-			AgentID:   "planner",
+			StepID:    launcherPlanStep,
+			AgentID:   launcherAgentPlanner,
 			AttemptID: attemptID,
 			Status:    launcherStatusDone,
 			Result:    launcherResultReady,
@@ -408,11 +406,13 @@ func writeCommandLauncherProject(t *testing.T, root string, opts commandWorkflow
 	writeLauncherFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
 
 	var workflowYAML strings.Builder
-	workflowYAML.WriteString("name: implementation\nstart: check\nexecution:\n  mode: sequential\ntask_context:\n  beads: optional\n  markdown_fallback: true\ndefaults:\n  timeout: " + opts.Timeout + "\n  report_exit_grace: 30ms\n  runtime: codex\n  retries: {}\nsteps:\n  check:\n    kind: " + opts.Kind + "\n")
+	fmt.Fprintf(&workflowYAML, "name: implementation\nstart: check\nexecution:\n  mode: sequential\ntask_context:\n  beads: optional\n  markdown_fallback: true\ndefaults:\n  timeout: %s\n  report_exit_grace: 30ms\n  runtime: codex\n  retries: {}\nsteps:\n  check:\n    kind: %s\n", opts.Timeout, opts.Kind)
 
 	switch opts.Kind {
 	case config.StepKindScript:
-		workflowYAML.WriteString("    script:\n      path: " + strconv.Quote(opts.ScriptPath) + "\n")
+		workflowYAML.WriteString("    script:\n      path: ")
+		workflowYAML.WriteString(strconv.Quote(opts.ScriptPath))
+		workflowYAML.WriteString("\n")
 
 		if len(opts.ScriptArgs) > 0 {
 			workflowYAML.WriteString("      args: [")
@@ -452,7 +452,11 @@ func writeCommandLauncherProject(t *testing.T, root string, opts commandWorkflow
 		slices.Sort(keys)
 
 		for _, key := range keys {
-			workflowYAML.WriteString("      " + key + ": " + strconv.Quote(opts.Env[key]) + "\n")
+			workflowYAML.WriteString("      ")
+			workflowYAML.WriteString(key)
+			workflowYAML.WriteString(": ")
+			workflowYAML.WriteString(strconv.Quote(opts.Env[key]))
+			workflowYAML.WriteString("\n")
 		}
 	}
 
@@ -498,7 +502,7 @@ func appendLauncherSandboxConfig(t *testing.T, root string, requireForWorkers bo
 
 	require := "false"
 	if requireForWorkers {
-		require = "true"
+		require = launcherCommandTrue
 	}
 
 	writeLauncherFile(t, configPath, content+`sandbox:
@@ -597,8 +601,8 @@ func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runc
 	}
 
 	attempt, _, err := loaded.Store.StartAttempt(runID, runstore.StartAttemptRequest{
-		StepID:          "plan",
-		AgentID:         "planner",
+		StepID:          launcherPlanStep,
+		AgentID:         launcherAgentPlanner,
 		AttemptID:       attemptID,
 		Timeout:         loaded.Workflow.Defaults.Timeout.Duration,
 		ReportExitGrace: loaded.Workflow.Defaults.ReportExitGrace.Duration,

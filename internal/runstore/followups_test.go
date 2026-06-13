@@ -56,9 +56,9 @@ func TestRecordFollowupAppendsAttributedMarkdown(t *testing.T) {
 			Details: "Capture summary context once follow-up recording lands.",
 		},
 		Source:    FollowupSourceReport,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-001",
+		StepID:    testWorkflowStatePlan,
+		AgentID:   testAgentPlanner,
+		AttemptID: testAttemptID,
 		Time:      recordedAt,
 	})
 	if err != nil {
@@ -150,7 +150,7 @@ func TestRecordFollowupRequiresTitleAndReportAttribution(t *testing.T) {
 	_, err = store.RecordFollowup(run.ID, RecordFollowupRequest{
 		Followup: Followup{Title: "Report follow-up"},
 		Source:   FollowupSourceReport,
-		StepID:   "plan",
+		StepID:   testWorkflowStatePlan,
 	})
 	requireErrorContains(t, err, "agent id is required")
 

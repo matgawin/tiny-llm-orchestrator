@@ -13,8 +13,8 @@ import (
 )
 
 func TestExecuteSandboxHelp(t *testing.T) {
-	output := executeCLICommand(t, []string{"sandbox", "--help"})
-	for _, want := range []string{"Usage:", "Available Commands:", "run"} {
+	output := executeCLICommand(t, []string{commandSandbox, helpFlag})
+	for _, want := range []string{cliUsage, "Available Commands:", commandRun} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("sandbox help output missing %q:\n%s", want, output)
 		}
@@ -24,7 +24,7 @@ func TestExecuteSandboxHelp(t *testing.T) {
 func TestExecuteSandboxRunHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"sandbox", "run", "--help"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandSandbox, commandRun, helpFlag}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
@@ -32,7 +32,7 @@ func TestExecuteSandboxRunHelp(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 
-	for _, want := range []string{"Usage:", "sandbox run"} {
+	for _, want := range []string{cliUsage, "sandbox run"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("sandbox run help output missing %q:\n%s", want, stdout.String())
 		}
@@ -42,7 +42,7 @@ func TestExecuteSandboxRunHelp(t *testing.T) {
 func TestExecuteSandboxUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"sandbox", "unknown"}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandSandbox, cliCommandUnknown}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown subcommand")
 	}
 
@@ -58,7 +58,7 @@ func TestExecuteSandboxUnknownSubcommand(t *testing.T) {
 func TestExecuteSandboxRunRejectsExtraArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{"sandbox", "run", "extra"}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandSandbox, commandRun, "extra"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want extra arg rejection")
 	}
 
@@ -77,7 +77,7 @@ func TestExecuteSandboxRunRequiresConfig(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"sandbox", "run"}, &stdout, &stderr)
+	err := Execute([]string{commandSandbox, commandRun}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want missing sandbox config error")
 	}
@@ -103,7 +103,7 @@ func TestExecuteSandboxRunMissingBwrapDoesNotRunConfiguredCommand(t *testing.T) 
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"sandbox", "run"}, &stdout, &stderr)
+	err := Execute([]string{commandSandbox, commandRun}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want missing bwrap error")
 	}

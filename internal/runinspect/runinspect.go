@@ -767,7 +767,7 @@ func printTerminalOutcome(w io.Writer, workflowConfig config.Workflow, run *runs
 		_, _ = fmt.Fprintf(w, "invalid_report_reason: %s\n", reason)
 	}
 
-	if outcome.Status == "failed" {
+	if outcome.Status == workflow.ReportStatusFailed {
 		_, _ = fmt.Fprintf(w, "retry_exhausted: %s\n", pair)
 		_, _ = fmt.Fprintf(w, "retry_count: %s\n", retryCountText(workflowConfig, pair, retryCountConsumedByRun(run, outcome, pair)))
 	}

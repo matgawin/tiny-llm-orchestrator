@@ -299,7 +299,7 @@ func (s *Store) RecordStepSkipContext(ctx context.Context, runID string, req Rec
 		payload, err := marshalPayload(workflowStepSkippedPayload{
 			StepID:             req.StepID,
 			Status:             attemptStatusDone,
-			Result:             "skipped",
+			Result:             stepSkipResult,
 			Reason:             req.Reason,
 			Source:             req.Source,
 			ConsumeAttemptID:   consumeAttemptID,

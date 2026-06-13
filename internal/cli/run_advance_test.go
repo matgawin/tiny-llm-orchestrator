@@ -16,9 +16,9 @@ import (
 func TestRunAdvanceCommandWorkflowReachesReadyForHuman(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIAdvanceCommandProject(t, root, "", "")
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 
-	output := executeCLICommand(t, []string{"run", "advance", result.runID})
+	output := executeCLICommand(t, []string{commandRun, cliCommandAdvance, result.runID})
 	assertCLIOutputContainsAll(t, output, []string{
 		"launched attempts: 4",
 		"final status: ready_for_human",
@@ -40,7 +40,7 @@ func TestRunAdvanceCommandWorkflowReachesReadyForHuman(t *testing.T) {
 func TestRunAdvanceJSONRoutesLiveProgressToStderr(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	t.Setenv("PATH", shim.binDir)
 	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
@@ -48,7 +48,7 @@ func TestRunAdvanceJSONRoutesLiveProgressToStderr(t *testing.T) {
 	t.Setenv("ORC_CLI_CODEX_PROGRESS", "analyzing code paths")
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{"run", "advance", result.runID, "--once", "--json"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, cliCommandAdvance, result.runID, "--once", cliFlagJSON}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -91,9 +91,9 @@ func TestRunAdvanceCommandStepDisplaysLiveProgressWithoutDedicatedPersistence(t 
     env:
       LIVE_MSG: "`+message+`"`, 1)
 	writeCLIFile(t, configPath, config)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 
-	output := executeCLICommand(t, []string{"run", "advance", result.runID, "--once"})
+	output := executeCLICommand(t, []string{commandRun, cliCommandAdvance, result.runID, "--once"})
 	loaded := loadCLIRun(t, root, result.runID)
 	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
 
@@ -115,14 +115,14 @@ func TestRunAdvanceCommandStepDisplaysLiveProgressWithoutDedicatedPersistence(t 
 	eventsContent := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "events.jsonl")))
 
 	var summaryStdout, summaryStderr bytes.Buffer
-	if err := Execute([]string{"run", "summary-context", result.runID}, &summaryStdout, &summaryStderr); err != nil {
+	if err := Execute([]string{commandRun, cliCommandSummaryContext, result.runID}, &summaryStdout, &summaryStderr); err != nil {
 		t.Fatalf("summary-context returned error: %v\nstderr: %s", err, summaryStderr.String())
 	}
 
 	for name, content := range map[string]string{
-		"status.json":     statusContent,
-		"events.jsonl":    eventsContent,
-		"summary-context": summaryStdout.String(),
+		"status.json":            statusContent,
+		"events.jsonl":           eventsContent,
+		cliCommandSummaryContext: summaryStdout.String(),
 	} {
 		if strings.Contains(content, message) {
 			t.Fatalf("%s contains live progress message %q", name, message)
@@ -143,9 +143,9 @@ func TestRunAdvanceContinuesAfterReviewChangesRequestedRoute(t *testing.T) {
     script:
       path: review-once.sh
 `, "")
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 
-	output := executeCLICommand(t, []string{"run", "advance", result.runID, "--max-steps=8"})
+	output := executeCLICommand(t, []string{commandRun, cliCommandAdvance, result.runID, "--max-steps=8"})
 	assertCLIOutputContainsAll(t, output, []string{
 		"launched attempts: 7",
 		"final status: ready_for_human",
@@ -166,13 +166,13 @@ func TestRunAdvanceStopsOnWorkerBlockedAndFailed(t *testing.T) {
 		wantReason string
 		wantCode   int
 	}{
-		{name: "blocked", status: "blocked", result: "blocked", wantReason: "worker_blocked", wantCode: 2},
-		{name: "failed", status: "failed", result: "error", wantReason: "worker_failed", wantCode: 1},
+		{name: cliStatusBlocked, status: cliStatusBlocked, result: cliStatusBlocked, wantReason: "worker_blocked", wantCode: 2},
+		{name: cliStatusFailed, status: cliStatusFailed, result: cliResultError, wantReason: "worker_failed", wantCode: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIImplementationProject(t, root)
-			run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			run := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 			shim := installCLICodexShim(t, root)
 			t.Setenv("PATH", shim.binDir)
 			t.Setenv("ORC_CLI_CODEX_SHIM", "1")
@@ -182,7 +182,7 @@ func TestRunAdvanceStopsOnWorkerBlockedAndFailed(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 
-			err := Execute([]string{"run", "advance", run.runID}, &stdout, &stderr)
+			err := Execute([]string{commandRun, cliCommandAdvance, run.runID}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want stop error")
 			}
@@ -212,16 +212,16 @@ func TestRunAdvanceStopsOnLoopCapsAndMaxSteps(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIAdvanceLoopProject(t, root, tc.caps)
 
-			run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			run := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 			if tc.wantReason == "loop_hard_cap" {
-				executeCLICommand(t, []string{"worker", "launch-next", run.runID})
-				executeCLICommand(t, []string{"worker", "launch-next", run.runID})
-				executeCLICommand(t, []string{"worker", "launch-next", run.runID})
+				executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, run.runID})
+				executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, run.runID})
+				executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, run.runID})
 			}
 
 			var stdout, stderr bytes.Buffer
 
-			err := Execute([]string{"run", "advance", run.runID, "--max-steps", tc.maxSteps}, &stdout, &stderr)
+			err := Execute([]string{commandRun, cliCommandAdvance, run.runID, "--max-steps", tc.maxSteps}, &stdout, &stderr)
 			if tc.wantCode == 0 && err != nil {
 				t.Fatalf("Execute returned error: %v", err)
 			}
@@ -244,10 +244,10 @@ func TestRunAdvanceStopsOnLoopCapsAndMaxSteps(t *testing.T) {
 func TestRunAdvanceOnceJSONActiveAttemptAndInvalidMaxSteps(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIAdvanceCommandProject(t, root, "", "")
-	run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	run := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{"run", "advance", run.runID, "--once=true", "--json=true"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, cliCommandAdvance, run.runID, "--once=true", "--json=true"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -269,12 +269,12 @@ func TestRunAdvanceOnceJSONActiveAttemptAndInvalidMaxSteps(t *testing.T) {
 
 	activeRoot := withTempCwd(t)
 	writeCLIProject(t, activeRoot, "optional", true)
-	activeRun := executeCLIRunStart(t, activeRoot, []string{"--task", "# Task"}, nil)
-	startCLIActiveAttempt(t, activeRoot, activeRun.runID, "attempt-001")
+	activeRun := executeCLIRunStart(t, activeRoot, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	startCLIActiveAttempt(t, activeRoot, activeRun.runID, cliAttempt001)
 	stdout.Reset()
 	stderr.Reset()
 
-	err := Execute([]string{"run", "advance", activeRun.runID}, &stdout, &stderr)
+	err := Execute([]string{commandRun, cliCommandAdvance, activeRun.runID}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want active attempt refusal")
 	}
@@ -288,7 +288,7 @@ func TestRunAdvanceOnceJSONActiveAttemptAndInvalidMaxSteps(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 
-	err = Execute([]string{"run", "advance", activeRun.runID, "--max-steps", "0"}, &stdout, &stderr)
+	err = Execute([]string{commandRun, cliCommandAdvance, activeRun.runID, "--max-steps", "0"}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want invalid max steps")
 	}
@@ -300,14 +300,14 @@ func TestRunAdvanceStopsOnInvalidRunState(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIAdvanceCommandProject(t, root, "", "")
 
-	run := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	run := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	if _, _, err := openCLIStore(t, root).UpdateStatus(run.runID, runstore.StatusUpdate{State: "unknown_run_state"}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"run", "advance", run.runID}, &stdout, &stderr)
+	err := Execute([]string{commandRun, cliCommandAdvance, run.runID}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want invalid state error")
 	}

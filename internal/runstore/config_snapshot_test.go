@@ -10,7 +10,7 @@ import (
 func TestWriteInitialConfigSnapshotPersistsVersionedFilesAndCurrentPointer(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "config-snapshot-run", Workflow: "implementation"})
+	run, err := store.Create(CreateRunRequest{RunID: "config-snapshot-run", Workflow: testWorkflowName})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestWriteInitialConfigSnapshotRejectsSymlinkedConfigDir(t *testing.T) {
 	root := t.TempDir()
 	store := openStore(t, root)
 
-	run, err := store.Create(CreateRunRequest{RunID: "config-symlink-run", Workflow: "implementation"})
+	run, err := store.Create(CreateRunRequest{RunID: "config-symlink-run", Workflow: testWorkflowName})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestWriteInitialConfigSnapshotRejectsSymlinkedConfigDir(t *testing.T) {
 func TestWriteInitialConfigSnapshotRejectsExistingCurrent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "config-existing-current-run", Workflow: "implementation"})
+	run, err := store.Create(CreateRunRequest{RunID: "config-existing-current-run", Workflow: testWorkflowName})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}

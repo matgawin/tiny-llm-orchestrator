@@ -52,7 +52,7 @@ func TestListenerRejectsMissingWrongOrMismatchedToken(t *testing.T) {
 				RunID:     validRegistration.RunID,
 				StepID:    validRegistration.StepID,
 				AttemptID: validRegistration.AttemptID,
-				Message:   "working",
+				Message:   testProgressMessageWorking,
 			},
 		},
 		{
@@ -62,7 +62,7 @@ func TestListenerRejectsMissingWrongOrMismatchedToken(t *testing.T) {
 				StepID:    validRegistration.StepID,
 				AttemptID: validRegistration.AttemptID,
 				Token:     "wrong",
-				Message:   "working",
+				Message:   testProgressMessageWorking,
 			},
 		},
 		{
@@ -72,7 +72,7 @@ func TestListenerRejectsMissingWrongOrMismatchedToken(t *testing.T) {
 				StepID:    "test",
 				AttemptID: validRegistration.AttemptID,
 				Token:     validRegistration.Token,
-				Message:   "working",
+				Message:   testProgressMessageWorking,
 			},
 		},
 	}

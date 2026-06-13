@@ -16,7 +16,7 @@ import (
 
 func newRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "run",
+		Use:           commandRun,
 		Short:         "Manage orchestration runs",
 		Long:          appName + " run manages orchestration runs.",
 		Args:          cobra.NoArgs,

@@ -13,11 +13,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
-const (
-	wantJJRootCommand   = "jj root"
-	wantJJStatusCommand = "jj status"
-)
-
 func TestInspectPreRunPrefersJJOverGit(t *testing.T) {
 	root := t.TempDir()
 	path := fakeVCSPath(t, map[string]string{
@@ -28,7 +23,7 @@ case "$1" in
   *) exit 2;;
 esac
 `,
-		"git": `#!/bin/sh
+		testVCSGit: `#!/bin/sh
 printf 'git should not be used\n' >&2
 exit 9
 `,
@@ -86,7 +81,7 @@ func TestInspectPreRunFallsBackToGit(t *testing.T) {
 printf 'Error: No jj repo found\n' >&2
 exit 1
 `,
-		"git": `#!/bin/sh
+		testVCSGit: `#!/bin/sh
 case "$*" in
   "rev-parse --show-toplevel") printf '%s\n' "$PWD";;
   "status --porcelain=v1 -z --untracked-files=all") printf ' M internal/runstart/runstart.go\0?? docs/features/run-start.md\0R  new.md\0old.md\0?? docs/space path.md\0';;
@@ -144,7 +139,7 @@ func TestInspectPreRunRejectsBrokenGitProbeAfterJJUnavailable(t *testing.T) {
 printf 'No jj repo found\n' >&2
 exit 1
 `,
-		"git": `#!/bin/sh
+		testVCSGit: `#!/bin/sh
 printf 'permission denied reading git metadata\n' >&2
 exit 1
 `,
@@ -168,7 +163,7 @@ func TestInspectPreRunNoVCS(t *testing.T) {
 printf 'No jj repo found\n' >&2
 exit 1
 `,
-		"git": `#!/bin/sh
+		testVCSGit: `#!/bin/sh
 printf 'fatal: not a git repository\n' >&2
 exit 1
 `,

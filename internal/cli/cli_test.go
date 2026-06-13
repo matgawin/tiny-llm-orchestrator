@@ -21,12 +21,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
-const (
-	reportIgnoredEvent    = "report.ignored"
-	cliStateRunning       = "running"
-	cliStateReadyForHuman = "ready_for_human"
-)
-
 func TestMain(m *testing.M) {
 	if os.Getenv("ORC_CLI_CODEX_SHIM") == "1" && filepath.Base(os.Args[0]) == "codex" {
 		cliCodexShimMain()
@@ -134,12 +128,12 @@ func cliCodexShimWorkerReport() {
 
 	status := os.Getenv("ORC_CLI_CODEX_REPORT_STATUS")
 	if status == "" {
-		status = "done"
+		status = cliStatusDone
 	}
 
 	result := os.Getenv("ORC_CLI_CODEX_REPORT_RESULT")
 	if result == "" {
-		result = "ready"
+		result = cliResultReady
 	}
 
 	summary := os.Getenv("ORC_CLI_CODEX_REPORT_SUMMARY")
@@ -148,20 +142,20 @@ func cliCodexShimWorkerReport() {
 	}
 
 	if message := os.Getenv("ORC_CLI_CODEX_PROGRESS"); message != "" {
-		if err := Execute([]string{"progress", message}, os.Stdout, os.Stderr); err != nil {
+		if err := Execute([]string{commandProgress, message}, os.Stdout, os.Stderr); err != nil {
 			os.Exit(1)
 		}
 	}
 
 	args := []string{
-		"report",
-		"--run", promptValue(prompt, "run_id"),
-		"--step", promptValue(prompt, "step_id"),
-		"--agent", promptValue(prompt, "agent_id"),
-		"--attempt", promptValue(prompt, "attempt_id"),
-		"--status", status,
-		"--result", result,
-		"--summary", summary,
+		commandReport,
+		cliFlagRun, promptValue(prompt, "run_id"),
+		cliFlagStep, promptValue(prompt, "step_id"),
+		cliFlagAgent, promptValue(prompt, "agent_id"),
+		cliFlagAttempt, promptValue(prompt, "attempt_id"),
+		cliFlagStatus, status,
+		cliFlagResult, result,
+		cliFlagSummary, summary,
 	}
 	if err := Execute(args, os.Stdout, os.Stderr); err != nil {
 		os.Exit(1)
@@ -292,7 +286,7 @@ agents:
 runtimes:
   codex: runtimes/codex.yaml
 `)
-	writeCLIFile(t, filepath.Join(orcDir, "agents", "planner.md"), cliAgentDescriptor("planner", "Creates implementation plans."))
+	writeCLIFile(t, filepath.Join(orcDir, "agents", "planner.md"), cliAgentDescriptor(cliAgentPlanner, "Creates implementation plans."))
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "coder.md"), cliAgentDescriptor("coder", "Implements code changes."))
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "tester.md"), cliAgentDescriptor("tester", "Runs verification."))
 	writeCLIFile(t, filepath.Join(orcDir, "agents", "reviewer.md"), cliAgentDescriptor("reviewer", "Reviews completed work."))
@@ -407,7 +401,9 @@ runtimes:
 		caps.WriteString("  loop_caps:\n")
 
 		for line := range strings.SplitSeq(strings.TrimRight(loopCaps, "\n"), "\n") {
-			caps.WriteString("    " + line + "\n")
+			caps.WriteString("    ")
+			caps.WriteString(line)
+			caps.WriteString("\n")
 		}
 	}
 
@@ -529,7 +525,7 @@ func blockCLIWorkflowLoopHardCap(t *testing.T, root, runID, state string, curren
 
 	store := openCLIStore(t, root)
 	if _, _, err := store.BlockWorkflowLoopHardCap(runID, runstore.WorkflowLoopHardCap{
-		Workflow:         "implementation",
+		Workflow:         cliWorkflowImplementation,
 		BlockedState:     state,
 		CurrentCount:     current,
 		ProspectiveCount: prospective,
@@ -550,7 +546,7 @@ func startCLIImplementationReportRun(t *testing.T) cliImplementationRun {
 	t.Helper()
 	root := withTempCwd(t)
 	writeCLIImplementationProject(t, root)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	shim := installCLICodexShim(t, root)
 	t.Setenv("PATH", shim.binDir)
 	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
@@ -567,11 +563,11 @@ type workerReport struct {
 }
 
 func ready(summary string) workerReport {
-	return done("ready", summary)
+	return done(cliResultReady, summary)
 }
 
 func failed(summary string) workerReport {
-	return done("failed", summary)
+	return done(cliStatusFailed, summary)
 }
 
 func passed(summary string) workerReport {
@@ -587,11 +583,11 @@ func approved(summary string) workerReport {
 }
 
 func blocked(summary string) workerReport {
-	return workerReport{status: "blocked", result: "blocked", summary: summary}
+	return workerReport{status: cliStatusBlocked, result: cliStatusBlocked, summary: summary}
 }
 
 func done(result, summary string) workerReport {
-	return workerReport{status: "done", result: result, summary: summary}
+	return workerReport{status: cliStatusDone, result: result, summary: summary}
 }
 
 func withPromptPath(report workerReport, path string) workerReport {
@@ -606,7 +602,7 @@ func launchCLIWorkerReport(t *testing.T, runID string, report workerReport) stri
 	t.Setenv("ORC_CLI_CODEX_REPORT_SUMMARY", report.summary)
 	t.Setenv("ORC_CLI_CODEX_STDIN", report.promptPath)
 
-	output := executeCLICommand(t, []string{"worker", "launch-next", runID})
+	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, runID})
 	if !strings.Contains(output, "result: "+report.status+"/"+report.result) {
 		t.Fatalf("output = %q, want result %s/%s", output, report.status, report.result)
 	}
@@ -619,7 +615,7 @@ func terminalizeCLIWorkflow(t *testing.T, root, runID, wantState string, wantAtt
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"worker", "launch-next", runID}, &stdout, &stderr)
+	err := Execute([]string{commandWorker, cliCommandLaunchNext, runID}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want terminal no-launch error")
 	}
@@ -647,8 +643,8 @@ func writeCurrentAttemptJSONReport(t *testing.T, extraFields string) (string, st
 	t.Helper()
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
-	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
 	jsonPath := filepath.Join(root, "report.json")
 	writeCLIFile(t, jsonPath, currentAttemptJSONReport(result.runID, extraFields))
 
@@ -690,7 +686,7 @@ func assertCLILatestAttemptState(t *testing.T, root, runID, state string) runsto
 
 func startCLIActiveAttempt(t *testing.T, root, runID, attemptID string) {
 	t.Helper()
-	startCLIActiveAttemptForStep(t, root, runID, attemptID, "plan", "planner")
+	startCLIActiveAttemptForStep(t, root, runID, attemptID, cliStepPlan, cliAgentPlanner)
 }
 
 func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, agentID string) {
@@ -780,8 +776,8 @@ func startCLIStartingAttempt(t *testing.T, root, runID, attemptID string) {
 
 	store := openCLIStore(t, root)
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
-		StepID:          "plan",
-		AgentID:         "planner",
+		StepID:          cliStepPlan,
+		AgentID:         cliAgentPlanner,
 		AttemptID:       attemptID,
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
@@ -855,7 +851,7 @@ type cliRunStartResult struct {
 func executeCLIRunStart(t *testing.T, root string, sourceArgs []string, stdin *strings.Reader) cliRunStartResult {
 	t.Helper()
 
-	args := append([]string{"run", "start", "--workflow", "implementation"}, sourceArgs...)
+	args := append([]string{commandRun, cliCommandStart, cliFlagWorkflow, cliWorkflowImplementation}, sourceArgs...)
 
 	var (
 		stdout, stderr bytes.Buffer
@@ -928,8 +924,8 @@ func newCLIProgressListener(t *testing.T) *progress.Listener {
 
 	if err := l.Register(progress.Registration{
 		RunID:     "run-001",
-		StepID:    "code",
-		AttemptID: "attempt-001",
+		StepID:    cliStepCode,
+		AttemptID: cliAttempt001,
 		Token:     "token-001",
 	}); err != nil {
 		t.Fatalf("Register returned error: %v", err)
@@ -942,8 +938,8 @@ func setCLIProgressEnv(t *testing.T, socketPath, token string) {
 	t.Helper()
 	t.Setenv("ORC_PROGRESS_SOCKET", socketPath)
 	t.Setenv("ORC_RUN_ID", "run-001")
-	t.Setenv("ORC_STEP_ID", "code")
-	t.Setenv("ORC_ATTEMPT_ID", "attempt-001")
+	t.Setenv("ORC_STEP_ID", cliStepCode)
+	t.Setenv("ORC_ATTEMPT_ID", cliAttempt001)
 	t.Setenv("ORC_PROGRESS_TOKEN", token)
 }
 

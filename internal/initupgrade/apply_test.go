@@ -365,6 +365,7 @@ func TestApplySkipsScaffoldCreateWhenConfigDependencyConflicts(t *testing.T) {
 
 	if applied == nil {
 		t.Fatal("Apply result is nil, want partial result")
+		return
 	}
 
 	if slices.Contains(applied.CreatedPaths, ".orc/runtimes/codex.yaml") {

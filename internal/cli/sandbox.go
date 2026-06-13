@@ -16,7 +16,7 @@ import (
 
 func newSandboxCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "sandbox",
+		Use:   commandSandbox,
 		Short: "Run configured commands through bubblewrap",
 		Long:  appName + " sandbox runs configured commands through bubblewrap.",
 		Args:  cobra.NoArgs,
@@ -32,7 +32,7 @@ func newSandboxCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command
 
 func newSandboxRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "run",
+		Use:   commandRun,
 		Short: "Run sandbox.command.argv from .orc/config.yaml through bwrap",
 		Long:  appName + " sandbox run launches the configured sandbox command through the system bwrap binary.",
 		Args: func(cmd *cobra.Command, args []string) error {

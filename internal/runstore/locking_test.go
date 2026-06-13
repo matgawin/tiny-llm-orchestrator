@@ -31,8 +31,8 @@ func TestStartAttemptAllowsOnlyOneConcurrentActiveAttempt(t *testing.T) {
 			defer wg.Done()
 
 			_, _, err := store.StartAttempt(run.ID, StartAttemptRequest{
-				StepID:          "plan",
-				AgentID:         "planner",
+				StepID:          testWorkflowStatePlan,
+				AgentID:         testAgentPlanner,
 				AttemptID:       attemptID,
 				Timeout:         30 * time.Minute,
 				ReportExitGrace: 30 * time.Second,
@@ -92,7 +92,7 @@ func TestStatusBackedWritesShareRunLock(t *testing.T) {
 
 			switch i % 3 {
 			case 0:
-				_, err = store.AppendEvent(run.ID, Event{Type: "workflow.step.finished"})
+				_, err = store.AppendEvent(run.ID, Event{Type: eventWorkflowStepFinished})
 			case 1:
 				_, _, err = store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState})
 			default:
@@ -141,9 +141,9 @@ func TestStartAttemptContextCancellationWhileLocalRunLockHeld(t *testing.T) {
 
 	err := runCanceledWhileLocalRunLockHeld(t, store, run.ID, "StartAttemptContext", func(ctx context.Context) error {
 		_, _, err := store.StartAttemptContext(ctx, run.ID, StartAttemptRequest{
-			StepID:          "plan",
-			AgentID:         "planner",
-			AttemptID:       "attempt-001",
+			StepID:          testWorkflowStatePlan,
+			AgentID:         testAgentPlanner,
+			AttemptID:       testAttemptID,
 			Timeout:         30 * time.Minute,
 			ReportExitGrace: 30 * time.Second,
 		})
@@ -167,12 +167,12 @@ func TestStartAttemptContextCancellationWhileLocalRunLockHeld(t *testing.T) {
 func TestRecordAttemptProcessContextCancellationWhileLocalRunLockHeld(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "local-lock-cancel-process-run")
-	startAttemptForTest(t, store, run.ID, "attempt-001")
-	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	startAttemptForTest(t, store, run.ID, testAttemptID)
+	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 
 	err := runCanceledWhileLocalRunLockHeld(t, store, run.ID, "RecordAttemptProcessContext", func(ctx context.Context) error {
 		_, _, err := store.RecordAttemptProcessContext(ctx, run.ID, AttemptProcessRequest{
-			AttemptID:        "attempt-001",
+			AttemptID:        testAttemptID,
 			PID:              12345,
 			ProcessStartTime: testProcessStartTime,
 		})
@@ -271,8 +271,6 @@ func waitForRunStoreLocalLockWaiter(t *testing.T, waiting <-chan struct{}) {
 	}
 }
 
-const testReportContent = "report\n"
-
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("RUNSTORE_LOCK_HELPER"); mode != "" {
 		os.Exit(runstoreLockHelper(mode))
@@ -346,7 +344,7 @@ func TestReadArtifactWaitsForRunLock(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "read-artifact-lock-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -382,7 +380,7 @@ func TestReadOnlyLegacyRunWithoutLockBackfillsLock(t *testing.T) {
 	store := openStore(t, root)
 	run := createManualRun(t, store, "legacy-no-lock-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -439,7 +437,7 @@ func TestRunLockCoordinatesAcrossProcesses(t *testing.T) {
 	store := openStore(t, root)
 	run := createManualRun(t, store, "cross-process-lock-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -563,22 +561,6 @@ func runstoreLockHelper(mode string) int {
 	return 0
 }
 
-const (
-	runstoreLockExitMissingEnv   = 2
-	runstoreLockExitOpenStore    = 3
-	runstoreLockExitLoad         = 4
-	runstoreLockExitParseRef     = 5
-	runstoreLockExitReadArtifact = 6
-	runstoreLockExitAppendEvent  = 7
-	runstoreLockExitUnknownMode  = 8
-	runstoreLockExitLockEnv      = 9
-	runstoreLockExitLockLoad     = 10
-	runstoreLockExitLockOpen     = 11
-	runstoreLockExitLockFlock    = 12
-	runstoreLockExitLockReady    = 13
-	runstoreLockExitLockUnlock   = 14
-)
-
 func runstoreMarkLockAttempt() {
 	if path := os.Getenv("RUNSTORE_LOCK_ATTEMPT"); path != "" {
 		_ = os.WriteFile(path, nil, 0o600)
@@ -637,7 +619,8 @@ func startRunstoreHelper(t *testing.T, mode, root, runID string, ref ArtifactRef
 		t.Fatalf("marshal ref: %v", err)
 	}
 
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"RUNSTORE_LOCK_HELPER="+mode,
 		"RUNSTORE_LOCK_ROOT="+root,
 		"RUNSTORE_LOCK_RUN_ID="+runID,

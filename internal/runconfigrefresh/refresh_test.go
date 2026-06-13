@@ -52,7 +52,7 @@ steps:
 	result, err := Refresh(context.Background(), Options{
 		Root:  root,
 		RunID: runID,
-		Env:   []string{"PATH="},
+		Env:   []string{refreshEmptyPathEnv},
 		Time:  fixedRefreshTime(),
 	})
 	if err != nil {
@@ -151,7 +151,7 @@ func TestRefreshRejectsActiveAttempt(t *testing.T) {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	_, err := Refresh(context.Background(), Options{Root: root, RunID: runID, Env: []string{"PATH="}})
+	_, err := Refresh(context.Background(), Options{Root: root, RunID: runID, Env: []string{refreshEmptyPathEnv}})
 	if err == nil || !strings.Contains(err.Error(), "active attempt") {
 		t.Fatalf("Refresh error = %v, want active attempt rejection", err)
 	}
@@ -190,7 +190,7 @@ steps:
       done/ready: ready_for_human
 `)
 
-	_, err := Refresh(context.Background(), Options{Root: root, RunID: runID, Env: []string{"PATH="}})
+	_, err := Refresh(context.Background(), Options{Root: root, RunID: runID, Env: []string{refreshEmptyPathEnv}})
 	if err == nil || !strings.Contains(err.Error(), `allowed result pair "failed/error" is no longer declared for selected step "plan"`) {
 		t.Fatalf("Refresh error = %v, want selected step allowed result rejection", err)
 	}
@@ -225,7 +225,7 @@ steps:
       done/ready: ready_for_human
 `)
 
-	_, err := Refresh(context.Background(), Options{Root: root, RunID: runID, Env: []string{"PATH="}})
+	_, err := Refresh(context.Background(), Options{Root: root, RunID: runID, Env: []string{refreshEmptyPathEnv}})
 	if err == nil || !strings.Contains(err.Error(), `"plan" is not declared`) {
 		t.Fatalf("Refresh error = %v, want missing current step rejection", err)
 	}

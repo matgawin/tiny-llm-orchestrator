@@ -25,6 +25,7 @@ const (
 	filePermPrivate     = 0o600
 	dirPermPrivate      = 0o750
 	plannedExtraActions = 3
+	confirmYes          = "yes"
 )
 
 var errUserDeclined = errors.New("user declined")
@@ -433,7 +434,7 @@ func (r runner) confirm(prompt string) (bool, error) {
 
 	normalized := strings.ToLower(strings.TrimSpace(answer))
 
-	return normalized == "y" || normalized == "yes", nil
+	return normalized == "y" || normalized == confirmYes, nil
 }
 
 func (r runner) report(action, target string) error {

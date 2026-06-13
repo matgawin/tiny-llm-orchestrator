@@ -9,15 +9,15 @@ import (
 func TestExecuteRunConfigShowsSnapshotMetadata(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 	workflowPath := filepath.Join(root, ".orc", "workflows", "implementation.yaml")
 	workflowContent := string(readCLIFile(t, workflowPath))
 	workflowContent = strings.Replace(workflowContent, "timeout: 30m", "timeout: 45m", 1)
 	writeCLIFile(t, workflowPath, workflowContent)
-	executeCLICommand(t, []string{"run", "refresh-config", result.runID})
+	executeCLICommand(t, []string{commandRun, cliCommandRefreshConfig, result.runID})
 	writeCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
 
-	output := executeCLICommand(t, []string{"run", "config", result.runID})
+	output := executeCLICommand(t, []string{commandRun, cliCommandConfig, result.runID})
 	assertCLIOutputContainsAll(t, output, []string{
 		"run: " + result.runID,
 		"current_config_snapshot:",
@@ -35,7 +35,7 @@ func TestExecuteRunConfigShowsSnapshotMetadata(t *testing.T) {
 }
 
 func TestExecuteRunConfigHelp(t *testing.T) {
-	output := executeCLICommand(t, []string{"run", "config", "--help"})
+	output := executeCLICommand(t, []string{commandRun, cliCommandConfig, helpFlag})
 	assertCLIOutputContainsAll(t, output, []string{
 		"orc run config <run-id>",
 		"current snapshot version",

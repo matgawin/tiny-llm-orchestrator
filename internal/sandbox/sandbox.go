@@ -24,6 +24,11 @@ const (
 	sandboxDirPerm        = 0o700
 	sandboxSignalExitBase = 128
 	sandboxTerminateGrace = 25 * time.Millisecond
+	bwrapDirArg           = "--dir"
+	hostUsrDir            = "/usr"
+	hostUsrBinDir         = "/usr/bin"
+	hostHomeDir           = "/home"
+	goosLinux             = "linux"
 )
 
 // ExitError reports the sandboxed command exit status.
@@ -108,7 +113,7 @@ func BuildSpec(project *config.Project, opts Options) (BwrapSpec, error) {
 		goos = runtime.GOOS
 	}
 
-	if goos != "linux" {
+	if goos != goosLinux {
 		return BwrapSpec{}, stableerr.Errorf("orc sandbox run requires Linux and the system bwrap binary; unsupported platform %s", goos)
 	}
 
@@ -159,10 +164,10 @@ func buildBwrapArgs(root, cwd string, sandboxConfig *config.SandboxConfig, polic
 	args := []string{
 		"--die-with-parent",
 		"--unshare-all",
-		"--dir", "/var",
-		"--dir", "/run",
-		"--dir", "/usr/bin",
-		"--dir", "/bin",
+		bwrapDirArg, "/var",
+		bwrapDirArg, "/run",
+		bwrapDirArg, hostUsrBinDir,
+		bwrapDirArg, "/bin",
 	}
 	if sandboxConfig.Bubblewrap.Network.Value {
 		args = append(args, "--share-net")
@@ -172,7 +177,7 @@ func buildBwrapArgs(root, cwd string, sandboxConfig *config.SandboxConfig, polic
 
 	args = append(args, "--clearenv", "--tmpfs", "/tmp")
 	for _, dir := range policy.setupDirs(root) {
-		args = append(args, "--dir", dir)
+		args = append(args, bwrapDirArg, dir)
 	}
 
 	args = append(args, "--bind", root, root)
@@ -246,7 +251,7 @@ var defaultEnvAllowlist = []string{
 }
 
 var minimalExecutableHostPaths = []string{
-	"/usr",
+	hostUsrDir,
 	"/bin",
 	"/sbin",
 	"/lib",
@@ -1019,7 +1024,7 @@ func validateExtraMountTarget(source, root, beadsPath, sandboxHome string, mount
 		return nil
 	}
 
-	if (strings.HasPrefix(target, "/home/") || target == "/home") && (!mount.envSourcedSamePathTarget || target == "/home") {
+	if (strings.HasPrefix(target, hostHomeDir+"/") || target == hostHomeDir) && (!mount.envSourcedSamePathTarget || target == hostHomeDir) {
 		return stableerr.Errorf("%s: must not override critical sandbox path /home", name)
 	}
 
@@ -1109,7 +1114,8 @@ func appendAbsPathDirs(dirs *[]string, seen map[string]bool, path string, includ
 
 	var current strings.Builder
 	for part := range strings.SplitSeq(strings.TrimPrefix(clean, string(filepath.Separator)), string(filepath.Separator)) {
-		current.WriteString(string(filepath.Separator) + part)
+		current.WriteString(string(filepath.Separator))
+		current.WriteString(part)
 
 		dir := current.String()
 		if dir == string(filepath.Separator) || dir == "/tmp" || seen[dir] {

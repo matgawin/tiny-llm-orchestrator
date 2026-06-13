@@ -28,7 +28,7 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 
 	if _, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindReport,
-		Name:    "plan",
+		Name:    promptStepPlan,
 		Content: []byte("# Prior Plan\n\nUse existing run-store artifacts.\n"),
 		Time:    fixedPromptTime().Add(2 * time.Minute),
 	}); err != nil {
@@ -38,9 +38,9 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-001",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttempt001,
 		Time:      fixedPromptTime().Add(3 * time.Minute),
 	})
 	if err != nil {
@@ -130,8 +130,8 @@ LIVE MUTATED BODY
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
 		AttemptID: "attempt-1",
 		Time:      fixedPromptTime().Add(time.Minute),
 	})
@@ -157,9 +157,9 @@ func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		Root:                root,
 		RunID:               runID,
-		StepID:              "test",
-		AgentID:             "tester",
-		AttemptID:           "attempt-test",
+		StepID:              promptStepTest,
+		AgentID:             promptAgentTester,
+		AttemptID:           promptAttemptTest,
 		AllowUnselectedStep: true,
 	})
 	if err != nil {
@@ -188,11 +188,11 @@ func TestRenderIncludesStructuredPriorReportCanonicalArtifactPath(t *testing.T) 
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
 	recordReportedAttempt(t, store, runID, runstore.Report{
 		RunID:        runID,
-		StepID:       "plan",
-		AgentID:      "planner",
-		AttemptID:    "attempt-plan",
-		Status:       "done",
-		Result:       "ready",
+		StepID:       promptStepPlan,
+		AgentID:      promptAgentPlanner,
+		AttemptID:    promptAttemptPlan,
+		Status:       promptStatusDone,
+		Result:       promptResultReady,
 		Summary:      "Plan is ready for verification.",
 		Commands:     []string{"go test ./internal/promptrender"},
 		Tests:        []string{"prompt renderer package tests passed"},
@@ -204,9 +204,9 @@ func TestRenderIncludesStructuredPriorReportCanonicalArtifactPath(t *testing.T) 
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "test",
-		AgentID:   "tester",
-		AttemptID: "attempt-test",
+		StepID:    promptStepTest,
+		AgentID:   promptAgentTester,
+		AttemptID: promptAttemptTest,
 		Time:      fixedPromptTime().Add(4 * time.Minute),
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ func TestRenderIncludesStructuredPriorReportCanonicalArtifactPath(t *testing.T) 
 	assertPromptContainsAll(t, prompt, []string{
 		"## Prior Report Context",
 		"### attempt attempt-plan (plan done/ready)",
-		"Full report: `.orc/runs/prompt-run/reports/000009-plan.md`",
+		promptFullReportLine,
 		"# Worker Report",
 		"## Metadata",
 		"- run_id: `prompt-run`",
@@ -245,7 +245,7 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:        "prompt-run",
 		Workflow:     "implementation",
-		InitialState: "plan",
+		InitialState: promptStepPlan,
 		Time:         fixedPromptTime(),
 	})
 	if err != nil {
@@ -259,18 +259,18 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	recordReportedLoopPromptAttempt(t, store, runID, "attempt-2", "attempt-1")
 
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
-		StepID:           "plan",
-		AgentID:          "planner",
+		StepID:           promptStepPlan,
+		AgentID:          promptAgentPlanner,
 		AttemptID:        "attempt-3",
 		Timeout:          30 * time.Minute,
 		ReportExitGrace:  30 * time.Second,
 		Time:             fixedPromptTime().Add(3 * time.Minute),
 		ConsumeAttemptID: "attempt-2",
 		WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
-			State:         "plan",
-			PreviousState: "plan",
-			TriggerStatus: "done",
-			TriggerResult: "ready",
+			State:         promptStepPlan,
+			PreviousState: promptStepPlan,
+			TriggerStatus: promptStatusDone,
+			TriggerResult: promptResultReady,
 		},
 	}); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
@@ -279,8 +279,8 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
 		AttemptID: "attempt-3",
 		Time:      fixedPromptTime().Add(4 * time.Minute),
 	})
@@ -308,16 +308,16 @@ func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
 	writeTaskContextArtifact(t, store, runID, "# Task\n\nBuild prompt rendering.\n", fixedPromptTime().Add(time.Minute))
 
 	if _, _, err := store.RecordStepSkip(runID, runstore.RecordStepSkipRequest{
-		StepID: "plan",
+		StepID: promptStepPlan,
 		Reason: "not worth another review",
 		Time:   fixedPromptTime().Add(2 * time.Minute),
 	}, func(runstore.Status) (runstore.StepSkipTransition, error) {
 		return runstore.StepSkipTransition{
 			State: workflow.RunStatusRunning,
 			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
-				State:         "test",
-				PreviousState: "plan",
-				TriggerStatus: "done",
+				State:         promptStepTest,
+				PreviousState: promptStepPlan,
+				TriggerStatus: promptStatusDone,
 				TriggerResult: "skipped",
 			},
 		}, nil
@@ -328,8 +328,8 @@ func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "test",
-		AgentID:   "tester",
+		StepID:    promptStepTest,
+		AgentID:   promptAgentTester,
 		AttemptID: "attempt-002",
 		Time:      fixedPromptTime().Add(3 * time.Minute),
 	})
@@ -352,20 +352,20 @@ func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
 	recordReportedAttempt(t, store, runID, runstore.Report{
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-plan",
-		Status:    "done",
-		Result:    "ready",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttemptPlan,
+		Status:    promptStatusDone,
+		Result:    promptResultReady,
 		Summary:   "Plan is ready for verification.",
 	}, []byte("# Detail\n\nUse the focused test surface.\n"))
 
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "test",
-		AgentID:   "tester",
-		AttemptID: "attempt-test",
+		StepID:    promptStepTest,
+		AgentID:   promptAgentTester,
+		AttemptID: promptAttemptTest,
 		Time:      fixedPromptTime().Add(8 * time.Minute),
 	})
 	if err != nil {
@@ -375,7 +375,7 @@ func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
 	prompt := string(result.Content)
 	assertPromptContainsAll(t, prompt, []string{
 		"### attempt attempt-plan (plan done/ready)",
-		"Full report: `.orc/runs/prompt-run/reports/000009-plan.md`",
+		promptFullReportLine,
 		"## Summary\n\nPlan is ready for verification.",
 		"## Report Detail",
 		"# Detail\n\nUse the focused test surface.",
@@ -394,11 +394,11 @@ func TestRenderRequiresPriorAttemptReportRef(t *testing.T) {
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
 	recordReportedAttempt(t, store, runID, runstore.Report{
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-plan",
-		Status:    "done",
-		Result:    "ready",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttemptPlan,
+		Status:    promptStatusDone,
+		Result:    promptResultReady,
 		Summary:   "Plan is ready.",
 	}, nil)
 	removeAttemptReportedReportRef(t, root, runID)
@@ -406,16 +406,16 @@ func TestRenderRequiresPriorAttemptReportRef(t *testing.T) {
 	_, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "test",
-		AgentID:   "tester",
-		AttemptID: "attempt-test",
+		StepID:    promptStepTest,
+		AgentID:   promptAgentTester,
+		AttemptID: promptAttemptTest,
 		Time:      fixedPromptTime().Add(8 * time.Minute),
 	})
 	if err == nil {
 		t.Fatal("Render returned nil error, want missing report_ref error")
 	}
 
-	for _, want := range []string{`run "prompt-run"`, `attempt "attempt-plan"`, `step "plan"`, "missing report_ref"} {
+	for _, want := range []string{`run "prompt-run"`, `attempt "` + promptAttemptPlan + `"`, `step "` + promptStepPlan + `"`, "missing report_ref"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Render error = %q, want %q", err, want)
 		}
@@ -430,20 +430,20 @@ func TestRenderTruncatedPriorReportRequiresReadingFullReport(t *testing.T) {
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
 	recordReportedAttempt(t, store, runID, runstore.Report{
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-plan",
-		Status:    "done",
-		Result:    "ready",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttemptPlan,
+		Status:    promptStatusDone,
+		Result:    promptResultReady,
 		Summary:   strings.Repeat("long summary ", 160),
 	}, nil)
 
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "test",
-		AgentID:   "tester",
-		AttemptID: "attempt-test",
+		StepID:    promptStepTest,
+		AgentID:   promptAgentTester,
+		AttemptID: promptAttemptTest,
 		Time:      fixedPromptTime().Add(8 * time.Minute),
 	})
 	if err != nil {
@@ -451,7 +451,7 @@ func TestRenderTruncatedPriorReportRequiresReadingFullReport(t *testing.T) {
 	}
 
 	assertPromptContainsAll(t, string(result.Content), []string{
-		"Full report: `.orc/runs/prompt-run/reports/000009-plan.md`",
+		promptFullReportLine,
 		"[excerpt truncated]",
 		"This excerpt is truncated. Read the full report before using this prior report as implementation, review, or correction input: `.orc/runs/prompt-run/reports/000009-plan.md`",
 	})
@@ -467,15 +467,15 @@ func TestRenderRefusesNonSelectedStepUnlessAllowed(t *testing.T) {
 	_, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "test",
-		AgentID:   "tester",
-		AttemptID: "attempt-test",
+		StepID:    promptStepTest,
+		AgentID:   promptAgentTester,
+		AttemptID: promptAttemptTest,
 	})
 	if err == nil {
 		t.Fatal("Render returned nil error, want non-selected step refusal")
 	}
 
-	if !strings.Contains(err.Error(), `step "test" is not selected`) {
+	if !strings.Contains(err.Error(), `step "`+promptStepTest+`" is not selected`) {
 		t.Fatalf("error = %q, want non-selected step context", err)
 	}
 
@@ -497,9 +497,9 @@ func TestRenderRefusesTerminalRun(t *testing.T) {
 	_, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-001",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttempt001,
 	})
 	if err == nil {
 		t.Fatal("Render returned nil error, want terminal refusal")
@@ -518,8 +518,8 @@ func TestRenderRequiresCallerProvidedAttemptMetadata(t *testing.T) {
 	_, err := Render(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		StepID:  "plan",
-		AgentID: "planner",
+		StepID:  promptStepPlan,
+		AgentID: promptAgentPlanner,
 	})
 	if err == nil || !strings.Contains(err.Error(), "attempt id is required") {
 		t.Fatalf("Render error = %v, want missing attempt id", err)
@@ -539,9 +539,9 @@ func TestRenderHonorsCanceledContextBeforeWritingPrompt(t *testing.T) {
 	_, err := Render(ctx, Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-001",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttempt001,
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Render error = %v, want context canceled", err)
@@ -569,9 +569,9 @@ func TestRenderReturnsCommittedPromptRefOnStatusMaterializationFailure(t *testin
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-001",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttempt001,
 	})
 
 	var materializationErr *runstore.StatusMaterializationError
@@ -599,8 +599,8 @@ func TestRenderRejectsInvalidRequestedMetadataBeforeWritingPrompt(t *testing.T) 
 			name: "undeclared step",
 			opts: Options{
 				StepID:              "deploy",
-				AgentID:             "tester",
-				AttemptID:           "attempt-001",
+				AgentID:             promptAgentTester,
+				AttemptID:           promptAttempt001,
 				AllowUnselectedStep: true,
 			},
 			want: `step "deploy" is not declared`,
@@ -608,12 +608,12 @@ func TestRenderRejectsInvalidRequestedMetadataBeforeWritingPrompt(t *testing.T) 
 		{
 			name: "agent mismatch",
 			opts: Options{
-				StepID:              "test",
-				AgentID:             "planner",
-				AttemptID:           "attempt-001",
+				StepID:              promptStepTest,
+				AgentID:             promptAgentPlanner,
+				AttemptID:           promptAttempt001,
 				AllowUnselectedStep: true,
 			},
-			want: `step "test" uses agent "tester", not "planner"`,
+			want: `step "` + promptStepTest + `" uses agent "` + promptAgentTester + `", not "` + promptAgentPlanner + `"`,
 		},
 	}
 
@@ -652,9 +652,9 @@ func TestRenderRequiresTaskContextArtifact(t *testing.T) {
 	_, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
-		StepID:    "plan",
-		AgentID:   "planner",
-		AttemptID: "attempt-001",
+		StepID:    promptStepPlan,
+		AgentID:   promptAgentPlanner,
+		AttemptID: promptAttempt001,
 	})
 	if err == nil || !strings.Contains(err.Error(), "has no task context artifact") {
 		t.Fatalf("Render error = %v, want missing task context", err)
@@ -867,8 +867,8 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 	t.Helper()
 
 	req := runstore.StartAttemptRequest{
-		StepID:           "plan",
-		AgentID:          "planner",
+		StepID:           promptStepPlan,
+		AgentID:          promptAgentPlanner,
 		AttemptID:        attemptID,
 		Timeout:          30 * time.Minute,
 		ReportExitGrace:  30 * time.Second,
@@ -877,10 +877,10 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 	}
 	if consumeAttemptID != "" {
 		req.WorkflowStateEntry = runstore.WorkflowStateEntryRequest{
-			State:         "plan",
-			PreviousState: "plan",
-			TriggerStatus: "done",
-			TriggerResult: "ready",
+			State:         promptStepPlan,
+			PreviousState: promptStepPlan,
+			TriggerStatus: promptStatusDone,
+			TriggerResult: promptResultReady,
 		}
 	}
 
@@ -890,7 +890,7 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 
 	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
-		Name:    "plan",
+		Name:    promptStepPlan,
 		Content: []byte("prompt\n"),
 		Time:    fixedPromptTime().Add(80 * time.Second),
 	})
@@ -908,7 +908,7 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 
 	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
-		Name:    "plan",
+		Name:    promptStepPlan,
 		Content: []byte("log\n"),
 		Time:    fixedPromptTime().Add(88 * time.Second),
 	})
@@ -937,11 +937,11 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    "plan",
-			AgentID:   "planner",
+			StepID:    promptStepPlan,
+			AgentID:   promptAgentPlanner,
 			AttemptID: attemptID,
-			Status:    "done",
-			Result:    "ready",
+			Status:    promptStatusDone,
+			Result:    promptResultReady,
 			Summary:   "Looping.",
 		},
 		Time: fixedPromptTime().Add(2 * time.Minute),

@@ -12,12 +12,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
-const (
-	appName        = "orc"
-	defaultVersion = "dev"
-	helpFlag       = "--help"
-)
-
 var version = defaultVersion
 
 // Execute runs the orc command with explicit output streams for deterministic
@@ -81,7 +75,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 
 func newVersionCommand(stdout io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:           "version",
+		Use:           commandVersion,
 		Short:         "Print version information",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -99,7 +93,7 @@ func newVersionCommand(stdout io.Writer) *cobra.Command {
 
 func newCompletionCommand(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "completion <shell>",
+		Use:   commandCompletionUse,
 		Short: "Generate shell completion scripts",
 		Long: appName + ` completion generates shell completion scripts.
 
@@ -107,7 +101,7 @@ Supported shells are bash, zsh, fish, and powershell.`,
 		Args: completionShellArgs(stderr),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch args[0] {
-			case "bash":
+			case shellBash:
 				return cmd.Root().GenBashCompletion(stdout)
 			case "zsh":
 				return cmd.Root().GenZshCompletion(stdout)

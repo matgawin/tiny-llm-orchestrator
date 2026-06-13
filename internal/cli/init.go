@@ -17,7 +17,7 @@ func newInitCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		Stdout: stdout,
 	}
 	cmd := &cobra.Command{
-		Use:           "init",
+		Use:           commandInit,
 		Short:         "Scaffold project-local Tiny Orc config",
 		Long:          initHelpLong(),
 		SilenceUsage:  true,

@@ -145,7 +145,7 @@ func TestResolveWorkerExecutableDoesNotFallbackWhenEnvOmitsPATH(t *testing.T) {
 }
 
 func TestNewWorkerCommandUsesAbsoluteHelperPath(t *testing.T) {
-	cmd, releaseExec, err := newWorkerCommand(context.Background(), []string{"sh", "-c", "true"}, os.Environ(), t.TempDir())
+	cmd, releaseExec, err := newWorkerCommand(context.Background(), []string{"sh", "-c", launcherCommandTrue}, os.Environ(), t.TempDir())
 	if err != nil {
 		t.Fatalf("newWorkerCommand returned error: %v", err)
 	}
@@ -201,7 +201,8 @@ func TestAmbientExecHelperEnvDoesNotBypassNormalInvocation(t *testing.T) {
 
 	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=TestAmbientExecHelperEnvDoesNotBypassNormalInvocation")
 
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		execHelperEnv+"=ambient-user-value",
 		"ORC_LAUNCHER_AMBIENT_HELPER_TEST=1",
 	)

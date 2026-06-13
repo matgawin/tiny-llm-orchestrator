@@ -11,9 +11,9 @@ import (
 func TestExecuteRunSkipStepSkipsSelectedReviewStep(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLISkipStepProject(t, root, true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 
-	output := executeCLICommand(t, []string{"run", "skip-step", result.runID, "--step", "review", "--reason", " not worth another review "})
+	output := executeCLICommand(t, []string{commandRun, cliCommandSkipStep, result.runID, cliFlagStep, cliStepReview, cliFlagReason, " not worth another review "})
 	assertCLIOutputContainsAll(t, output, []string{
 		"skipped step review for run " + result.runID,
 		"reason: not worth another review",
@@ -25,7 +25,7 @@ func TestExecuteRunSkipStepSkipsSelectedReviewStep(t *testing.T) {
 		t.Fatalf("attempts = %d, want unchanged empty attempts", got)
 	}
 
-	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != "review" || loaded.Status.SkippedSteps[0].Reason != "not worth another review" {
+	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != cliStepReview || loaded.Status.SkippedSteps[0].Reason != "not worth another review" {
 		t.Fatalf("skipped steps = %+v, want review skip with trimmed reason", loaded.Status.SkippedSteps)
 	}
 }
@@ -33,10 +33,10 @@ func TestExecuteRunSkipStepSkipsSelectedReviewStep(t *testing.T) {
 func TestExecuteRunSkipStepSkipsSelectedRemediationStep(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLISkipStepProject(t, root, true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
-	recordCLIReportedAttempt(t, root, result.runID, "review-attempt", "review", "reviewer", "done", "changes_requested")
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	recordCLIReportedAttempt(t, root, result.runID, "review-attempt", cliStepReview, "reviewer", cliStatusDone, "changes_requested")
 
-	output := executeCLICommand(t, []string{"run", "skip-step", result.runID, "--step=code", "--reason=human reviewed requested changes"})
+	output := executeCLICommand(t, []string{commandRun, cliCommandSkipStep, result.runID, "--step=code", "--reason=human reviewed requested changes"})
 	assertCLIOutputContainsAll(t, output, []string{
 		"skipped step code for run " + result.runID,
 		"reason: human reviewed requested changes",
@@ -44,7 +44,7 @@ func TestExecuteRunSkipStepSkipsSelectedRemediationStep(t *testing.T) {
 	})
 
 	loaded := loadCLIRun(t, root, result.runID)
-	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != "code" {
+	if len(loaded.Status.SkippedSteps) != 1 || loaded.Status.SkippedSteps[0].StepID != cliStepCode {
 		t.Fatalf("skipped steps = %+v, want code remediation skip", loaded.Status.SkippedSteps)
 	}
 
@@ -59,13 +59,13 @@ func TestExecuteRunSkipStepFlagValidation(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{name: "missing step", args: []string{"run", "skip-step", "run-1", "--reason", "skip"}, want: []string{"--step is required"}},
-		{name: "missing reason", args: []string{"run", "skip-step", "run-1", "--step", "review"}, want: []string{"--reason is required"}},
-		{name: "whitespace reason", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", " \t "}, want: []string{"non-empty after trimming"}},
-		{name: "duplicate step", args: []string{"run", "skip-step", "run-1", "--step", "review", "--step=code", "--reason", "skip"}, want: []string{"repeated --step"}},
-		{name: "duplicate reason", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "one", "--reason=two"}, want: []string{"repeated --reason"}},
-		{name: "unknown json", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--json"}, want: []string{`unknown flag: --json`}},
-		{name: "unknown flag", args: []string{"run", "skip-step", "run-1", "--step", "review", "--reason", "skip", "--force"}, want: []string{`unknown flag: --force`}},
+		{name: "missing step", args: []string{commandRun, cliCommandSkipStep, cliRunIDOne, cliFlagReason, cliSkipReason}, want: []string{"--step is required"}},
+		{name: "missing reason", args: []string{commandRun, cliCommandSkipStep, cliRunIDOne, cliFlagStep, cliStepReview}, want: []string{"--reason is required"}},
+		{name: "whitespace reason", args: []string{commandRun, cliCommandSkipStep, cliRunIDOne, cliFlagStep, cliStepReview, cliFlagReason, " \t "}, want: []string{"non-empty after trimming"}},
+		{name: "duplicate step", args: []string{commandRun, cliCommandSkipStep, cliRunIDOne, cliFlagStep, cliStepReview, "--step=code", cliFlagReason, cliSkipReason}, want: []string{"repeated --step"}},
+		{name: "duplicate reason", args: []string{commandRun, cliCommandSkipStep, cliRunIDOne, cliFlagStep, cliStepReview, cliFlagReason, "one", "--reason=two"}, want: []string{"repeated --reason"}},
+		{name: "unknown json", args: []string{commandRun, cliCommandSkipStep, cliRunIDOne, cliFlagStep, cliStepReview, cliFlagReason, cliSkipReason, cliFlagJSON}, want: []string{`unknown flag: --json`}},
+		{name: cliUnknownFlag, args: []string{commandRun, cliCommandSkipStep, cliRunIDOne, cliFlagStep, cliStepReview, cliFlagReason, cliSkipReason, "--force"}, want: []string{`unknown flag: --force`}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 		{
 			name:      "wrong step",
 			skippable: true,
-			step:      "code",
+			step:      cliStepCode,
 			want:      []string{`step "code" is not selected`, `selected step is "review"`},
 		},
 		{
@@ -102,9 +102,9 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 			skippable: true,
 			setup: func(t *testing.T, root, runID string) {
 				t.Helper()
-				startCLIActiveAttemptForStep(t, root, runID, "review-active", "review", "reviewer")
+				startCLIActiveAttemptForStep(t, root, runID, "review-active", cliStepReview, "reviewer")
 			},
-			step: "review",
+			step: cliStepReview,
 			want: []string{"active attempt"},
 		},
 		{
@@ -112,9 +112,9 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 			skippable: true,
 			setup: func(t *testing.T, root, runID string) {
 				t.Helper()
-				recordCLIReportedAttempt(t, root, runID, "review-retry", "review", "reviewer", "failed", "error")
+				recordCLIReportedAttempt(t, root, runID, "review-retry", cliStepReview, "reviewer", cliStatusFailed, cliResultError)
 			},
-			step: "review",
+			step: cliStepReview,
 			want: []string{"decision is retry_step", "only a selected step can be skipped"},
 		},
 		{
@@ -127,13 +127,13 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			},
-			step: "review",
+			step: cliStepReview,
 			want: []string{"terminal"},
 		},
 		{
 			name:      "non skippable step",
 			skippable: false,
-			step:      "review",
+			step:      cliStepReview,
 			want:      []string{`step "review" is not skippable`},
 		},
 	}
@@ -142,7 +142,7 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLISkipStepProject(t, root, tc.skippable)
 
-			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 			if tc.setup != nil {
 				tc.setup(t, root, result.runID)
 			}
@@ -151,7 +151,7 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 
-			err := Execute([]string{"run", "skip-step", result.runID, "--step", tc.step, "--reason", "skip it"}, &stdout, &stderr)
+			err := Execute([]string{commandRun, cliCommandSkipStep, result.runID, cliFlagStep, tc.step, cliFlagReason, "skip it"}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want skip rejection")
 			}
@@ -172,7 +172,7 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 
 func TestExecuteRunHelpListsMigratedSubcommands(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{"run", "--help"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, helpFlag}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
@@ -181,25 +181,25 @@ func TestExecuteRunHelpListsMigratedSubcommands(t *testing.T) {
 	}
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
-		"add-followup",
-		"advance",
-		"config",
-		"continue",
-		"next",
-		"record-summary",
-		"refresh-config",
-		"show",
-		"skip-step",
-		"start",
-		"status",
-		"summary-context",
+		cliCommandAddFollowup,
+		cliCommandAdvance,
+		cliCommandConfig,
+		cliCommandContinue,
+		cliCommandNext,
+		cliCommandRecordSummary,
+		cliCommandRefreshConfig,
+		cliCommandShow,
+		cliCommandSkipStep,
+		cliCommandStart,
+		cliCommandStatus,
+		cliCommandSummaryContext,
 		"Skip the currently selected skippable workflow step",
 	})
 }
 
 func TestExecuteRunUnknownSubcommandFailsThroughCobra(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{"run", "unknown"}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandRun, cliCommandUnknown}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown command failure")
 	}
 
@@ -214,7 +214,7 @@ func TestExecuteRunUnknownSubcommandFailsThroughCobra(t *testing.T) {
 
 func TestExecuteRunSkipStepHelpDocumentsContract(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{"run", "skip-step", "--help"}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, cliCommandSkipStep, helpFlag}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 

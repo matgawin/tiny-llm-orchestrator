@@ -13,6 +13,7 @@ const (
 	stateBlockedHuman   = "blocked_for_human"
 	attemptStatusDone   = "done"
 	attemptStatusFailed = "failed"
+	stepSkipResult      = "skipped"
 
 	eventRunCreated              = "run.created"
 	eventStatusUpdated           = "status.updated"
@@ -31,6 +32,8 @@ const (
 	eventWorkflowHardCap         = "workflow.loop_hard_cap"
 	eventWorkflowHardCapOverride = "workflow.loop_hard_cap_override"
 	eventWorkflowStepSkipped     = "workflow.step_skipped"
+	eventWorkflowStepSelected    = "workflow.step.selected"
+	eventWorkflowStepFinished    = "workflow.step.finished"
 	// EventConfigSnapshotRefreshed records explicit adoption of a new run config snapshot.
 	EventConfigSnapshotRefreshed = "config_snapshot_refreshed"
 
@@ -43,7 +46,8 @@ const (
 	KindSummary      ArtifactKind = "summary"
 	KindFollowup     ArtifactKind = "followup"
 
-	WorkflowLoopHardCapReason = "loop_hard_cap_reached"
+	WorkflowLoopHardCapReason        = "loop_hard_cap_reached"
+	reportTargetCurrentAttemptReason = "report does not target current active attempt"
 )
 
 // Store owns durable run state for one project root.
@@ -62,7 +66,7 @@ type ReportTargetError struct {
 
 func (err *ReportTargetError) Error() string {
 	if err == nil || err.Err == nil {
-		return "report does not target current active attempt"
+		return reportTargetCurrentAttemptReason
 	}
 
 	return err.Err.Error()

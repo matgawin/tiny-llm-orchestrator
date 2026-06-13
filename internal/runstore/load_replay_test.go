@@ -13,7 +13,7 @@ func TestLoadReportsMalformedStateWithArtifactPath(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "broken-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestLoadRejectsMissingInitialRunLayout(t *testing.T) {
 		wantContext string
 	}{
 		{name: "followups", remove: followupsName, wantContext: followupsName},
-		{name: "reports", remove: "reports", wantContext: "reports"},
+		{name: reportsDir, remove: reportsDir, wantContext: reportsDir},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := openStore(t, t.TempDir())
@@ -193,7 +193,7 @@ func TestLoadRejectsMalformedArtifactFileShapes(t *testing.T) {
 func TestLoadRejectsSymlinkedArtifactParent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run, ref, artifactPath := createRunWithReportArtifact(t, store, "load-symlink-parent")
-	reportsDir := filepath.Join(run.Path, "reports")
+	reportsDir := filepath.Join(run.Path, reportsDir)
 
 	if err := os.Remove(artifactPath); err != nil {
 		t.Fatalf("remove artifact: %v", err)
@@ -291,7 +291,7 @@ func TestLoadRejectsMissingRunCreatedEvent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-created")
 	events := readRunEvents(t, run)
-	events[0].Type = "workflow.step.selected"
+	events[0].Type = eventWorkflowStepSelected
 	writeRunEvents(t, run, events)
 
 	_, err := store.Load(run.ID)
@@ -348,7 +348,7 @@ func TestLoadReplaysArtifactEventWhenMaterializedStatusIsStale(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-ref")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestLoadRejectsNestedRepeatableArtifactPath(t *testing.T) {
 	run, _ := createRunWithMutatedArtifactEvent(t, store, "nested-artifact-path", func(run *Run, _ ArtifactRef, payload *artifactWrittenPayload) {
 		nestedPath := "reports/000002-plan/evil.md"
 
-		if err := os.Mkdir(filepath.Join(run.Path, "reports", "000002-plan"), 0o750); err != nil {
+		if err := os.Mkdir(filepath.Join(run.Path, reportsDir, "000002-plan"), 0o750); err != nil {
 			t.Fatalf("mkdir nested artifact dir: %v", err)
 		}
 
@@ -503,7 +503,7 @@ func TestLoadIgnoresStatusRefMissingArtifactEvent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-event")
 
-	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte(testReportContent)})
+	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}

@@ -53,7 +53,7 @@ type initUpgradeApplyRefusalJSON struct {
 func newInitUpgradeCommand(stdout, stderr io.Writer) *cobra.Command {
 	opts := initUpgradeOptions{}
 	cmd := &cobra.Command{
-		Use:           "upgrade",
+		Use:           commandUpgrade,
 		Short:         "Plan or apply project setup upgrades",
 		Long:          initUpgradeHelpLong(),
 		SilenceUsage:  true,
@@ -325,7 +325,7 @@ func printInitUpgradeApplyRefusal(stdout io.Writer, plan *initupgrade.Result, co
 func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) error {
 	title := "orc init upgrade applied"
 	if len(applied.Conflicts) > 0 {
-		title = "orc init upgrade partially applied"
+		title = initUpgradePartialTitle
 	}
 
 	if _, err := fmt.Fprintf(stdout, "%s\n\nsetup version: %d -> %d\nconfig schema version: %d\n", title, applied.PreviousSetupVersion, applied.TargetSetupVersion, applied.ConfigSchemaVersion); err != nil {
@@ -371,7 +371,7 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 
 	result := "result: safe planned changes were written"
 	if len(applied.Conflicts) > 0 {
-		result = "result: safe independent changes were written; unresolved conflicts remain"
+		result = initUpgradePartialResult
 	}
 
 	if _, err := fmt.Fprintln(stdout, "\n"+result); err != nil {

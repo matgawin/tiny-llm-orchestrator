@@ -770,7 +770,7 @@ func validateAgentStepModel(stepName string, step Step, workflow Workflow, runti
 	return validateAgentStepSelection(stepSelectionValidation{
 		stepName:      stepName,
 		runtimeID:     runtimeID,
-		name:          "model",
+		name:          runtimeSelectionModel,
 		supportedName: "model.supported",
 		allowedName:   "model.allowed",
 		stepValue:     step.Model,
@@ -787,7 +787,7 @@ func validateAgentStepReasoning(stepName string, step Step, workflow Workflow, r
 	return validateAgentStepSelection(stepSelectionValidation{
 		stepName:      stepName,
 		runtimeID:     runtimeID,
-		name:          "reasoning",
+		name:          runtimeSelectionReasoning,
 		supportedName: "reasoning.supported",
 		allowedName:   "reasoning.allowed",
 		stepValue:     step.Reasoning,

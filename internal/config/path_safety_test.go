@@ -28,7 +28,7 @@ sandbox:
 		t.Fatal("sandbox config was nil")
 	}
 
-	if got, want := project.Config.Sandbox.Command.Argv, []string{"codex"}; !slices.Equal(got, want) {
+	if got, want := project.Config.Sandbox.Command.Argv, []string{testRuntimeCodex}; !slices.Equal(got, want) {
 		t.Fatalf("sandbox command argv = %v, want %v", got, want)
 	}
 
@@ -134,6 +134,7 @@ func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
 	sandbox := project.Config.Sandbox
 	if sandbox == nil {
 		t.Fatal("sandbox config was nil")
+		return
 	}
 
 	sandboxConfig := *sandbox
@@ -173,7 +174,7 @@ func TestLoadAcceptsFullSandboxConfig(t *testing.T) {
 		t.Fatalf("sandbox env set ORC_SANDBOX = %q, want 1", got)
 	}
 
-	if got := len(sandbox.Mounts); got != 2 {
+	if got := len(sandboxConfig.Mounts); got != 2 {
 		t.Fatalf("sandbox mounts length = %d, want 2", got)
 	}
 }

@@ -12,10 +12,10 @@ import (
 func TestExecuteRunAddFollowupAppendsFollowup(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 
 	output := executeCLICommand(t, []string{
-		"run", "add-followup", result.runID,
+		commandRun, cliCommandAddFollowup, result.runID,
 		"--title=Create release note",
 		"--details=Mention the follow-up recorder.",
 	})
@@ -41,11 +41,11 @@ func TestExecuteRunAddFollowupAppendsFollowup(t *testing.T) {
 func TestExecuteRunAddFollowupRequiresTitle(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{"run", "add-followup", result.runID, "--details", "No title."}, &stdout, &stderr)
+	err := Execute([]string{commandRun, cliCommandAddFollowup, result.runID, "--details", "No title."}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want missing title failure")
 	}
@@ -65,7 +65,7 @@ func TestExecuteRunAddFollowupOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 	result := startCLIBeadBackedRunThenBlockBD(t, root)
 
 	output := executeCLICommand(t, []string{
-		"run", "add-followup", result.runID,
+		commandRun, cliCommandAddFollowup, result.runID,
 		"--title", "Create bead manually",
 		"--details", "Human should decide whether to create a bead.",
 	})
@@ -90,7 +90,7 @@ func TestRunRecordSummaryOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 	summaryPath := filepath.Join(root, "final-summary.md")
 	writeCLIFile(t, summaryPath, "# Final Summary\n\nSuggested bead note for the human.\n")
 
-	output := executeCLICommand(t, []string{"run", "record-summary", result.runID, "--file=" + summaryPath})
+	output := executeCLICommand(t, []string{commandRun, cliCommandRecordSummary, result.runID, "--file=" + summaryPath})
 	assertCLIOutputContainsAll(t, output, []string{"recorded final summary for run " + result.runID, "summaries/"})
 
 	_, content := latestCLIArtifactContent(t, root, result.runID, runstore.KindSummary)
@@ -101,7 +101,7 @@ func TestRunRecordSummaryOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 
 func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) {
 	run := startCLIImplementationReportRun(t)
-	launchCLIWorkerReport(t, run.runID, ready("Plan is ready."))
+	launchCLIWorkerReport(t, run.runID, ready(cliSummaryReady))
 	launchCLIWorkerReport(t, run.runID, ready("Code is ready for tests."))
 	launchCLIWorkerReport(t, run.runID, passed("Tests passed."))
 	attemptsBeforeApprovalTerminal := len(loadCLIRun(t, run.root, run.runID).Status.Attempts)
@@ -110,7 +110,7 @@ func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) 
 
 	summaryPath := filepath.Join(run.root, "final-summary.md")
 	writeCLIFile(t, summaryPath, "# Final Summary\n\nChanges, tests, risks, follow-ups, VCS summary, and review checklist.\n")
-	recordOutput := executeCLICommand(t, []string{"run", "record-summary", run.runID, "--file", summaryPath})
+	recordOutput := executeCLICommand(t, []string{commandRun, cliCommandRecordSummary, run.runID, "--file", summaryPath})
 	assertCLIOutputContainsAll(t, recordOutput, []string{"recorded final summary", "summaries/"})
 
 	summaryRef, summaryContent := latestCLIArtifactContent(t, run.root, run.runID, runstore.KindSummary)
@@ -118,11 +118,11 @@ func TestRunRecordSummaryPersistsReadySummaryAndLeavesRunTerminal(t *testing.T) 
 		t.Fatalf("summary content = %q, want copied final handoff content", summaryContent)
 	}
 
-	statusOutput := executeCLICommand(t, []string{"run", "status", run.runID})
+	statusOutput := executeCLICommand(t, []string{commandRun, cliCommandStatus, run.runID})
 	assertCLIOutputContainsAll(t, statusOutput, []string{"state: ready_for_human", "summary: " + summaryRef.Path})
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{"worker", "launch-next", run.runID}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandWorker, cliCommandLaunchNext, run.runID}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want terminal no-launch error after summary")
 	}
 
@@ -138,7 +138,7 @@ func TestRunRecordSummaryRejectsNotReadyRuns(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIProject(t, root, "optional", true)
 
-			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 			if state != "running" {
 				if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: state}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
@@ -150,7 +150,7 @@ func TestRunRecordSummaryRejectsNotReadyRuns(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 
-			err := Execute([]string{"run", "record-summary", result.runID, "--file", summaryPath}, &stdout, &stderr)
+			err := Execute([]string{commandRun, cliCommandRecordSummary, result.runID, "--file", summaryPath}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want rejection")
 			}

@@ -124,10 +124,10 @@ func (p *planner) planMigration0To1() {
 
 func (p *planner) planConfigMigration0To1() {
 	var edits []SurgicalEdit
-	if !p.config.has("setup_version") {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: "setup_version", Value: fmt.Sprint(config.CurrentSetupVersion)})
+	if !p.config.has(setupVersionField) {
+		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: setupVersionField, Value: fmt.Sprint(config.CurrentSetupVersion)})
 	} else if p.config.setupVersion < config.CurrentSetupVersion {
-		edits = append(edits, SurgicalEdit{Kind: EditSetYAMLField, Path: "setup_version", Value: fmt.Sprint(config.CurrentSetupVersion)})
+		edits = append(edits, SurgicalEdit{Kind: EditSetYAMLField, Path: setupVersionField, Value: fmt.Sprint(config.CurrentSetupVersion)})
 	}
 
 	if p.config.hasNested("defaults", "max_loops") && !p.config.hasNested("defaults", "loop_caps") {
@@ -141,7 +141,8 @@ func (p *planner) planConfigMigration0To1() {
 			hard = strconv.Itoa(parsed + 1)
 		}
 
-		edits = append(edits,
+		edits = append(
+			edits,
 			SurgicalEdit{Kind: EditRemoveYAMLField, Path: "defaults.max_loops"},
 			SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + value + "\nhard: " + hard},
 		)

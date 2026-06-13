@@ -17,11 +17,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
-const (
-	reportIgnoredEvent = "report.ignored"
-	reportStatusFailed = "failed"
-)
-
 func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	root := t.TempDir()
 	writeSkippableReportProject(t, root)
@@ -33,7 +28,7 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "skip-report-run",
-		Workflow: "implementation",
+		Workflow: reportWorkflowName,
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -47,10 +42,10 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 		Root: root,
 		Report: runstore.Report{
 			RunID:     run.ID,
-			StepID:    "plan",
-			AgentID:   "planner",
+			StepID:    reportStepPlan,
+			AgentID:   reportAgentPlanner,
 			AttemptID: "attempt-001",
-			Status:    "done",
+			Status:    reportStatusDone,
 			Result:    "skipped",
 			Summary:   "Skipping this step.",
 		},
@@ -90,7 +85,7 @@ func TestSubmitValidatesReportAgainstPinnedWorkflowAfterLiveMutation(t *testing.
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "pinned-report-run",
-		Workflow: "implementation",
+		Workflow: reportWorkflowName,
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -124,11 +119,11 @@ steps:
 		Root: root,
 		Report: runstore.Report{
 			RunID:     run.ID,
-			StepID:    "plan",
-			AgentID:   "planner",
+			StepID:    reportStepPlan,
+			AgentID:   reportAgentPlanner,
 			AttemptID: "attempt-1",
-			Status:    "done",
-			Result:    "ready",
+			Status:    reportStatusDone,
+			Result:    reportResultReady,
 			Summary:   "Pinned workflow accepted this.",
 		},
 		Time: time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC),
@@ -150,7 +145,7 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "race-report-run",
-		Workflow: "implementation",
+		Workflow: reportWorkflowName,
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -159,11 +154,11 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 
 	report := runstore.Report{
 		RunID:     run.ID,
-		StepID:    "plan",
-		AgentID:   "planner",
+		StepID:    reportStepPlan,
+		AgentID:   reportAgentPlanner,
 		AttemptID: "stale-attempt",
-		Status:    "done",
-		Result:    "ready",
+		Status:    reportStatusDone,
+		Result:    reportResultReady,
 		Summary:   "Stale report.",
 	}
 	err = &runstore.ReportTargetError{
@@ -209,7 +204,7 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 
 	run, err := store.Create(runstore.CreateRunRequest{
 		RunID:    "race-submit-run",
-		Workflow: "implementation",
+		Workflow: reportWorkflowName,
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -221,11 +216,11 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 
 	report := runstore.Report{
 		RunID:     run.ID,
-		StepID:    "plan",
-		AgentID:   "planner",
+		StepID:    reportStepPlan,
+		AgentID:   reportAgentPlanner,
 		AttemptID: "attempt-001",
-		Status:    "done",
-		Result:    "ready",
+		Status:    reportStatusDone,
+		Result:    reportResultReady,
 		Summary:   "Plan is ready.",
 	}
 
@@ -277,7 +272,7 @@ func writeReportConfigSnapshot(t *testing.T, root string, store *runstore.Store,
 		t.Fatalf("Load config returned error: %v", err)
 	}
 
-	snapshot, err := configsnapshot.BuildInitial(project, "implementation", time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
+	snapshot, err := configsnapshot.BuildInitial(project, reportWorkflowName, time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
@@ -333,8 +328,8 @@ func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID st
 	t.Helper()
 
 	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
-		StepID:          "plan",
-		AgentID:         "planner",
+		StepID:          reportStepPlan,
+		AgentID:         reportAgentPlanner,
 		AttemptID:       attemptID,
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,

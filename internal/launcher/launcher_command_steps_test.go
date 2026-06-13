@@ -252,7 +252,7 @@ func TestLaunchNextRecordsSystemReportForCommandSpawnError(t *testing.T) {
 func TestLaunchNextMapsCommandTimeout(t *testing.T) {
 	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
 		Timeout: "20ms",
-		Argv:    []string{"sh", "-c", "sleep 1"},
+		Argv:    []string{"sh", "-c", launcherCommandSleepOne},
 	})
 
 	result, err := LaunchNext(context.Background(), Options{

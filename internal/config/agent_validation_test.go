@@ -11,12 +11,12 @@ func TestLoadRejectsInvalidProjectConfig(t *testing.T) {
 	}{
 		{
 			name:     "step references missing configured agent",
-			agents:   map[string]string{"coder": validAgentDescriptor("coder")},
+			agents:   map[string]string{testAgentCoder: validAgentDescriptor(testAgentCoder)},
 			contains: []string{`step "plan" references missing agent "planner"`},
 		},
 		{
 			name:     "invalid agent frontmatter",
-			agents:   map[string]string{"planner": "---\nid: planner\nrole: planner\n---\n\nPlan the work.\n"},
+			agents:   map[string]string{testAgentPlanner: "---\nid: planner\nrole: planner\n---\n\nPlan the work.\n"},
 			contains: []string{"frontmatter description is required"},
 		},
 	}

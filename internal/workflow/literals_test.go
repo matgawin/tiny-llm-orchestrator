@@ -1,0 +1,28 @@
+package workflow
+
+const (
+	stepPlan                = "plan"
+	stepCode                = "code"
+	stepLSP                 = "lsp"
+	stepTest                = "test"
+	stepReview              = "review"
+	stepRedundancyReview    = "redundancy-review"
+	stepCodeFixer           = "code_fixer"
+	stepLSPRedundancy       = "lsp-redundancy"
+	stepTestRedundancy      = "test-redundancy"
+	stepReadabilityReview   = "readability-review"
+	stepCodeCleaner         = "code_cleaner"
+	stepLSPReadability      = "lsp-readability"
+	stepTestReadability     = "test-readability"
+	resultReady             = "ready"
+	resultFailed            = "failed"
+	resultPassed            = "passed"
+	resultChangesRequested  = "changes_requested"
+	resultApproved          = "approved"
+	resultSkipped           = "skipped"
+	resultMissingReport     = "missing_report"
+	resultError             = "error"
+	pairFailedError         = "failed/error"
+	pairFailedMissingReport = "failed/missing_report"
+	pairFailedProcessError  = "failed/process_error"
+)
