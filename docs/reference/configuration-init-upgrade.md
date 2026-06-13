@@ -168,9 +168,14 @@ files:
 ```
 
 Manifest paths are slash-separated project-relative paths sorted
-lexicographically. Hashes are SHA-256 over exact file bytes. Orc does not
-normalize line endings, YAML formatting, comments, or trailing newlines before
-hashing.
+lexicographically. A valid v1 manifest must use `version: 1` and
+`setup_version: 1`, matching the current supported setup version. Future and
+older `setup_version` values are reported as `invalid-scaffold-manifest` and do
+not prove ownership. Hashes are SHA-256 over exact file bytes. Each `sha256`
+value must be exactly 64 hexadecimal characters. Uppercase hex is accepted and
+normalized to lowercase internally. Empty, wrong-length, or non-hex values make
+the manifest invalid. Orc does not normalize line endings, YAML formatting,
+comments, or trailing newlines before hashing.
 
 The manifest owns embedded scaffold descriptors under `.orc/agents/`,
 `.orc/workflows/`, and `.orc/runtimes/`. It excludes `.orc/config.yaml`,
@@ -231,8 +236,9 @@ Conflict behavior:
 - Action-scoped conflicts block only the affected action and actions that
   depend on it. These include dirty affected paths, changed-during-apply
   identity mismatches, unsafe target paths, symlink parents or targets,
-  non-regular existing files, semantic config conflicts that apply to a
-  specific config edit, and `.orc/runs/**` exclusions.
+  non-regular existing files, permission-denied writes, semantic config
+  conflicts that apply to a specific config edit, and `.orc/runs/**`
+  exclusions.
 - Customized or unknown existing scaffold-managed files under `.orc/agents/`,
   `.orc/workflows/`, and `.orc/runtimes/` become nonfatal skipped actions with
   stable code `customized-scaffold-file` unless an exact current scaffold match,
@@ -327,11 +333,16 @@ Local-edit behavior:
   but it must warn that affected-file dirtiness could not be checked.
 - Changed-during-apply content verification still applies per action. If one
   target changes after planning, reject that write and continue with unrelated
-  safe writes. Earlier successful independent writes are not rolled back. When a
+  safe writes. Earlier successful independent writes are not rolled back. The
+  manifest refresh group is `.orc/scaffold.lock.yaml` plus each scaffold file
+  refresh action with a reciprocal dependency on the manifest. If a
   manifest-managed scaffold refresh fails after `.orc/scaffold.lock.yaml` or
-  another file in the same manifest refresh group was written, apply restores
-  the already-written manifest refresh group entries before reporting the
-  failure.
+  another file in that group was written, apply restores already-written
+  modified files in the group when their bytes still match the attempted write.
+  The failed path is reported as a conflict. Remaining unattempted files in the
+  same group are reported as `dependency-skipped`, with the failed path in
+  `depends_on`, and are not written against the rolled-back manifest. Unrelated
+  independent actions keep the existing partial-apply behavior.
 - Do not create backup files by default.
 
 Apply ordering:
@@ -341,8 +352,9 @@ Apply ordering:
 - Write actions after dependency ordering. Stable path order is the tie-breaker
   for independent actions.
 - When manifest refresh actions depend on each other, write
-  `.orc/scaffold.lock.yaml` before the paired scaffold file so a later scaffold
-  write failure can restore the manifest refresh group.
+  `.orc/scaffold.lock.yaml` before reciprocal scaffold refresh files, then write
+  those scaffold files in stable path order. This keeps the group rollback and
+  remaining-group skip behavior deterministic.
 - If a later action fails a changed-during-apply or filesystem safety check
   after earlier independent writes succeeded, report partial failure with both
   the written paths and the unresolved conflict.

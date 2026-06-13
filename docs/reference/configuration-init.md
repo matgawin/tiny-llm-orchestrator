@@ -88,12 +88,15 @@ files:
 ```
 
 Manifest paths are slash-separated project-relative paths sorted
-lexicographically. `sha256` is the SHA-256 digest of the exact bytes Orc last
-wrote for that scaffold file. The manifest excludes `.orc/config.yaml`,
-`.orc/runs/**`, `.gitignore`, and `AGENTS.md`. Config stays under explicit
-semantic migration rules, `.orc/runs/**` is runtime state, and `.gitignore` plus
-`AGENTS.md` use append or section policies instead of whole-file scaffold
-ownership.
+lexicographically. V1 manifests are valid only with `version: 1` and
+`setup_version: 1`, matching the current supported setup version. Each
+`sha256` is the SHA-256 digest of the exact bytes Orc last wrote for that
+scaffold file and must be 64 hexadecimal characters. Uppercase hex is accepted
+and normalized to lowercase during parsing. The manifest excludes
+`.orc/config.yaml`, `.orc/runs/**`, `.gitignore`, and `AGENTS.md`. Config stays
+under explicit semantic migration rules, `.orc/runs/**` is runtime state, and
+`.gitignore` plus `AGENTS.md` use append or section policies instead of
+whole-file scaffold ownership.
 
 The scaffolded Codex runtime descriptor is:
 

@@ -270,6 +270,70 @@ func TestApplyRestoresManifestWhenManifestManagedFileWriteFails(t *testing.T) {
 	}
 }
 
+func TestApplyBlocksRemainingManifestRefreshGroupAfterFileWriteFails(t *testing.T) {
+	root := currentScaffold(t)
+	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")
+	workflowPath := filepath.Join(root, ".orc", "workflows", "implementation.yaml")
+	oldPlanner := []byte("old managed planner\n")
+	oldWorkflow := []byte("old managed workflow\n")
+
+	writeFile(t, plannerPath, string(oldPlanner))
+	writeFile(t, workflowPath, string(oldWorkflow))
+	replaceInFile(t, filepath.Join(root, ".orc", "config.yaml"), "setup_version: 1\n", "setup_version: 0\n")
+	writeManifest(t, root, []initconfig.ScaffoldManifestFile{
+		{Path: testPlannerPath, SHA256: initconfig.SHA256Hex(oldPlanner)},
+		{Path: testWorkflowPath, SHA256: initconfig.SHA256Hex(oldWorkflow)},
+	})
+
+	manifestFile := filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath()))
+	oldManifest := readFile(t, manifestFile)
+	result := mustPlan(t, root)
+
+	agentsDir := filepath.Join(root, ".orc", "agents")
+	if err := os.Chmod(agentsDir, 0o500); err != nil {
+		t.Fatalf("chmod .orc/agents: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if err := os.Chmod(agentsDir, 0o750); err != nil {
+			t.Fatalf("restore .orc/agents permissions: %v", err)
+		}
+	})
+
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
+	if err == nil {
+		t.Fatal("Apply returned nil error, want scaffold file write failure")
+	}
+
+	if got := readFile(t, plannerPath); got != string(oldPlanner) {
+		t.Fatalf("planner content = %q, want preserved old managed content", got)
+	}
+
+	if got := readFile(t, manifestFile); got != oldManifest {
+		t.Fatalf("manifest content changed to:\n%s\nwant restored:\n%s", got, oldManifest)
+	}
+
+	if got := readFile(t, workflowPath); got != string(oldWorkflow) {
+		t.Fatalf("workflow content = %q, want preserved old managed content after group failure", got)
+	}
+
+	if !strings.Contains(readFile(t, filepath.Join(root, ".orc", "config.yaml")), "setup_version: 1\n") {
+		t.Fatalf("config was not modified despite independent manifest group failure")
+	}
+
+	if !slices.ContainsFunc(applied.Conflicts, func(conflict Conflict) bool {
+		return conflict.Path == testPlannerPath && conflict.Code == "write-permission-denied"
+	}) {
+		t.Fatalf("conflicts = %#v, want planner write-permission-denied", applied.Conflicts)
+	}
+
+	if !slices.ContainsFunc(applied.SkippedActions, func(skipped SkippedAction) bool {
+		return skipped.Path == testWorkflowPath && skipped.Code == dependencySkippedCode
+	}) {
+		t.Fatalf("skipped actions = %#v, want workflow dependency skip after group failure", applied.SkippedActions)
+	}
+}
+
 func TestApplyPreservesCustomizedFileWhenManifestHashDiffers(t *testing.T) {
 	root := currentScaffold(t)
 	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")

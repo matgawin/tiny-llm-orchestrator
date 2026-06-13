@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,6 +84,65 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 
 	if output := stdout.String(); !strings.Contains(output, "skipped AGENTS.md creation") {
 		t.Fatalf("output = %q, want AGENTS.md skip", output)
+	}
+}
+
+func TestParseScaffoldManifestRejectsUnsupportedSetupVersion(t *testing.T) {
+	validHash := strings.Repeat("a", 64)
+
+	for _, tc := range []struct {
+		name         string
+		setupVersion int
+	}{
+		{name: "future", setupVersion: config.CurrentSetupVersion + 1},
+		{name: "older", setupVersion: config.CurrentSetupVersion - 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("version: 1\nsetup_version: " + strconv.Itoa(tc.setupVersion) + "\nfiles:\n  - path: .orc/agents/planner.md\n    sha256: " + validHash + "\n")
+
+			if _, _, err := ParseScaffoldManifest(content); err == nil {
+				t.Fatal("ParseScaffoldManifest returned nil error, want unsupported setup_version rejection")
+			}
+		})
+	}
+}
+
+func TestParseScaffoldManifestRejectsWeakSHA256(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hash string
+	}{
+		{name: "empty", hash: ""},
+		{name: "short", hash: strings.Repeat("a", 63)},
+		{name: "long", hash: strings.Repeat("a", 65)},
+		{name: "non_hex", hash: strings.Repeat("a", 63) + "g"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("version: 1\nsetup_version: 1\nfiles:\n  - path: .orc/agents/planner.md\n    sha256: " + tc.hash + "\n")
+
+			if _, _, err := ParseScaffoldManifest(content); err == nil {
+				t.Fatal("ParseScaffoldManifest returned nil error, want invalid sha256 rejection")
+			}
+		})
+	}
+}
+
+func TestParseScaffoldManifestNormalizesUppercaseSHA256(t *testing.T) {
+	hash := strings.Repeat("A", 64)
+	wantHash := strings.ToLower(hash)
+	content := []byte("version: 1\nsetup_version: 1\nfiles:\n  - path: .orc/agents/planner.md\n    sha256: " + hash + "\n")
+
+	manifest, hashes, err := ParseScaffoldManifest(content)
+	if err != nil {
+		t.Fatalf("ParseScaffoldManifest returned error: %v", err)
+	}
+
+	if got := hashes[".orc/agents/planner.md"]; got != wantHash {
+		t.Fatalf("normalized hash = %q, want %q", got, wantHash)
+	}
+
+	if got := manifest.Files[0].SHA256; got != wantHash {
+		t.Fatalf("manifest file hash = %q, want %q", got, wantHash)
 	}
 }
 

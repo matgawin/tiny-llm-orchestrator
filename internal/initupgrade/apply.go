@@ -19,10 +19,11 @@ const (
 	filePermPrivate = 0o600
 	dirPermPrivate  = 0o750
 
-	yamlChildIndent       = 2
-	yamlGrandchildIndent  = 4
-	dependencySkippedCode = "dependency-skipped"
-	setupVersionField     = "setup_version"
+	yamlChildIndent           = 2
+	yamlGrandchildIndent      = 4
+	dependencySkippedCode     = "dependency-skipped"
+	dependencySkippedGuidance = "resolve the dependency conflict and rerun orc init upgrade"
+	setupVersionField         = "setup_version"
 )
 
 // ApplyOptions controls upgrade plan application.
@@ -168,7 +169,11 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 		FollowUps:            append([]FollowUp(nil), plan.FollowUps...),
 	}
 
-	for _, write := range writes {
+	for i, write := range writes {
+		if _, ok := blocked[write.relPath]; ok {
+			continue
+		}
+
 		if blockedByDependency(write.relPath, actions, blocked) {
 			skippedAction := dependencySkippedAction(write.relPath, actions)
 			result.SkippedActions = append(result.SkippedActions, skippedAction)
@@ -192,6 +197,10 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 
 			conflicts = append(conflicts, conflict)
 			addBlockedConflict(blocked, conflict)
+
+			groupSkipped := skippedRemainingManifestRefreshGroupAfterFailure(write, actions, writes[i+1:], blocked)
+			result.SkippedActions = append(result.SkippedActions, groupSkipped...)
+			addBlockedSkippedActions(blocked, groupSkipped)
 
 			continue
 		}
@@ -453,6 +462,21 @@ func orderPreparedWritesForApply(writes []preparedWrite, actions []Action) []pre
 	ordered := append([]preparedWrite(nil), writes...)
 
 	slices.SortStableFunc(ordered, func(a, b preparedWrite) int {
+		aManifestGroup := isManifestRefreshGroupPath(a.relPath, actions)
+
+		bManifestGroup := isManifestRefreshGroupPath(b.relPath, actions)
+		if aManifestGroup && bManifestGroup {
+			if a.relPath == initconfig.ScaffoldManifestPath() {
+				return -1
+			}
+
+			if b.relPath == initconfig.ScaffoldManifestPath() {
+				return 1
+			}
+
+			return strings.Compare(a.relPath, b.relPath)
+		}
+
 		aDependsOnB := actionDependsOn(actions, a.relPath, b.relPath)
 		bDependsOnA := actionDependsOn(actions, b.relPath, a.relPath)
 
@@ -517,7 +541,7 @@ func dependencySkippedAction(path string, actions []Action) SkippedAction {
 		Path:       path,
 		Code:       dependencySkippedCode,
 		Message:    "planned action depends on a prerequisite action, which was not safe to apply",
-		Guidance:   "resolve the dependency conflict and rerun orc init upgrade",
+		Guidance:   dependencySkippedGuidance,
 		ActionKind: ActionModify,
 	}
 }
@@ -532,7 +556,7 @@ func dependencySkippedActionFor(action Action, dep string) SkippedAction {
 		Path:       rel,
 		Code:       dependencySkippedCode,
 		Message:    fmt.Sprintf("planned action depends on %s, which was not safe to apply", dep),
-		Guidance:   "resolve the dependency conflict and rerun orc init upgrade",
+		Guidance:   dependencySkippedGuidance,
 		ActionKind: action.Kind,
 		DependsOn:  []string{dep},
 	}
@@ -563,6 +587,73 @@ func rollbackManifestRefreshGroupAfterFailure(failed preparedWrite, actions []Ac
 	}
 
 	return rolledBack, nil
+}
+
+func skippedRemainingManifestRefreshGroupAfterFailure(failed preparedWrite, actions []Action, writes []preparedWrite, blocked map[string]struct{}) []SkippedAction {
+	if !isManifestRefreshGroupWrite(failed, actions) {
+		return nil
+	}
+
+	var skipped []SkippedAction
+
+	for _, write := range writes {
+		if write.relPath == failed.relPath {
+			continue
+		}
+
+		if _, ok := blocked[write.relPath]; ok {
+			continue
+		}
+
+		if !isManifestRefreshGroupWrite(write, actions) {
+			continue
+		}
+
+		if action, ok := actionForPath(actions, write.relPath); ok {
+			skipped = append(skipped, dependencySkippedActionFor(action, failed.relPath))
+			continue
+		}
+
+		skipped = append(skipped, SkippedAction{
+			Path:       write.relPath,
+			Code:       dependencySkippedCode,
+			Message:    fmt.Sprintf("planned action depends on %s, which was not safe to apply", failed.relPath),
+			Guidance:   dependencySkippedGuidance,
+			ActionKind: write.kind,
+			DependsOn:  []string{failed.relPath},
+		})
+	}
+
+	return orderedSkippedActions(skipped)
+}
+
+func isManifestRefreshGroupWrite(write preparedWrite, actions []Action) bool {
+	return isManifestRefreshGroupPath(write.relPath, actions)
+}
+
+func isManifestRefreshGroupPath(path string, actions []Action) bool {
+	manifestPath := initconfig.ScaffoldManifestPath()
+	if path == manifestPath {
+		for _, action := range actions {
+			if action.Path != manifestPath && actionDependsOn(actions, action.Path, manifestPath) && actionDependsOn(actions, manifestPath, action.Path) {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	return actionDependsOn(actions, path, manifestPath) && actionDependsOn(actions, manifestPath, path)
+}
+
+func actionForPath(actions []Action, path string) (Action, bool) {
+	for _, action := range actions {
+		if action.Path == path {
+			return action, true
+		}
+	}
+
+	return Action{}, false
 }
 
 func rollbackModifyWrite(write preparedWrite) error {
@@ -662,6 +753,9 @@ func actionConflict(path string, err error) (Conflict, bool) {
 	case strings.Contains(message, "non-directory parent"):
 		code = "non-directory-parent"
 		guidance = "replace the parent path with a directory before applying the upgrade"
+	case errors.Is(err, os.ErrPermission):
+		code = "write-permission-denied"
+		guidance = "fix path permissions before applying the upgrade"
 	case strings.Contains(message, "excluded from setup upgrade apply"):
 		code = "runs-path-excluded"
 		guidance = "do not plan setup upgrades under .orc/runs"

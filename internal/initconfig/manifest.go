@@ -124,13 +124,14 @@ func ParseScaffoldManifest(content []byte) (ScaffoldManifest, map[string]string,
 		return ScaffoldManifest{}, nil, fmt.Errorf("parse scaffold manifest: %w", err)
 	}
 
-	if manifest.Version != 1 || manifest.SetupVersion <= 0 {
+	if manifest.Version != 1 || manifest.SetupVersion != config.CurrentSetupVersion {
 		return ScaffoldManifest{}, nil, errUnsupportedScaffoldManifest
 	}
 
 	hashByPath := make(map[string]string, len(manifest.Files))
-	for _, file := range manifest.Files {
-		if !IsManagedScaffoldManifestPath(file.Path) || file.SHA256 == "" {
+	for i, file := range manifest.Files {
+		normalizedSHA256 := strings.ToLower(file.SHA256)
+		if !IsManagedScaffoldManifestPath(file.Path) || !isSHA256Hex(normalizedSHA256) {
 			return ScaffoldManifest{}, nil, errInvalidScaffoldManifestFile
 		}
 
@@ -138,8 +139,19 @@ func ParseScaffoldManifest(content []byte) (ScaffoldManifest, map[string]string,
 			return ScaffoldManifest{}, nil, errDuplicateScaffoldManifest
 		}
 
-		hashByPath[file.Path] = strings.ToLower(file.SHA256)
+		manifest.Files[i].SHA256 = normalizedSHA256
+		hashByPath[file.Path] = normalizedSHA256
 	}
 
 	return manifest, hashByPath, nil
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+
+	_, err := hex.DecodeString(value)
+
+	return err == nil
 }
