@@ -48,6 +48,7 @@ path-specific conflict must not block unrelated safe actions.
 JSON. `orc init upgrade --apply --json` emits structured apply results as well.
 JSON output must include at least:
 
+- `status`
 - `current_setup_version`
 - `target_setup_version`
 - `config_schema_version`
@@ -63,6 +64,19 @@ Apply JSON must also include written paths and unresolved skipped or refused
 writes. JSON and human output must describe the same decisions. Human output
 must not claim a fully clean upgrade when any action was skipped or conflicted;
 it must report partial apply and list the remaining work.
+
+`status` is a top-level summary string for human and JSON output:
+
+- `current`: no setup writes are needed and no manual refresh work remains.
+- `planned`: plan-only output contains safe writes and no skipped actions or
+  conflicts.
+- `applied`: apply wrote safe changes and no skipped actions or conflicts
+  remain.
+- `partial`: safe writes are available or were applied, but skipped actions or
+  unresolved conflicts remain.
+- `blocked`: conflicts prevent apply from writing any safe subset.
+- `failed`: a global fatal error prevents planning or apply from deciding a
+  safe action set.
 
 ## Version Marker
 
@@ -233,10 +247,18 @@ Skipped action behavior:
 
 - Skipped actions are planned or applied work that Orc intentionally does not
   write while the command can continue.
-- Each skipped scaffold item must include the path, stable code, message, and
-  guidance. The guidance must say local customization was preserved and that the
-  operator may manually compare the file with the current embedded scaffold or
-  docs before refreshing it.
+- Each skipped action must include `path`, stable `code`, `message`, and
+  `guidance`. It must include `action_kind` when it corresponds to a planned
+  write, and `depends_on` when a dependency made the action unsafe to write.
+- `customized-scaffold-file` means an embedded scaffold-managed file exists but
+  differs from the current embedded scaffold, exact known replacement
+  baselines, and any valid ownership manifest hash. The guidance must say local
+  customization was preserved and that the operator may manually compare the
+  file with the current embedded scaffold or docs before refreshing it.
+- `dependency-skipped` means a planned write depends on another path that was
+  skipped or conflicted. The skipped action records the dependent path in
+  `path`, the skipped write kind in `action_kind`, and the blocking path in
+  `depends_on`.
 - Skipped customized scaffold files are not global apply blockers. Safe
   unrelated actions such as `.orc/config.yaml` surgical edits, `.gitignore`
   updates, and independent missing-file creates may still apply.
@@ -254,8 +276,8 @@ Missing-file behavior:
 - A scaffold file create may proceed only when the config already points to the
   scaffold path, or when the config action that establishes the reference is
   also safe and will be applied. If the config reference edit is skipped or
-  conflicted, the dependent scaffold create is skipped instead of created
-  blindly.
+  conflicted, the dependent scaffold create is reported as
+  `dependency-skipped` instead of created blindly.
 - New file content comes from the current embedded scaffold.
 
 Existing scaffold-file behavior:

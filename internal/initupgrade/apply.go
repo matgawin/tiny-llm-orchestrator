@@ -45,6 +45,56 @@ type ApplyResult struct {
 	FollowUps            []FollowUp      `json:"follow_ups"`
 }
 
+// PlanSkippedActions returns explicit skipped actions for a no-write upgrade plan.
+func PlanSkippedActions(plan *Result) []SkippedAction {
+	if plan == nil {
+		return nil
+	}
+
+	skipped := append([]SkippedAction(nil), plan.SkippedActions...)
+	blocked := blockedPaths(plan.Conflicts, skipped)
+
+	for {
+		added := false
+
+		for _, action := range plan.Actions {
+			rel, err := cleanPlanPath(action.Path)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := blocked[rel]; ok {
+				continue
+			}
+
+			for _, dep := range action.DependsOn {
+				cleanDep, err := cleanPlanPath(dep)
+				if err != nil {
+					continue
+				}
+
+				if _, ok := blocked[cleanDep]; !ok {
+					continue
+				}
+
+				skippedAction := dependencySkippedActionFor(action, cleanDep)
+				skipped = append(skipped, skippedAction)
+				addBlockedSkippedAction(blocked, skippedAction)
+
+				added = true
+
+				break
+			}
+		}
+
+		if !added {
+			break
+		}
+	}
+
+	return orderedSkippedActions(skipped)
+}
+
 // Apply writes the safe actions from a previously generated upgrade plan.
 func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, error) {
 	if plan == nil {
@@ -62,15 +112,16 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 
 	warnings := append([]Warning(nil), plan.Warnings...)
 	conflicts := append([]Conflict(nil), plan.Conflicts...)
-	blocked := blockedConflictPaths(conflicts)
+	skipped := append([]SkippedAction(nil), plan.SkippedActions...)
+	blocked := blockedPaths(conflicts, skipped)
 
-	actions, depConflicts, err := actionableSubset(plan.Actions, blocked)
+	actions, depSkipped, err := actionableSubset(plan.Actions, blocked)
 	if err != nil {
 		return nil, err
 	}
 
-	conflicts = append(conflicts, depConflicts...)
-	addBlockedConflicts(blocked, depConflicts)
+	skipped = append(skipped, depSkipped...)
+	addBlockedSkippedActions(blocked, depSkipped)
 
 	warning, hasWarning, dirtyConflicts, err := checkAffectedPathDirtiness(ctx, root, affectedPathsForActions(actions), opts)
 	if err != nil {
@@ -84,13 +135,13 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 	conflicts = append(conflicts, dirtyConflicts...)
 	addBlockedConflicts(blocked, dirtyConflicts)
 
-	actions, depConflicts, err = actionableSubset(actions, blocked)
+	actions, depSkipped, err = actionableSubset(actions, blocked)
 	if err != nil {
 		return nil, err
 	}
 
-	conflicts = append(conflicts, depConflicts...)
-	addBlockedConflicts(blocked, depConflicts)
+	skipped = append(skipped, depSkipped...)
+	addBlockedSkippedActions(blocked, depSkipped)
 
 	writes, prepareConflicts, err := prepareWritesPartial(root, actions)
 	if err != nil {
@@ -100,9 +151,9 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 	conflicts = append(conflicts, prepareConflicts...)
 	addBlockedConflicts(blocked, prepareConflicts)
 
-	writes, depConflicts = filterPreparedWritesByDependencies(writes, actions, blocked)
-	conflicts = append(conflicts, depConflicts...)
-	addBlockedConflicts(blocked, depConflicts)
+	writes, depSkipped = filterPreparedWritesByDependencies(writes, actions, blocked)
+	skipped = append(skipped, depSkipped...)
+	addBlockedSkippedActions(blocked, depSkipped)
 
 	writes = orderPreparedWritesForApply(writes, actions)
 
@@ -112,16 +163,16 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 		PreviousSetupVersion: plan.CurrentSetupVersion,
 		TargetSetupVersion:   plan.TargetSetupVersion,
 		Warnings:             warnings,
-		SkippedActions:       append([]SkippedAction(nil), plan.SkippedActions...),
+		SkippedActions:       skipped,
 		StaleFiles:           append([]StaleFile(nil), plan.StaleFiles...),
 		FollowUps:            append([]FollowUp(nil), plan.FollowUps...),
 	}
 
 	for _, write := range writes {
 		if blockedByDependency(write.relPath, actions, blocked) {
-			conflict := dependencyConflict(write.relPath, actions)
-			conflicts = append(conflicts, conflict)
-			addBlockedConflict(blocked, conflict)
+			skippedAction := dependencySkippedAction(write.relPath, actions)
+			result.SkippedActions = append(result.SkippedActions, skippedAction)
+			addBlockedSkippedAction(blocked, skippedAction)
 
 			continue
 		}
@@ -154,6 +205,8 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 	}
 
 	result.Conflicts = orderedConflicts(conflicts)
+
+	result.SkippedActions = orderedSkippedActions(result.SkippedActions)
 	if len(result.Conflicts) > 0 {
 		return result, conflictsError(result.Conflicts)
 	}
@@ -246,10 +299,10 @@ func affectedPathsForActions(actions []Action) []AffectedPath {
 	return affected
 }
 
-func actionableSubset(actions []Action, blocked map[string]struct{}) ([]Action, []Conflict, error) {
+func actionableSubset(actions []Action, blocked map[string]struct{}) ([]Action, []SkippedAction, error) {
 	var (
-		out       []Action
-		conflicts []Conflict
+		out     []Action
+		skipped []SkippedAction
 	)
 
 	for _, action := range actions {
@@ -277,12 +330,7 @@ func actionableSubset(actions []Action, blocked map[string]struct{}) ([]Action, 
 		}
 
 		if blockedDep != "" {
-			conflicts = append(conflicts, Conflict{
-				Path:     rel,
-				Code:     dependencySkippedCode,
-				Message:  fmt.Sprintf("planned action depends on %s, which was not safe to apply", blockedDep),
-				Guidance: "resolve the dependency conflict and rerun orc init upgrade",
-			})
+			skipped = append(skipped, dependencySkippedActionFor(action, blockedDep))
 
 			continue
 		}
@@ -294,7 +342,7 @@ func actionableSubset(actions []Action, blocked map[string]struct{}) ([]Action, 
 
 	slices.SortFunc(out, func(a, b Action) int { return strings.Compare(a.Path, b.Path) })
 
-	return out, orderedConflicts(conflicts), nil
+	return out, orderedSkippedActions(skipped), nil
 }
 
 func prepareWritesPartial(root string, actions []Action) ([]preparedWrite, []Conflict, error) {
@@ -362,15 +410,15 @@ func prepareWritesPartial(root string, actions []Action) ([]preparedWrite, []Con
 	return writes, orderedConflicts(conflicts), nil
 }
 
-func filterPreparedWritesByDependencies(writes []preparedWrite, actions []Action, blocked map[string]struct{}) ([]preparedWrite, []Conflict) {
+func filterPreparedWritesByDependencies(writes []preparedWrite, actions []Action, blocked map[string]struct{}) ([]preparedWrite, []SkippedAction) {
 	actionByPath := make(map[string]Action, len(actions))
 	for _, action := range actions {
 		actionByPath[action.Path] = action
 	}
 
 	var (
-		out       []preparedWrite
-		conflicts []Conflict
+		out     []preparedWrite
+		skipped []SkippedAction
 	)
 
 	for _, write := range writes {
@@ -391,14 +439,14 @@ func filterPreparedWritesByDependencies(writes []preparedWrite, actions []Action
 		}
 
 		if blockedDep != "" {
-			conflicts = append(conflicts, dependencyConflictFor(write.relPath, blockedDep))
+			skipped = append(skipped, dependencySkippedActionFor(action, blockedDep))
 			continue
 		}
 
 		out = append(out, write)
 	}
 
-	return out, orderedConflicts(conflicts)
+	return out, orderedSkippedActions(skipped)
 }
 
 func orderPreparedWritesForApply(writes []preparedWrite, actions []Action) []preparedWrite {
@@ -451,7 +499,7 @@ func blockedByDependency(path string, actions []Action, blocked map[string]struc
 	return false
 }
 
-func dependencyConflict(path string, actions []Action) Conflict {
+func dependencySkippedAction(path string, actions []Action) SkippedAction {
 	for _, action := range actions {
 		if action.Path != path {
 			continue
@@ -460,20 +508,33 @@ func dependencyConflict(path string, actions []Action) Conflict {
 		for _, dep := range action.DependsOn {
 			cleanDep, err := cleanPlanPath(dep)
 			if err == nil {
-				return dependencyConflictFor(path, cleanDep)
+				return dependencySkippedActionFor(action, cleanDep)
 			}
 		}
 	}
 
-	return dependencyConflictFor(path, "a prerequisite action")
+	return SkippedAction{
+		Path:       path,
+		Code:       dependencySkippedCode,
+		Message:    "planned action depends on a prerequisite action, which was not safe to apply",
+		Guidance:   "resolve the dependency conflict and rerun orc init upgrade",
+		ActionKind: ActionModify,
+	}
 }
 
-func dependencyConflictFor(path, dep string) Conflict {
-	return Conflict{
-		Path:     path,
-		Code:     dependencySkippedCode,
-		Message:  fmt.Sprintf("planned action depends on %s, which was not safe to apply", dep),
-		Guidance: "resolve the dependency conflict and rerun orc init upgrade",
+func dependencySkippedActionFor(action Action, dep string) SkippedAction {
+	rel, err := cleanPlanPath(action.Path)
+	if err != nil {
+		rel = action.Path
+	}
+
+	return SkippedAction{
+		Path:       rel,
+		Code:       dependencySkippedCode,
+		Message:    fmt.Sprintf("planned action depends on %s, which was not safe to apply", dep),
+		Guidance:   "resolve the dependency conflict and rerun orc init upgrade",
+		ActionKind: action.Kind,
+		DependsOn:  []string{dep},
 	}
 }
 
@@ -537,9 +598,10 @@ func actionDependsOn(actions []Action, path, dep string) bool {
 	return false
 }
 
-func blockedConflictPaths(conflicts []Conflict) map[string]struct{} {
-	blocked := make(map[string]struct{}, len(conflicts))
+func blockedPaths(conflicts []Conflict, skipped []SkippedAction) map[string]struct{} {
+	blocked := make(map[string]struct{}, len(conflicts)+len(skipped))
 	addBlockedConflicts(blocked, conflicts)
+	addBlockedSkippedActions(blocked, skipped)
 
 	return blocked
 }
@@ -556,6 +618,22 @@ func addBlockedConflict(blocked map[string]struct{}, conflict Conflict) {
 	}
 
 	if rel, err := cleanPlanPath(conflict.Path); err == nil {
+		blocked[rel] = struct{}{}
+	}
+}
+
+func addBlockedSkippedActions(blocked map[string]struct{}, skipped []SkippedAction) {
+	for _, item := range skipped {
+		addBlockedSkippedAction(blocked, item)
+	}
+}
+
+func addBlockedSkippedAction(blocked map[string]struct{}, skipped SkippedAction) {
+	if skipped.Path == "" {
+		return
+	}
+
+	if rel, err := cleanPlanPath(skipped.Path); err == nil {
 		blocked[rel] = struct{}{}
 	}
 }
@@ -1282,6 +1360,13 @@ func conflictsError(conflicts []Conflict) error {
 func orderedConflicts(conflicts []Conflict) []Conflict {
 	ordered := append([]Conflict(nil), conflicts...)
 	slices.SortFunc(ordered, func(a, b Conflict) int { return strings.Compare(a.Path+a.Code, b.Path+b.Code) })
+
+	return ordered
+}
+
+func orderedSkippedActions(skipped []SkippedAction) []SkippedAction {
+	ordered := append([]SkippedAction(nil), skipped...)
+	slices.SortFunc(ordered, func(a, b SkippedAction) int { return strings.Compare(a.Path+a.Code, b.Path+b.Code) })
 
 	return ordered
 }

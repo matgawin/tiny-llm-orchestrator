@@ -120,6 +120,7 @@ func TestExecuteInitUpgradeApplyPartiallyAppliesWithManualRefreshSkippedAction(t
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc init upgrade partially applied",
+		"status: partial",
 		"modified files:",
 		cliConfigPath,
 		"skipped actions:",
@@ -151,6 +152,7 @@ func TestExecuteInitUpgradeApplyReportsDirtyAffectedPathConflict(t *testing.T) {
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc init upgrade partially applied",
+		"status: partial",
 		"created files:",
 		"AGENTS.md",
 		"conflicts:",
@@ -189,6 +191,10 @@ func TestExecuteInitUpgradeJSONPlanIncludesStructuredFields(t *testing.T) {
 	}
 
 	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if payload.Status != initUpgradeStatusPartial {
+		t.Fatalf("status = %q, want partial", payload.Status)
+	}
+
 	if payload.CurrentSetupVersion != 0 || payload.TargetSetupVersion != 1 || payload.ConfigSchemaVersion != 1 {
 		t.Fatalf("versions = current %d target %d schema %d, want 0 1 1", payload.CurrentSetupVersion, payload.TargetSetupVersion, payload.ConfigSchemaVersion)
 	}
@@ -229,6 +235,10 @@ func TestExecuteInitUpgradeJSONApplyReportsDirtyAffectedPathConflict(t *testing.
 	}
 
 	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if payload.Status != initUpgradeStatusPartial {
+		t.Fatalf("status = %q, want partial", payload.Status)
+	}
+
 	if !payload.Applied || !payload.Refused {
 		t.Fatalf("applied/refused = %t/%t, want true/true", payload.Applied, payload.Refused)
 	}
@@ -264,6 +274,10 @@ func TestExecuteInitUpgradeJSONApplyReportsCustomizedScaffoldSkip(t *testing.T) 
 	}
 
 	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if payload.Status != initUpgradeStatusPartial {
+		t.Fatalf("status = %q, want partial", payload.Status)
+	}
+
 	if !payload.Applied || payload.Refused {
 		t.Fatalf("applied/refused = %t/%t, want true/false", payload.Applied, payload.Refused)
 	}
@@ -292,6 +306,10 @@ func TestExecuteInitUpgradeJSONApplyIncludesWrittenPaths(t *testing.T) {
 	}
 
 	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if payload.Status != initUpgradeStatusApplied {
+		t.Fatalf("status = %q, want applied", payload.Status)
+	}
+
 	if !payload.Applied || payload.Refused {
 		t.Fatalf("applied/refused = %t/%t, want true/false", payload.Applied, payload.Refused)
 	}
@@ -305,6 +323,72 @@ func TestExecuteInitUpgradeJSONApplyIncludesWrittenPaths(t *testing.T) {
 	}
 
 	assertInitUpgradeJSONOmitsFields(t, stdout.Bytes(), "apply_warnings", "apply_result", "scope", "setup_version_guidance")
+}
+
+func TestExecuteInitUpgradeJSONApplyReportsDependencySkippedAction(t *testing.T) {
+	root := withTempCwd(t)
+	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	removeCLISetupVersion(t, root)
+
+	configPath := filepath.Join(root, ".orc", "config.yaml")
+	replaceCLIFile(t, configPath, "runtimes:\n  codex: runtimes/codex.yaml\n", "runtimes:\n  codex: runtimes/custom.yaml\n")
+
+	if err := os.Remove(filepath.Join(root, ".orc", "runtimes", "codex.yaml")); err != nil {
+		t.Fatalf("remove runtime: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply, cliFlagJSON}, &stdout, &stderr); err == nil {
+		t.Fatal("Execute returned nil error, want unresolved config conflict")
+	}
+
+	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if payload.Status != initUpgradeStatusPartial {
+		t.Fatalf("status = %q, want partial", payload.Status)
+	}
+
+	if !hasInitUpgradeSkippedActionCode(payload.SkippedActions, "dependency-skipped") {
+		t.Fatalf("skipped actions = %#v, want dependency-skipped", payload.SkippedActions)
+	}
+
+	if hasInitUpgradeConflict(payload.Conflicts, "dependency-skipped") {
+		t.Fatalf("conflicts = %#v, want dependency-skipped omitted from conflicts", payload.Conflicts)
+	}
+
+	if !strings.Contains(stderr.String(), "unresolved conflicts remain") {
+		t.Fatalf("stderr = %q, want unresolved conflicts", stderr.String())
+	}
+}
+
+func TestExecuteInitUpgradeJSONPlanReportsDependencySkippedAction(t *testing.T) {
+	root := withTempCwd(t)
+	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	removeCLISetupVersion(t, root)
+
+	configPath := filepath.Join(root, ".orc", "config.yaml")
+	replaceCLIFile(t, configPath, "runtimes:\n  codex: runtimes/codex.yaml\n", "runtimes:\n  codex: runtimes/custom.yaml\n")
+
+	if err := os.Remove(filepath.Join(root, ".orc", "runtimes", "codex.yaml")); err != nil {
+		t.Fatalf("remove runtime: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{commandInit, commandUpgrade, cliFlagJSON}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+
+	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if payload.Status != initUpgradeStatusPartial {
+		t.Fatalf("status = %q, want partial", payload.Status)
+	}
+
+	if !hasInitUpgradeSkippedActionCode(payload.SkippedActions, "dependency-skipped") {
+		t.Fatalf("skipped actions = %#v, want dependency-skipped", payload.SkippedActions)
+	}
+
+	if len(payload.SkippedActions[0].DependsOn) == 0 {
+		t.Fatalf("skipped actions = %#v, want depends_on", payload.SkippedActions)
+	}
 }
 
 func TestExecuteInitUpgradeHelpDoesNotExposeDryRunFlag(t *testing.T) {
@@ -480,9 +564,10 @@ func confirmThreeInitPromptsThroughCLI() *strings.Reader {
 }
 
 type initUpgradeTestJSON struct {
-	ConfigSchemaVersion int `json:"config_schema_version"`
-	CurrentSetupVersion int `json:"current_setup_version"`
-	TargetSetupVersion  int `json:"target_setup_version"`
+	Status              string `json:"status"`
+	ConfigSchemaVersion int    `json:"config_schema_version"`
+	CurrentSetupVersion int    `json:"current_setup_version"`
+	TargetSetupVersion  int    `json:"target_setup_version"`
 	Actions             []struct {
 		Kind string `json:"kind"`
 		Path string `json:"path"`
@@ -494,11 +579,12 @@ type initUpgradeTestJSON struct {
 		Code string `json:"code"`
 	} `json:"conflicts"`
 	SkippedActions []struct {
-		Path       string `json:"path"`
-		Code       string `json:"code"`
-		Message    string `json:"message"`
-		Guidance   string `json:"guidance"`
-		ActionKind string `json:"action_kind"`
+		Path       string   `json:"path"`
+		Code       string   `json:"code"`
+		Message    string   `json:"message"`
+		Guidance   string   `json:"guidance"`
+		ActionKind string   `json:"action_kind"`
+		DependsOn  []string `json:"depends_on"`
 	} `json:"skipped_actions"`
 	Applied       bool     `json:"applied"`
 	Refused       bool     `json:"refused"`
@@ -594,15 +680,34 @@ func hasInitUpgradeConflict(conflicts []struct {
 }
 
 func hasInitUpgradeSkippedAction(skipped []struct {
-	Path       string `json:"path"`
-	Code       string `json:"code"`
-	Message    string `json:"message"`
-	Guidance   string `json:"guidance"`
-	ActionKind string `json:"action_kind"`
+	Path       string   `json:"path"`
+	Code       string   `json:"code"`
+	Message    string   `json:"message"`
+	Guidance   string   `json:"guidance"`
+	ActionKind string   `json:"action_kind"`
+	DependsOn  []string `json:"depends_on"`
 }, code string,
 ) bool {
 	for _, item := range skipped {
 		if item.Code == code && item.Path != "" && item.Message != "" && strings.Contains(item.Guidance, "local customization was preserved") && item.ActionKind != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasInitUpgradeSkippedActionCode(skipped []struct {
+	Path       string   `json:"path"`
+	Code       string   `json:"code"`
+	Message    string   `json:"message"`
+	Guidance   string   `json:"guidance"`
+	ActionKind string   `json:"action_kind"`
+	DependsOn  []string `json:"depends_on"`
+}, code string,
+) bool {
+	for _, item := range skipped {
+		if item.Code == code && item.Path != "" && item.Message != "" && item.Guidance != "" && item.ActionKind != "" {
 			return true
 		}
 	}
@@ -621,6 +726,17 @@ func removeCLISetupVersion(t *testing.T, root string) {
 	content := string(readCLIFile(t, configPath))
 	content = strings.Replace(content, "setup_version: 1\n", "", 1)
 	writeCLIFile(t, configPath, content)
+}
+
+func replaceCLIFile(t *testing.T, path, old, replacement string) {
+	t.Helper()
+
+	content := string(readCLIFile(t, path))
+	if !strings.Contains(content, old) {
+		t.Fatalf("%s missing content %q", path, old)
+	}
+
+	writeCLIFile(t, path, strings.Replace(content, old, replacement, 1))
 }
 
 func appendCLIFile(t *testing.T, path, content string) {

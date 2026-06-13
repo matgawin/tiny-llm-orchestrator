@@ -20,8 +20,18 @@ type initUpgradeOptions struct {
 	JSON  bool
 }
 
+const (
+	initUpgradeStatusCurrent = "current"
+	initUpgradeStatusPlanned = "planned"
+	initUpgradeStatusApplied = "applied"
+	initUpgradeStatusPartial = "partial"
+	initUpgradeStatusBlocked = "blocked"
+	initUpgradeStatusFailed  = "failed"
+)
+
 type initUpgradeJSON struct {
 	ProjectRoot         string                       `json:"project_root"`
+	Status              string                       `json:"status"`
 	ConfigSchemaVersion int                          `json:"config_schema_version"`
 	CurrentSetupVersion int                          `json:"current_setup_version"`
 	TargetSetupVersion  int                          `json:"target_setup_version"`
@@ -139,6 +149,7 @@ func refuseInitUpgradeApplyConflicts(opts initUpgradeOptions, stdout, stderr io.
 		payload := initUpgradePlanJSON(plan)
 
 		payload.Refused = true
+		payload.Status = initUpgradeStatusBlocked
 		payload.Conflicts = conflictsCopy
 
 		payload.ApplyRefusal = &initUpgradeApplyRefusalJSON{
@@ -196,6 +207,8 @@ func encodeInitUpgradeJSON(stdout io.Writer, payload initUpgradeJSON) error {
 }
 
 func initUpgradePlanJSON(plan *initupgrade.Result) initUpgradeJSON {
+	skippedActions := initUpgradePlanSkippedActions(plan)
+
 	actions := make([]initUpgradeActionJSON, 0, len(plan.Actions))
 	for _, action := range plan.Actions {
 		actions = append(actions, initUpgradeActionJSON{
@@ -209,13 +222,14 @@ func initUpgradePlanJSON(plan *initupgrade.Result) initUpgradeJSON {
 
 	return initUpgradeJSON{
 		ProjectRoot:         plan.ProjectRoot,
+		Status:              initUpgradePlanStatus(plan),
 		ConfigSchemaVersion: plan.ConfigSchemaVersion,
 		CurrentSetupVersion: plan.CurrentSetupVersion,
 		TargetSetupVersion:  plan.TargetSetupVersion,
 		Actions:             actions,
 		Warnings:            append([]initupgrade.Warning(nil), plan.Warnings...),
 		Conflicts:           append([]initupgrade.Conflict(nil), plan.Conflicts...),
-		SkippedActions:      append([]initupgrade.SkippedAction(nil), plan.SkippedActions...),
+		SkippedActions:      skippedActions,
 		StaleFiles:          append([]initupgrade.StaleFile(nil), plan.StaleFiles...),
 		AffectedPaths:       append([]initupgrade.AffectedPath(nil), plan.AffectedPaths...),
 		FollowUps:           append([]initupgrade.FollowUp(nil), plan.FollowUps...),
@@ -225,6 +239,7 @@ func initUpgradePlanJSON(plan *initupgrade.Result) initUpgradeJSON {
 func initUpgradeApplyJSON(plan *initupgrade.Result, applied *initupgrade.ApplyResult) initUpgradeJSON {
 	payload := initUpgradePlanJSON(plan)
 	payload.Applied = true
+	payload.Status = initUpgradeApplyStatus(applied)
 
 	payload.Warnings = append([]initupgrade.Warning(nil), applied.Warnings...)
 	payload.Conflicts = append([]initupgrade.Conflict(nil), applied.Conflicts...)
@@ -238,7 +253,7 @@ func initUpgradeApplyJSON(plan *initupgrade.Result, applied *initupgrade.ApplyRe
 }
 
 func printInitUpgradePlan(stdout io.Writer, plan *initupgrade.Result) error {
-	if _, err := fmt.Fprintf(stdout, "orc init upgrade plan\n\nsetup version: %d -> %d\nconfig schema version: %d\n\n", plan.CurrentSetupVersion, plan.TargetSetupVersion, plan.ConfigSchemaVersion); err != nil {
+	if _, err := fmt.Fprintf(stdout, "orc init upgrade plan\n\nstatus: %s\nsetup version: %d -> %d\nconfig schema version: %d\n\n", initUpgradePlanStatus(plan), plan.CurrentSetupVersion, plan.TargetSetupVersion, plan.ConfigSchemaVersion); err != nil {
 		return fmt.Errorf("print init upgrade plan: %w", err)
 	}
 
@@ -262,7 +277,7 @@ func printInitUpgradePlan(stdout io.Writer, plan *initupgrade.Result) error {
 		return err
 	}
 
-	if err := printInitUpgradeSkippedActions(stdout, plan.SkippedActions); err != nil {
+	if err := printInitUpgradeSkippedActions(stdout, initUpgradePlanSkippedActions(plan)); err != nil {
 		return err
 	}
 
@@ -306,7 +321,7 @@ func printInitUpgradePlan(stdout io.Writer, plan *initupgrade.Result) error {
 }
 
 func printInitUpgradeApplyRefusal(stdout io.Writer, plan *initupgrade.Result, conflicts []initupgrade.Conflict) error {
-	if _, err := fmt.Fprintf(stdout, "orc init upgrade apply refused\n\nsetup version: %d -> %d\nconfig schema version: %d\n\n", plan.CurrentSetupVersion, plan.TargetSetupVersion, plan.ConfigSchemaVersion); err != nil {
+	if _, err := fmt.Fprintf(stdout, "orc init upgrade apply refused\n\nstatus: blocked\nsetup version: %d -> %d\nconfig schema version: %d\n\n", plan.CurrentSetupVersion, plan.TargetSetupVersion, plan.ConfigSchemaVersion); err != nil {
 		return fmt.Errorf("print init upgrade apply refusal: %w", err)
 	}
 
@@ -318,7 +333,7 @@ func printInitUpgradeApplyRefusal(stdout io.Writer, plan *initupgrade.Result, co
 		return err
 	}
 
-	if err := printInitUpgradeSkippedActions(stdout, plan.SkippedActions); err != nil {
+	if err := printInitUpgradeSkippedActions(stdout, initUpgradePlanSkippedActions(plan)); err != nil {
 		return err
 	}
 
@@ -347,7 +362,7 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 		title = initUpgradePartialTitle
 	}
 
-	if _, err := fmt.Fprintf(stdout, "%s\n\nsetup version: %d -> %d\nconfig schema version: %d\n", title, applied.PreviousSetupVersion, applied.TargetSetupVersion, applied.ConfigSchemaVersion); err != nil {
+	if _, err := fmt.Fprintf(stdout, "%s\n\nstatus: %s\nsetup version: %d -> %d\nconfig schema version: %d\n", title, initUpgradeApplyStatus(applied), applied.PreviousSetupVersion, applied.TargetSetupVersion, applied.ConfigSchemaVersion); err != nil {
 		return fmt.Errorf("print init upgrade apply: %w", err)
 	}
 
@@ -406,6 +421,56 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 	}
 
 	return nil
+}
+
+func initUpgradePlanStatus(plan *initupgrade.Result) string {
+	skippedActions := initUpgradePlanSkippedActions(plan)
+	if len(plan.Conflicts) > 0 {
+		if len(plan.Actions) > 0 || len(skippedActions) > 0 {
+			return initUpgradeStatusPartial
+		}
+
+		return initUpgradeStatusBlocked
+	}
+
+	if len(skippedActions) > 0 {
+		return initUpgradeStatusPartial
+	}
+
+	if len(plan.Actions) == 0 && len(plan.StaleFiles) == 0 && len(plan.FollowUps) == 0 {
+		return initUpgradeStatusCurrent
+	}
+
+	return initUpgradeStatusPlanned
+}
+
+func initUpgradePlanSkippedActions(plan *initupgrade.Result) []initupgrade.SkippedAction {
+	return initupgrade.PlanSkippedActions(plan)
+}
+
+func initUpgradeApplyStatus(applied *initupgrade.ApplyResult) string {
+	if applied == nil {
+		return initUpgradeStatusFailed
+	}
+
+	hasWrites := len(applied.CreatedPaths) > 0 || len(applied.ModifiedPaths) > 0
+	if len(applied.Conflicts) > 0 {
+		if hasWrites || len(applied.SkippedActions) > 0 {
+			return initUpgradeStatusPartial
+		}
+
+		return initUpgradeStatusBlocked
+	}
+
+	if len(applied.SkippedActions) > 0 {
+		return initUpgradeStatusPartial
+	}
+
+	if !hasWrites {
+		return initUpgradeStatusCurrent
+	}
+
+	return initUpgradeStatusApplied
 }
 
 func printInitUpgradeActions(stdout io.Writer, title string, actions []initupgrade.Action) error {

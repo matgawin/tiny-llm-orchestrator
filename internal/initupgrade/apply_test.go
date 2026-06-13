@@ -570,10 +570,13 @@ func TestApplySkipsScaffoldCreateWhenConfigDependencyConflicts(t *testing.T) {
 		t.Fatalf("runtime stat error = %v, want missing", err)
 	}
 
-	if !slices.ContainsFunc(applied.Conflicts, func(conflict Conflict) bool {
-		return conflict.Path == ".orc/runtimes/codex.yaml" && conflict.Code == dependencySkippedCode
+	if !slices.ContainsFunc(applied.SkippedActions, func(skipped SkippedAction) bool {
+		return skipped.Path == ".orc/runtimes/codex.yaml" &&
+			skipped.Code == dependencySkippedCode &&
+			skipped.ActionKind == ActionCreate &&
+			slices.Contains(skipped.DependsOn, ".orc/config.yaml")
 	}) {
-		t.Fatalf("conflicts = %#v, want runtime dependency-skipped", applied.Conflicts)
+		t.Fatalf("skipped actions = %#v, want runtime dependency-skipped", applied.SkippedActions)
 	}
 }
 
