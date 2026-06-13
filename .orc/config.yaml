@@ -3,8 +3,8 @@ setup_version: 1
 defaults:
   loop_caps:
     enabled: true
-    soft: 4
-    hard: 8
+    soft: 10
+    hard: 20
 sandbox:
   command:
     argv:
@@ -34,6 +34,9 @@ sandbox:
       mode: ro
     - host: /nix/var/nix
       target: /nix/var/nix
+      mode: ro
+    - host: /home/matt/.config/jj
+      target: /home/matt/.config/jj
       mode: ro
 workflows:
   implementation: workflows/implementation.yaml

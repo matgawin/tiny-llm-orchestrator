@@ -32,6 +32,53 @@ Common cues:
 - `change-scope` first for non-trivial changes
 - `verify-change` for the final consistency check
 
+## Documentation writing rules
+
+When this skill requires writing or editing durable docs, enforce these rules before handoff.
+
+### 1. Make every durable claim concrete
+
+- Anchor behavior claims with a route, command, config key, package path, migration name, role name, error, example, number, or explicit condition.
+- Do not write universal filler such as "many teams", "common scenarios", "significant improvements", or "key considerations" unless the doc names the actual cases.
+- If the code is the only verified source, describe the observed code behavior directly. Do not invent product rationale, metrics, adoption claims, or examples to make prose sound complete.
+- Prefer domain-native wording over generic verbs: "wire", "route", "grant", "backfill", "regenerate", "cut over", "reject", "return". Avoid generic substitutions such as "leverage", "utilize", "facilitate", "streamline", "robust", or "comprehensive".
+
+### 2. Write direct technical prose
+
+- State the rule, behavior, or workflow directly. Avoid helper-assistant framing such as "Here is an overview", "There are a few things to consider", "It is important to note", or "This section will...".
+- Use hedges only for real uncertainty. If an exception exists, name it: "This breaks when `X` is disabled", not "this generally works".
+- Do not lead with strawman pivots like "This is not about X, it is about Y". Start with the actual rule or behavior.
+- Do not add a closing summary that restates the preceding paragraph. End on the last substantive rule, example, or next action.
+
+### 3. Use structure only when it carries information
+
+- Use headings, tables, bullets, and numbered lists for reference material, checklists, commands, ordered workflows, or scannable policy. Do not impose a three-part structure on content that is not actually sequential or enumerable.
+- Avoid topic sentence -> evidence -> restatement paragraphs. Give the claim and evidence. Skip the recap.
+- Avoid perfectly symmetrical triples, repeated sentence openers, balanced parenthetical tradeoffs, and "either X or Y" binaries unless the code or workflow truly has exactly those branches.
+- Let one paragraph do two related jobs when that is clearer than splitting into artificial one-idea paragraphs.
+
+### 4. Normalize punctuation and register
+
+- Prefer periods and commas. Use at most one em dash per roughly 300 words, and never use double-em-dash wrapping (`X — like this — Y`).
+- Treat semicolons as errors in repo docs unless they separate list items that already contain commas.
+- Use colons only after a complete clause, usually to introduce a list, command, or example. Avoid mid-sentence colon patterns like "The problem: X".
+- Use straight quotes and apostrophes in technical docs unless a file already follows a different house style.
+- Match the local doc register. Engineering docs should be specific, terse, and operational. They should not read like marketing copy, a tutorial transcript, or a polished status update.
+
+### 5. Run a docs prose audit before output
+
+Before finalizing a docs change, scan the edited text and fix every hit:
+
+- banned or low-specificity vocabulary: "delve", "leverage" as a verb, "utilize", "robust", "comprehensive", "streamline", "significant", "notable", "pivotal", "nuanced", "foster", "facilitate".
+- reflexive hedges: "often", "generally", "typically", "in many cases", "it is worth noting", "it is important to note".
+- robotic transitions: "Furthermore", "Moreover", "Additionally", "This highlights", "This underscores", "As previously mentioned".
+- rhetorical scaffolding: "turns out", "What X was Y", "The key insight", "The rule is", "not just X", "more X than Y", "between X and Y".
+- punctuation tells: em-dash overuse, semicolons, mid-sentence colons, curly quotes.
+- generic claims without anchors.
+- paragraph closers that read like aphorisms or motivational taglines.
+
+If a flagged phrase is required because it is an API field, quoted output, command text, or existing proper name, keep it and treat it as evidence rather than prose.
+
 ## Steps
 
 1. Classify the durable change.
@@ -77,7 +124,15 @@ Common cues:
    - ensure examples reflect actual behavior;
    - call out when regeneration must happen alongside doc updates.
 
-6. Suggest follow-on skills when needed.
+6. Apply the documentation writing rules.
+
+   For every edited durable doc:
+   - make claims concrete and source-backed.
+   - remove AI-pattern filler, hedges, transitions, punctuation tells, and rhetorical scaffolding.
+   - keep structure purposeful and local-register consistent.
+   - preserve exact API names, SQL names, command text, quoted output, and proper nouns even when they match a banned phrase.
+
+7. Suggest follow-on skills when needed.
 
    Only when applicable:
    - `verify-change` for final consistency check
