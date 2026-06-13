@@ -24,16 +24,17 @@ const (
 
 // Result is the structured no-write upgrade plan.
 type Result struct {
-	ProjectRoot         string         `json:"project_root"`
-	ConfigSchemaVersion int            `json:"config_schema_version"`
-	CurrentSetupVersion int            `json:"current_setup_version"`
-	TargetSetupVersion  int            `json:"target_setup_version"`
-	Actions             []Action       `json:"actions"`
-	Warnings            []Warning      `json:"warnings"`
-	Conflicts           []Conflict     `json:"conflicts"`
-	StaleFiles          []StaleFile    `json:"stale_files"`
-	AffectedPaths       []AffectedPath `json:"affected_paths"`
-	FollowUps           []FollowUp     `json:"follow_ups"`
+	ProjectRoot         string          `json:"project_root"`
+	ConfigSchemaVersion int             `json:"config_schema_version"`
+	CurrentSetupVersion int             `json:"current_setup_version"`
+	TargetSetupVersion  int             `json:"target_setup_version"`
+	Actions             []Action        `json:"actions"`
+	Warnings            []Warning       `json:"warnings"`
+	Conflicts           []Conflict      `json:"conflicts"`
+	SkippedActions      []SkippedAction `json:"skipped_actions"`
+	StaleFiles          []StaleFile     `json:"stale_files"`
+	AffectedPaths       []AffectedPath  `json:"affected_paths"`
+	FollowUps           []FollowUp      `json:"follow_ups"`
 }
 
 // Action describes a safe create or modify that a later apply path may consume.
@@ -69,6 +70,16 @@ type Conflict struct {
 	Code     string `json:"code"`
 	Message  string `json:"message"`
 	Guidance string `json:"guidance"`
+}
+
+// SkippedAction describes a nonfatal planned write that requires manual action.
+type SkippedAction struct {
+	Path       string     `json:"path"`
+	Code       string     `json:"code"`
+	Message    string     `json:"message"`
+	Guidance   string     `json:"guidance"`
+	ActionKind ActionKind `json:"action_kind,omitempty"`
+	DependsOn  []string   `json:"depends_on,omitempty"`
 }
 
 // StaleFile reports a removed managed file. V1 never plans deletion.

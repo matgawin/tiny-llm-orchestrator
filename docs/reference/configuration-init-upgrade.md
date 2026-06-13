@@ -54,6 +54,7 @@ JSON output must include at least:
 - `actions`
 - `warnings`
 - `conflicts`
+- `skipped_actions`
 - `stale_files`
 - `affected_paths`
 - `follow_ups`
@@ -152,8 +153,10 @@ Safe changes include:
 - removing or migrating deprecated fields only when semantics are unambiguous
 
 Unsafe or ambiguous cases become warnings or conflicts with exact operator
-guidance. The upgrader must not silently skip or overwrite an unrecognized
-historical shape when the migration cannot enumerate a safe rule for it.
+guidance. Customized scaffold files become skipped manual-refresh items with
+exact operator guidance. The upgrader must not silently overwrite an
+unrecognized historical shape when the migration cannot enumerate a safe rule
+for it.
 
 Conflict behavior:
 
@@ -166,13 +169,33 @@ Conflict behavior:
   identity mismatches, unsafe target paths, symlink parents or targets,
   non-regular existing files, semantic config conflicts that apply to a
   specific config edit, and `.orc/runs/**` exclusions.
-- Customized or unknown existing scaffold files become conflicts or warnings
-  unless a migration has a narrow structural rule for them.
+- Customized or unknown existing scaffold-managed files under `.orc/agents/`,
+  `.orc/workflows/`, and `.orc/runtimes/` become nonfatal skipped actions with
+  stable code `customized-scaffold-file` unless an exact current scaffold match
+  or exact known replacement baseline applies.
 - Path conflicts for missing new files become conflicts.
 - Deprecated fields with no unambiguous replacement become warnings or
   conflicts, not silent removals.
 - Existing `AGENTS.md` sections headed `## Tiny Orc` are reported as present
   and not merged or rewritten in v1.
+
+Skipped action behavior:
+
+- Skipped actions are planned or applied work that Orc intentionally does not
+  write while the command can continue.
+- Each skipped scaffold item must include the path, stable code, message, and
+  guidance. The guidance must say local customization was preserved and that the
+  operator may manually compare the file with the current embedded scaffold or
+  docs before refreshing it.
+- Skipped customized scaffold files are not global apply blockers. Safe
+  unrelated actions such as `.orc/config.yaml` surgical edits, `.gitignore`
+  updates, and independent missing-file creates may still apply.
+- Human and JSON output must list skipped actions separately from warnings and
+  conflicts. Human apply output must not claim a fully clean upgrade while
+  skipped actions remain.
+- Skipped actions do not make `--apply` fail by themselves. True semantic or
+  safety conflicts remain conflicts and still make apply report unresolved
+  conflicts after writing any independent safe actions.
 
 Missing-file behavior:
 
@@ -184,6 +207,26 @@ Missing-file behavior:
   conflicted, the dependent scaffold create is skipped instead of created
   blindly.
 - New file content comes from the current embedded scaffold.
+
+Existing scaffold-file behavior:
+
+- Byte-for-byte equality with the current embedded scaffold is a no-op. No
+  action and no skipped item is emitted for that file.
+- Exact known replacement baselines remain the automatic replacement mechanism
+  for pre-manifest historical scaffolds. When a file exactly matches such a
+  baseline, apply may replace it with the current embedded scaffold content
+  using the safe baseline edit path.
+- Any other existing content under the embedded scaffold-managed
+  `.orc/agents/`, `.orc/workflows/`, or `.orc/runtimes/` paths is treated as
+  customized and preserved. This includes harmless-looking comments,
+  whitespace-only differences, reordered YAML, and known fields unless a narrow
+  explicit migration rule owns that exact change.
+- `orc init upgrade` does not semantically merge YAML or Markdown scaffold
+  files and does not write `.new` merge candidates in v1. Operators refresh
+  customized files manually by comparing the preserved local file with the
+  current embedded scaffold or docs.
+- `.orc/config.yaml` is not a whole-file scaffold replacement target. It remains
+  migrated only by explicit surgical YAML rules.
 
 Stale-file behavior:
 
@@ -285,7 +328,10 @@ Safe `0 -> 1` rules:
   and no broad `.orc` ignore hides persistent config.
 - Apply the v1 `AGENTS.md` policy above.
 
-If a current scaffold file exists and matches a known baseline, the migration
-may replace it or perform a surgical edit defined by that migration. If it is
-customized or unknown and there is no narrow structural rule, report a conflict
-or warning with path, reason, and operator guidance.
+If a current scaffold file exists and matches the current embedded scaffold, the
+migration emits no action or skipped item for that file. If it matches an exact
+known replacement baseline, the migration may replace it with the current
+embedded scaffold content. If it is customized or unknown and there is no narrow
+explicit migration rule, preserve the file and report a skipped
+`customized-scaffold-file` manual-refresh item with path, reason, and operator
+guidance.

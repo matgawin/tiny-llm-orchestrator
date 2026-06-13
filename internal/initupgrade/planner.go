@@ -256,7 +256,7 @@ func (p *planner) planRequiredScaffoldFiles() {
 			continue
 		}
 
-		p.conflict(path, "customized-scaffold-file", "existing scaffold file differs from known safe setup migration baselines", "review the file manually; the planner will not overwrite customized content")
+		p.skip(path, "customized-scaffold-file", "existing scaffold file differs from the current embedded scaffold and known safe setup migration baselines", "local customization was preserved; manually compare this file with the current embedded scaffold or docs before refreshing it", ActionModify, nil)
 	}
 }
 
@@ -367,6 +367,17 @@ func (p *planner) conflict(path, code, message, guidance string) {
 	p.result.Conflicts = append(p.result.Conflicts, Conflict{Path: path, Code: code, Message: message, Guidance: guidance})
 }
 
+func (p *planner) skip(path, code, message, guidance string, actionKind ActionKind, dependsOn []string) {
+	p.result.SkippedActions = append(p.result.SkippedActions, SkippedAction{
+		Path:       path,
+		Code:       code,
+		Message:    message,
+		Guidance:   guidance,
+		ActionKind: actionKind,
+		DependsOn:  append([]string(nil), dependsOn...),
+	})
+}
+
 func (p *planner) hasConflict(path, code string) bool {
 	return slices.ContainsFunc(p.result.Conflicts, func(conflict Conflict) bool {
 		return conflict.Path == path && conflict.Code == code
@@ -390,6 +401,7 @@ func (p *planner) sortResult() {
 	slices.SortFunc(p.result.Actions, func(a, b Action) int { return strings.Compare(a.Path, b.Path) })
 	slices.SortFunc(p.result.AffectedPaths, func(a, b AffectedPath) int { return strings.Compare(a.Path, b.Path) })
 	slices.SortFunc(p.result.Conflicts, func(a, b Conflict) int { return strings.Compare(a.Path+a.Code, b.Path+b.Code) })
+	slices.SortFunc(p.result.SkippedActions, func(a, b SkippedAction) int { return strings.Compare(a.Path+a.Code, b.Path+b.Code) })
 	slices.SortFunc(p.result.Warnings, func(a, b Warning) int { return strings.Compare(a.Path+a.Code, b.Path+b.Code) })
 	slices.SortFunc(p.result.StaleFiles, func(a, b StaleFile) int { return strings.Compare(a.Path, b.Path) })
 }

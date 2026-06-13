@@ -28,6 +28,7 @@ type initUpgradeJSON struct {
 	Actions             []initUpgradeActionJSON      `json:"actions"`
 	Warnings            []initupgrade.Warning        `json:"warnings"`
 	Conflicts           []initupgrade.Conflict       `json:"conflicts"`
+	SkippedActions      []initupgrade.SkippedAction  `json:"skipped_actions"`
 	StaleFiles          []initupgrade.StaleFile      `json:"stale_files"`
 	AffectedPaths       []initupgrade.AffectedPath   `json:"affected_paths"`
 	FollowUps           []initupgrade.FollowUp       `json:"follow_ups"`
@@ -214,6 +215,7 @@ func initUpgradePlanJSON(plan *initupgrade.Result) initUpgradeJSON {
 		Actions:             actions,
 		Warnings:            append([]initupgrade.Warning(nil), plan.Warnings...),
 		Conflicts:           append([]initupgrade.Conflict(nil), plan.Conflicts...),
+		SkippedActions:      append([]initupgrade.SkippedAction(nil), plan.SkippedActions...),
 		StaleFiles:          append([]initupgrade.StaleFile(nil), plan.StaleFiles...),
 		AffectedPaths:       append([]initupgrade.AffectedPath(nil), plan.AffectedPaths...),
 		FollowUps:           append([]initupgrade.FollowUp(nil), plan.FollowUps...),
@@ -226,6 +228,7 @@ func initUpgradeApplyJSON(plan *initupgrade.Result, applied *initupgrade.ApplyRe
 
 	payload.Warnings = append([]initupgrade.Warning(nil), applied.Warnings...)
 	payload.Conflicts = append([]initupgrade.Conflict(nil), applied.Conflicts...)
+	payload.SkippedActions = append([]initupgrade.SkippedAction(nil), applied.SkippedActions...)
 	payload.StaleFiles = append([]initupgrade.StaleFile(nil), applied.StaleFiles...)
 	payload.FollowUps = append([]initupgrade.FollowUp(nil), applied.FollowUps...)
 	payload.CreatedPaths = append([]string(nil), applied.CreatedPaths...)
@@ -259,6 +262,10 @@ func printInitUpgradePlan(stdout io.Writer, plan *initupgrade.Result) error {
 		return err
 	}
 
+	if err := printInitUpgradeSkippedActions(stdout, plan.SkippedActions); err != nil {
+		return err
+	}
+
 	if err := printInitUpgradeWarnings(stdout, "warnings", plan.Warnings); err != nil {
 		return err
 	}
@@ -277,6 +284,14 @@ func printInitUpgradePlan(stdout io.Writer, plan *initupgrade.Result) error {
 
 	if len(plan.Conflicts) > 0 {
 		if _, err := fmt.Fprintln(stdout, "\napply: run orc init upgrade --apply to write safe independent changes; conflicting paths and dependent actions will be skipped"); err != nil {
+			return fmt.Errorf("print init upgrade plan: %w", err)
+		}
+
+		return nil
+	}
+
+	if len(plan.SkippedActions) > 0 {
+		if _, err := fmt.Fprintln(stdout, "\napply: run orc init upgrade --apply to write safe planned changes; skipped manual-refresh items will be preserved"); err != nil {
 			return fmt.Errorf("print init upgrade plan: %w", err)
 		}
 
@@ -303,6 +318,10 @@ func printInitUpgradeApplyRefusal(stdout io.Writer, plan *initupgrade.Result, co
 		return err
 	}
 
+	if err := printInitUpgradeSkippedActions(stdout, plan.SkippedActions); err != nil {
+		return err
+	}
+
 	if err := printInitUpgradeConflicts(stdout, conflicts); err != nil {
 		return err
 	}
@@ -324,7 +343,7 @@ func printInitUpgradeApplyRefusal(stdout io.Writer, plan *initupgrade.Result, co
 
 func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) error {
 	title := "orc init upgrade applied"
-	if len(applied.Conflicts) > 0 {
+	if len(applied.Conflicts) > 0 || len(applied.SkippedActions) > 0 {
 		title = initUpgradePartialTitle
 	}
 
@@ -340,11 +359,15 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 		return err
 	}
 
-	if err := printInitUpgradeWarnings(stdout, "warnings", applied.Warnings); err != nil {
+	if err := printInitUpgradeSkippedActions(stdout, applied.SkippedActions); err != nil {
 		return err
 	}
 
 	if err := printInitUpgradeConflicts(stdout, applied.Conflicts); err != nil {
+		return err
+	}
+
+	if err := printInitUpgradeWarnings(stdout, "warnings", applied.Warnings); err != nil {
 		return err
 	}
 
@@ -360,6 +383,8 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 		result := "result: no files changed"
 		if len(applied.Conflicts) > 0 {
 			result = "result: no files changed; unresolved conflicts remain"
+		} else if len(applied.SkippedActions) > 0 {
+			result = "result: no files changed; manual refresh items remain"
 		}
 
 		if _, err := fmt.Fprintln(stdout, "\n"+result); err != nil {
@@ -372,6 +397,8 @@ func printInitUpgradeApply(stdout io.Writer, applied *initupgrade.ApplyResult) e
 	result := "result: safe planned changes were written"
 	if len(applied.Conflicts) > 0 {
 		result = initUpgradePartialResult
+	} else if len(applied.SkippedActions) > 0 {
+		result = "result: safe planned changes were written; manual refresh items remain"
 	}
 
 	if _, err := fmt.Fprintln(stdout, "\n"+result); err != nil {
@@ -446,6 +473,40 @@ func printInitUpgradeWarnings(stdout io.Writer, title string, warnings []initupg
 		if warning.Guidance != "" {
 			if _, err := fmt.Fprintf(stdout, "    guidance: %s\n", warning.Guidance); err != nil {
 				return fmt.Errorf("print init upgrade warnings: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func printInitUpgradeSkippedActions(stdout io.Writer, skipped []initupgrade.SkippedAction) error {
+	if _, err := fmt.Fprintln(stdout, "\nskipped actions:"); err != nil {
+		return fmt.Errorf("print init upgrade skipped actions: %w", err)
+	}
+
+	if len(skipped) == 0 {
+		if _, err := fmt.Fprintln(stdout, "  none"); err != nil {
+			return fmt.Errorf("print init upgrade skipped actions: %w", err)
+		}
+
+		return nil
+	}
+
+	for _, item := range skipped {
+		if _, err := fmt.Fprintf(stdout, "  - %s [%s]: %s\n    guidance: %s\n", item.Path, item.Code, item.Message, item.Guidance); err != nil {
+			return fmt.Errorf("print init upgrade skipped actions: %w", err)
+		}
+
+		if item.ActionKind != "" {
+			if _, err := fmt.Fprintf(stdout, "    action: %s\n", item.ActionKind); err != nil {
+				return fmt.Errorf("print init upgrade skipped actions: %w", err)
+			}
+		}
+
+		if len(item.DependsOn) > 0 {
+			if _, err := fmt.Fprintf(stdout, "    depends_on: %s\n", strings.Join(item.DependsOn, ", ")); err != nil {
+				return fmt.Errorf("print init upgrade skipped actions: %w", err)
 			}
 		}
 	}

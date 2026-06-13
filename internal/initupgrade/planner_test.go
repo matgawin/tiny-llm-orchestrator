@@ -85,22 +85,42 @@ func TestPlanMissingNewScaffoldFileCreatesWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestPlanCustomizedExistingScaffoldFileConflicts(t *testing.T) {
+func TestPlanCustomizedExistingScaffoldFileIsSkippedForManualRefresh(t *testing.T) {
 	root := legacyScaffold(t)
 	writeFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Custom.\n---\n\nCustom content.\n")
 
 	result := mustPlan(t, root)
 
-	assertConflict(t, result, ".orc/agents/planner.md", "customized-scaffold-file")
+	assertSkippedAction(t, result, ".orc/agents/planner.md", "customized-scaffold-file")
+
+	if len(result.Conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none for customized scaffold", result.Conflicts)
+	}
 }
 
-func TestPlanUnknownHistoricalFileConflicts(t *testing.T) {
+func TestPlanUnknownHistoricalFileIsSkippedForManualRefresh(t *testing.T) {
 	root := legacyScaffold(t)
 	writeFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "---\nid: planner\nrole: planner\ndescription: Plans implementation work.\n---\n\nPlan the work.\n")
 
 	result := mustPlan(t, root)
 
-	assertConflict(t, result, ".orc/agents/planner.md", "customized-scaffold-file")
+	assertSkippedAction(t, result, ".orc/agents/planner.md", "customized-scaffold-file")
+
+	if len(result.Conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none for unknown scaffold content", result.Conflicts)
+	}
+}
+
+func TestPlanCommentOnlyScaffoldChangeIsSkippedForManualRefresh(t *testing.T) {
+	root := legacyScaffold(t)
+	replaceInFile(t, filepath.Join(root, ".orc", "workflows", "implementation.yaml"), "name: implementation\n", "# local note\nname: implementation\n")
+
+	result := mustPlan(t, root)
+
+	skipped := assertSkippedAction(t, result, ".orc/workflows/implementation.yaml", "customized-scaffold-file")
+	if !strings.Contains(skipped.Guidance, "local customization was preserved") {
+		t.Fatalf("guidance = %q, want preservation guidance", skipped.Guidance)
+	}
 }
 
 func TestPlanDeprecatedFieldWithSafeMigrationUsesSurgicalEdits(t *testing.T) {
@@ -261,6 +281,20 @@ func assertConflict(t *testing.T, result *Result, path, code string) {
 	}
 
 	t.Fatalf("missing conflict %s %s; conflicts = %#v", path, code, result.Conflicts)
+}
+
+func assertSkippedAction(t *testing.T, result *Result, path, code string) SkippedAction {
+	t.Helper()
+
+	for _, skipped := range result.SkippedActions {
+		if skipped.Path == path && skipped.Code == code {
+			return skipped
+		}
+	}
+
+	t.Fatalf("missing skipped action %s %s; skipped = %#v", path, code, result.SkippedActions)
+
+	return SkippedAction{}
 }
 
 func replaceInFile(t *testing.T, path, old, next string) {

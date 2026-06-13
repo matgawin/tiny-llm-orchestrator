@@ -107,29 +107,30 @@ func TestExecuteInitUpgradeApplyWritesSafePlan(t *testing.T) {
 	})
 }
 
-func TestExecuteInitUpgradeApplyPartiallyAppliesWithConflicts(t *testing.T) {
+func TestExecuteInitUpgradeApplyPartiallyAppliesWithManualRefreshSkippedAction(t *testing.T) {
 	root := withTempCwd(t)
 	executeCLICommand(t, []string{commandInit, cliFlagYes})
 	removeCLISetupVersion(t, root)
 	writeCLIFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "custom planner\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply}, &stdout, &stderr); err == nil {
-		t.Fatal("Execute returned nil error, want conflict refusal")
+	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc init upgrade partially applied",
 		"modified files:",
 		cliConfigPath,
-		"conflicts:",
+		"skipped actions:",
 		"customized-scaffold-file",
-		"result: safe independent changes were written; unresolved conflicts remain",
+		"local customization was preserved",
+		"result: safe planned changes were written; manual refresh items remain",
 	})
-	assertCLIOutputContainsAll(t, stderr.String(), []string{
-		"orc init upgrade",
-		"applied safe changes but unresolved conflicts remain",
-	})
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty for nonfatal skipped scaffold", stderr.String())
+	}
 
 	if !strings.Contains(string(readCLIFile(t, filepath.Join(root, ".orc", "config.yaml"))), "setup_version: 1\n") {
 		t.Fatalf("config did not gain setup_version during partial apply")
@@ -200,8 +201,12 @@ func TestExecuteInitUpgradeJSONPlanIncludesStructuredFields(t *testing.T) {
 		t.Fatalf("warnings = %#v, want older-setup", payload.Warnings)
 	}
 
-	if !hasInitUpgradeConflict(payload.Conflicts, "customized-scaffold-file") {
-		t.Fatalf("conflicts = %#v, want customized-scaffold-file", payload.Conflicts)
+	if !hasInitUpgradeSkippedAction(payload.SkippedActions, "customized-scaffold-file") {
+		t.Fatalf("skipped actions = %#v, want customized-scaffold-file", payload.SkippedActions)
+	}
+
+	if len(payload.Conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none for customized scaffold", payload.Conflicts)
 	}
 
 	assertInitUpgradeJSONOmitsFields(t, stdout.Bytes(), "scope", "setup_version_guidance")
@@ -240,6 +245,35 @@ func TestExecuteInitUpgradeJSONApplyReportsDirtyAffectedPathConflict(t *testing.
 
 	if strings.Contains(string(readCLIFile(t, filepath.Join(root, ".orc", "config.yaml"))), "setup_version") {
 		t.Fatalf("config gained setup_version despite dirty affected path")
+	}
+}
+
+func TestExecuteInitUpgradeJSONApplyReportsCustomizedScaffoldSkip(t *testing.T) {
+	root := withTempCwd(t)
+	executeCLICommand(t, []string{"init", "--yes"})
+	removeCLISetupVersion(t, root)
+	writeCLIFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "custom planner\n")
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"init", "upgrade", "--apply", "--json"}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty for nonfatal skipped scaffold", stderr.String())
+	}
+
+	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if !payload.Applied || payload.Refused {
+		t.Fatalf("applied/refused = %t/%t, want true/false", payload.Applied, payload.Refused)
+	}
+
+	if !hasInitUpgradeSkippedAction(payload.SkippedActions, "customized-scaffold-file") {
+		t.Fatalf("skipped actions = %#v, want customized-scaffold-file", payload.SkippedActions)
+	}
+
+	if len(payload.Conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none for customized scaffold", payload.Conflicts)
 	}
 }
 
@@ -459,6 +493,13 @@ type initUpgradeTestJSON struct {
 	Conflicts []struct {
 		Code string `json:"code"`
 	} `json:"conflicts"`
+	SkippedActions []struct {
+		Path       string `json:"path"`
+		Code       string `json:"code"`
+		Message    string `json:"message"`
+		Guidance   string `json:"guidance"`
+		ActionKind string `json:"action_kind"`
+	} `json:"skipped_actions"`
 	Applied       bool     `json:"applied"`
 	Refused       bool     `json:"refused"`
 	ModifiedPaths []string `json:"modified_paths"`
@@ -545,6 +586,23 @@ func hasInitUpgradeConflict(conflicts []struct {
 ) bool {
 	for _, conflict := range conflicts {
 		if conflict.Code == code {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasInitUpgradeSkippedAction(skipped []struct {
+	Path       string `json:"path"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	Guidance   string `json:"guidance"`
+	ActionKind string `json:"action_kind"`
+}, code string,
+) bool {
+	for _, item := range skipped {
+		if item.Code == code && item.Path != "" && item.Message != "" && strings.Contains(item.Guidance, "local customization was preserved") && item.ActionKind != "" {
 			return true
 		}
 	}

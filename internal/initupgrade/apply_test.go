@@ -13,7 +13,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 )
 
-func TestApplyWritesIndependentActionsDespitePlanConflicts(t *testing.T) {
+func TestApplyWritesIndependentActionsDespiteCustomizedScaffoldSkip(t *testing.T) {
 	root := legacyScaffold(t)
 	configPath := filepath.Join(root, ".orc", "config.yaml")
 
@@ -22,16 +22,18 @@ func TestApplyWritesIndependentActionsDespitePlanConflicts(t *testing.T) {
 	result := mustPlan(t, root)
 
 	applied, err := Apply(context.Background(), result, ApplyOptions{})
-	if err == nil {
-		t.Fatal("Apply returned nil error, want unresolved conflict")
-	}
-
-	if !strings.Contains(err.Error(), "customized-scaffold-file") {
-		t.Fatalf("Apply error = %v, want customized-scaffold-file", err)
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
 	}
 
 	if applied == nil || !slices.Contains(applied.ModifiedPaths, ".orc/config.yaml") {
-		t.Fatalf("applied = %#v, want config modified despite unrelated scaffold conflict", applied)
+		t.Fatalf("applied = %#v, want config modified despite unrelated scaffold skip", applied)
+	}
+
+	if !slices.ContainsFunc(applied.SkippedActions, func(skipped SkippedAction) bool {
+		return skipped.Path == ".orc/agents/planner.md" && skipped.Code == "customized-scaffold-file"
+	}) {
+		t.Fatalf("skipped actions = %#v, want customized planner", applied.SkippedActions)
 	}
 
 	if got := readFile(t, plannerPath); got != "custom planner\n" {

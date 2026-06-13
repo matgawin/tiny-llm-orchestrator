@@ -31,16 +31,17 @@ type ApplyOptions struct {
 
 // ApplyResult describes files written and non-blocking apply guidance.
 type ApplyResult struct {
-	ProjectRoot          string      `json:"project_root"`
-	ConfigSchemaVersion  int         `json:"config_schema_version"`
-	PreviousSetupVersion int         `json:"previous_setup_version"`
-	TargetSetupVersion   int         `json:"target_setup_version"`
-	CreatedPaths         []string    `json:"created_paths"`
-	ModifiedPaths        []string    `json:"modified_paths"`
-	Warnings             []Warning   `json:"warnings"`
-	Conflicts            []Conflict  `json:"conflicts,omitempty"`
-	StaleFiles           []StaleFile `json:"stale_files"`
-	FollowUps            []FollowUp  `json:"follow_ups"`
+	ProjectRoot          string          `json:"project_root"`
+	ConfigSchemaVersion  int             `json:"config_schema_version"`
+	PreviousSetupVersion int             `json:"previous_setup_version"`
+	TargetSetupVersion   int             `json:"target_setup_version"`
+	CreatedPaths         []string        `json:"created_paths"`
+	ModifiedPaths        []string        `json:"modified_paths"`
+	Warnings             []Warning       `json:"warnings"`
+	Conflicts            []Conflict      `json:"conflicts,omitempty"`
+	SkippedActions       []SkippedAction `json:"skipped_actions,omitempty"`
+	StaleFiles           []StaleFile     `json:"stale_files"`
+	FollowUps            []FollowUp      `json:"follow_ups"`
 }
 
 // Apply writes the safe actions from a previously generated upgrade plan.
@@ -108,6 +109,7 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 		PreviousSetupVersion: plan.CurrentSetupVersion,
 		TargetSetupVersion:   plan.TargetSetupVersion,
 		Warnings:             warnings,
+		SkippedActions:       append([]SkippedAction(nil), plan.SkippedActions...),
 		StaleFiles:           append([]StaleFile(nil), plan.StaleFiles...),
 		FollowUps:            append([]FollowUp(nil), plan.FollowUps...),
 	}
