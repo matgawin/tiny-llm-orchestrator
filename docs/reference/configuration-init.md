@@ -47,7 +47,10 @@ directory:
 - `orc init upgrade` owns later setup upgrades. Bare `orc init upgrade` is
   plan-only and writes nothing; `orc init upgrade --apply` writes safe changes.
   V1 has no `--dry-run` flag for upgrade because the bare command is the dry-run
-  behavior. See [configuration-init-upgrade.md](configuration-init-upgrade.md).
+  behavior. Schema migrations repair eligible live `.orc` file formats before
+  normal config validation. Scaffold refresh remains limited to Orc-owned
+  default content when ownership proof is available. See
+  [configuration-init-upgrade.md](configuration-init-upgrade.md).
 
 The scaffold includes these workflows:
 

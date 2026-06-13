@@ -26,7 +26,7 @@ Contributors and maintainers changing config loading, validation, scaffold sourc
 ## Contract Pages
 
 - [configuration-init.md](configuration-init.md): `orc init` scaffold files, overwrite prompts, `.gitignore`, `.orc/runs/`, and scaffolded workflow and agent inventory.
-- [configuration-init-upgrade.md](configuration-init-upgrade.md): `orc init upgrade` plan/apply contract, setup version marker, migration scope, safety rules, and initial `0 -> 1` migration.
+- [configuration-init-upgrade.md](configuration-init-upgrade.md): `orc init upgrade` plan/apply contract, setup version marker, schema migration scope, scaffold refresh safety rules, and initial `0 -> 1` migration.
 - [configuration-project.md](configuration-project.md): `.orc/config.yaml`, project config validation, loop caps, and sandbox config schema.
 - [configuration-runtimes.md](configuration-runtimes.md): `.orc/runtimes/*.yaml` descriptor schema, runtime selection, descriptor-built argv, prompt delivery, capabilities, sandbox requirements, and Codex migration.
 - [configuration-workflows.md](configuration-workflows.md): workflow files, step contracts, report outcomes, terminal states, and agent descriptor files.
@@ -44,7 +44,7 @@ It reads:
 
 `.orc/config.yaml` contains both `version`, the project config schema version,
 and optional `setup_version`, the `orc init upgrade` setup/scaffold version.
-Missing `setup_version` is treated as legacy setup version `0`; new scaffolds
+Missing `setup_version` is treated as legacy setup version `0`. New scaffolds
 write `setup_version: 1`.
 
 Agents are prompt/persona descriptors. Runtimes are executable descriptors.
@@ -57,6 +57,12 @@ precedence rules.
 
 The canonical scaffold source for the current v1 shape is
 `internal/initconfig/scaffold/.orc`.
+
+`orc init upgrade` may scan eligible live `.orc` files for schema migrations
+before `internal/config.Load(projectRoot)` would accept the current schema.
+That raw migration pass covers `.orc/config.yaml`, files under
+`.orc/workflows/**`, `.orc/agents/**`, and `.orc/runtimes/**`, and excludes
+`.orc/runs/**`. See [configuration-init-upgrade.md](configuration-init-upgrade.md).
 
 ## Environment Variables
 

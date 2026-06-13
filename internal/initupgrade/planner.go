@@ -31,6 +31,10 @@ const (
 
 // Plan reads the live project setup and returns a no-write upgrade plan.
 func Plan(root string) (*Result, error) {
+	return planWithOptions(root, planOptions{schemaMigrations: productionSchemaMigrations()})
+}
+
+func planWithOptions(root string, opts planOptions) (*Result, error) {
 	if root == "" {
 		return nil, stableerr.New("project root is required")
 	}
@@ -41,8 +45,9 @@ func Plan(root string) (*Result, error) {
 	}
 
 	planner := planner{
-		root:     absRoot,
-		scaffold: scaffoldByPath(),
+		root:             absRoot,
+		scaffold:         scaffoldByPath(),
+		schemaMigrations: append([]schemaMigration(nil), opts.schemaMigrations...),
 		result: Result{
 			ProjectRoot:         absRoot,
 			TargetSetupVersion:  config.CurrentSetupVersion,
@@ -58,23 +63,41 @@ func Plan(root string) (*Result, error) {
 }
 
 type planner struct {
-	root     string
-	scaffold map[string][]byte
-	result   Result
-	config   configFile
-	manifest scaffoldManifestState
+	root             string
+	scaffold         map[string][]byte
+	result           Result
+	config           configFile
+	manifest         scaffoldManifestState
+	schemaMigrations []schemaMigration
 }
 
 func (p *planner) plan() error {
+	p.planSchemaMigrations()
+
 	cfg, err := p.readConfig()
 	if err != nil {
-		return err
+		p.conflict(configPath, "invalid-project-config", fmt.Sprintf("read %s: %v", configPath, err), "replace the config path with a regular project-local YAML file before rerunning orc init upgrade")
+		p.planRunsFollowUp()
+		p.sortResult()
+
+		return nil
 	}
 
 	p.config = cfg
 	p.result.ConfigSchemaVersion = cfg.schemaVersion
 	p.result.CurrentSetupVersion = cfg.setupVersion
 	p.manifest = p.readManifest()
+
+	if cfg.loadErr != nil {
+		if !p.hasAction(configPath) {
+			p.conflict(configPath, "invalid-project-config", fmt.Sprintf("parse %s: %v", configPath, cfg.loadErr), "fix the config file or apply a schema migration that makes it loadable")
+		}
+
+		p.planRunsFollowUp()
+		p.sortResult()
+
+		return nil
+	}
 
 	if warning, ok := config.OlderSetupWarning(cfg.data); ok {
 		p.warn("", "older-setup", warning, "")
@@ -95,28 +118,41 @@ func (p *planner) plan() error {
 }
 
 func (p *planner) readConfig() (configFile, error) {
+	if conflict := p.schemaPathConflict(configPath); conflict != "" {
+		return configFile{}, stableerr.New(conflict)
+	}
+
 	content, err := p.read(configPath)
 	if err != nil {
 		return configFile{}, err
 	}
 
 	var raw yaml.MapSlice
-	if err := yaml.Unmarshal(content, &raw); err != nil {
-		return configFile{}, fmt.Errorf("parse %s: %w", configPath, err)
-	}
 
 	var cfg config.ProjectConfig
-	if err := yaml.Unmarshal(content, &cfg); err != nil {
-		return configFile{}, fmt.Errorf("parse %s: %w", configPath, err)
+
+	rawErr := yaml.Unmarshal(content, &raw)
+	loadErr := yaml.Unmarshal(content, &cfg)
+	schemaVersion := cfg.Version
+	setupVersion := cfg.SetupVersion
+
+	if rawErr != nil {
+		loadErr = rawErr
+		schemaVersion = 0
+		setupVersion = 0
+	} else if loadErr != nil {
+		schemaVersion = intScalarField(raw, "version")
+		setupVersion = intScalarField(raw, setupVersionField)
 	}
 
 	return configFile{
 		content:       content,
 		identity:      identity(content),
-		schemaVersion: cfg.Version,
-		setupVersion:  cfg.SetupVersion,
+		schemaVersion: schemaVersion,
+		setupVersion:  setupVersion,
 		data:          cfg,
 		doc:           raw,
+		loadErr:       loadErr,
 	}, nil
 }
 
@@ -257,6 +293,14 @@ func (p *planner) planRequiredScaffoldFiles() {
 			continue
 		}
 
+		if p.hasAction(path) {
+			if p.manifestProvesManaged(path, existing) || replacementBaselineMatches(path, existing) {
+				p.conflict(path, "duplicate-upgrade-action", "schema migration and scaffold refresh both target this path", "apply one compatible migration at a time or add an explicit composed migration for this path")
+			}
+
+			continue
+		}
+
 		if p.manifestProvesManaged(path, existing) {
 			action := p.modifyReturning(path, "refresh manifest-managed scaffold file with current scaffold content", identity(existing), []SurgicalEdit{{Kind: EditReplaceIfBaseline, Value: string(content)}})
 			if action != nil {
@@ -357,6 +401,11 @@ func (p *planner) create(path, reason string, content []byte) *Action {
 		return nil
 	}
 
+	if p.hasAction(path) {
+		p.conflict(path, "duplicate-upgrade-action", "multiple upgrade actions target this path", "resolve the competing migrations or scaffold refresh before applying")
+		return nil
+	}
+
 	p.result.Actions = append(p.result.Actions, Action{Kind: ActionCreate, Path: path, Reason: reason, Content: append([]byte(nil), content...)})
 	p.result.AffectedPaths = append(p.result.AffectedPaths, AffectedPath{Path: path, Exists: false})
 
@@ -374,10 +423,36 @@ func (p *planner) modifyReturning(path, reason string, fileID FileIdentity, edit
 	}
 
 	id := fileID
+	if existing := p.actionForPath(path); existing != nil {
+		if existing.Kind != ActionModify || existing.FileIdentity == nil || !sameIdentity(*existing.FileIdentity, id) || !compatibleSurgicalEdits(existing.Edits, edits) {
+			p.conflict(path, "duplicate-upgrade-action", "multiple incompatible upgrade actions target this path", "resolve the competing migrations or scaffold refresh before applying")
+			return nil
+		}
+
+		existing.Reason = existing.Reason + "; " + reason
+		existing.Edits = append(existing.Edits, edits...)
+
+		return existing
+	}
+
 	p.result.Actions = append(p.result.Actions, Action{Kind: ActionModify, Path: path, Reason: reason, Edits: edits, FileIdentity: &id})
 	p.result.AffectedPaths = append(p.result.AffectedPaths, AffectedPath{Path: path, Exists: true, FileIdentity: &id})
 
 	return &p.result.Actions[len(p.result.Actions)-1]
+}
+
+func (p *planner) hasAction(path string) bool {
+	return p.actionForPath(path) != nil
+}
+
+func (p *planner) actionForPath(path string) *Action {
+	for i := range p.result.Actions {
+		if p.result.Actions[i].Path == path {
+			return &p.result.Actions[i]
+		}
+	}
+
+	return nil
 }
 
 func (p *planner) warn(path, code, message, guidance string) {

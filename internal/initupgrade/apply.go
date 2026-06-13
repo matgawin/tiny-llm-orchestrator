@@ -858,7 +858,7 @@ func prepareModifyWrite(root, rel, abs string, action Action) (preparedWrite, er
 		return preparedWrite{}, stableerr.Errorf("%s changed during init upgrade apply; rerun orc init upgrade", rel)
 	}
 
-	next, err := applyEdits(current, action.Edits)
+	next, err := applyEditsForPath(rel, current, action.Edits)
 	if err != nil {
 		return preparedWrite{}, fmt.Errorf("edit %s: %w", rel, err)
 	}
@@ -1011,6 +1011,106 @@ func writeExistingAtomic(path string, content []byte) error {
 	}
 
 	return nil
+}
+
+func applyEditsForPath(path string, content []byte, edits []SurgicalEdit) ([]byte, error) {
+	if strings.HasSuffix(path, ".md") && hasYAMLEdit(edits) {
+		frontmatter, body, ok, err := splitMarkdownFrontmatter(content)
+		if err != nil {
+			return nil, err
+		}
+
+		if !ok {
+			return nil, stableerr.Errorf("%s is missing YAML frontmatter", path)
+		}
+
+		nextFrontmatter, err := applyEdits(frontmatter, edits)
+		if err != nil {
+			return nil, err
+		}
+
+		return joinMarkdownFrontmatter(nextFrontmatter, body), nil
+	}
+
+	return applyEdits(content, edits)
+}
+
+func hasYAMLEdit(edits []SurgicalEdit) bool {
+	for _, edit := range edits {
+		switch edit.Kind {
+		case EditAddYAMLField, EditSetYAMLField, EditRemoveYAMLField, EditAddYAMLMapEntry:
+			return true
+		case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
+			continue
+		}
+	}
+
+	return false
+}
+
+func splitMarkdownFrontmatter(content []byte) ([]byte, []byte, bool, error) {
+	text := string(content)
+
+	var firstEnd int
+
+	switch {
+	case strings.HasPrefix(text, "---\n"):
+		firstEnd = len("---\n")
+	case strings.HasPrefix(text, "---\r\n"):
+		firstEnd = len("---\r\n")
+	default:
+		return nil, content, false, nil
+	}
+
+	for _, line := range splitLinesWithOffsets(text[firstEnd:]) {
+		trimmed := strings.TrimSuffix(strings.TrimSuffix(line.text, "\n"), "\r")
+		if trimmed != "---" {
+			continue
+		}
+
+		start := firstEnd + line.offset
+		end := start + len(line.text)
+
+		return []byte(text[firstEnd:start]), []byte(text[end:]), true, nil
+	}
+
+	return nil, nil, true, stableerr.New("YAML frontmatter is missing a closing delimiter")
+}
+
+type offsetLine struct {
+	offset int
+	text   string
+}
+
+func splitLinesWithOffsets(text string) []offsetLine {
+	if text == "" {
+		return nil
+	}
+
+	raw := strings.SplitAfter(text, "\n")
+	if raw[len(raw)-1] == "" {
+		raw = raw[:len(raw)-1]
+	}
+
+	out := make([]offsetLine, 0, len(raw))
+
+	offset := 0
+
+	for _, line := range raw {
+		out = append(out, offsetLine{offset: offset, text: line})
+		offset += len(line)
+	}
+
+	return out
+}
+
+func joinMarkdownFrontmatter(frontmatter, body []byte) []byte {
+	next := []byte("---\n")
+	next = append(next, ensureTrailingNewline(frontmatter)...)
+	next = append(next, []byte("---\n")...)
+	next = append(next, body...)
+
+	return next
 }
 
 func applyEdits(content []byte, edits []SurgicalEdit) ([]byte, error) {
@@ -1418,6 +1518,58 @@ func cleanPlanPath(path string) (string, error) {
 func identityMatches(content []byte, want FileIdentity) bool {
 	got := identity(content)
 	return got.Size == want.Size && got.SHA256 == want.SHA256
+}
+
+func sameIdentity(a, b FileIdentity) bool {
+	return a.Size == b.Size && a.SHA256 == b.SHA256
+}
+
+func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
+	seen := make(map[string]struct{}, len(existing))
+	for _, edit := range existing {
+		if edit.Kind == EditReplaceIfBaseline {
+			return false
+		}
+
+		key := surgicalEditKey(edit)
+
+		if key != "" {
+			seen[key] = struct{}{}
+		}
+	}
+
+	for _, edit := range next {
+		if edit.Kind == EditReplaceIfBaseline {
+			return false
+		}
+
+		key := surgicalEditKey(edit)
+
+		if key == "" {
+			continue
+		}
+
+		if _, ok := seen[key]; ok {
+			return false
+		}
+
+		seen[key] = struct{}{}
+	}
+
+	return true
+}
+
+func surgicalEditKey(edit SurgicalEdit) string {
+	switch edit.Kind {
+	case EditAddYAMLField, EditSetYAMLField, EditRemoveYAMLField:
+		return edit.Path
+	case EditAddYAMLMapEntry:
+		return edit.Path + "." + edit.Key
+	case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
+		return ""
+	default:
+		return ""
+	}
 }
 
 // ConflictError reports conflicts that prevented an upgrade apply from writing.

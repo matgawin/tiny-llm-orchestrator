@@ -2,6 +2,7 @@ package initupgrade
 
 import (
 	"fmt"
+	"strconv"
 
 	"tiny-llm-orchestrator/orc/internal/config"
 
@@ -15,6 +16,7 @@ type configFile struct {
 	setupVersion  int
 	data          config.ProjectConfig
 	doc           yaml.MapSlice
+	loadErr       error
 }
 
 func (c configFile) has(key string) bool {
@@ -106,4 +108,18 @@ func asMapSlice(value any) (yaml.MapSlice, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func intScalarField(items yaml.MapSlice, key string) int {
+	value, ok := mapLookup(items, key)
+	if !ok {
+		return 0
+	}
+
+	parsed, err := strconv.Atoi(fmt.Sprint(value))
+	if err != nil {
+		return 0
+	}
+
+	return parsed
 }

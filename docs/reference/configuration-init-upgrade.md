@@ -13,7 +13,7 @@ behavior, config schema validation, or scaffold migrations.
 ## Read This When
 
 - You are changing `orc init upgrade` behavior or output.
-- You are adding a setup migration.
+- You are adding a schema migration or setup migration.
 - You need to distinguish live project setup versions from run-store or config
   snapshot versions.
 - You are deciding whether a setup file is safe to update.
@@ -62,8 +62,8 @@ JSON output must include at least:
 
 Apply JSON must also include written paths and unresolved skipped or refused
 writes. JSON and human output must describe the same decisions. Human output
-must not claim a fully clean upgrade when any action was skipped or conflicted;
-it must report partial apply and list the remaining work.
+must not claim a fully clean upgrade when any action was skipped or conflicted.
+It must report partial apply and list the remaining work.
 
 `status` is a top-level summary string for human and JSON output:
 
@@ -110,13 +110,19 @@ upgrade implementation. V1 defines current setup version `1`. New scaffolded
 
 `orc init upgrade` upgrades persistent project-local setup only.
 
-Included surfaces:
+Schema migration surfaces:
 
 - `.orc/config.yaml`
+- regular files under `.orc/workflows/**`
+- regular files under `.orc/agents/**`
+- regular files under `.orc/runtimes/**`
+- `.orc/scaffold.lock.yaml` only for ownership metadata migrations
+
+Scaffold refresh and setup surfaces:
+
 - `.orc/scaffold.lock.yaml`
-- `.orc/runtimes/*.yaml`
-- `.orc/workflows/*.yaml` referenced by `.orc/config.yaml`
-- `.orc/agents/*.md` referenced by `.orc/config.yaml`
+- embedded scaffold files under `.orc/runtimes/`, `.orc/workflows/`, and
+  `.orc/agents/` only when ownership proof allows default-content refresh
 - `.gitignore` only for `.orc/runs/` ignore handling
 - `AGENTS.md` only under the conservative Tiny Orc section policy
 
@@ -125,9 +131,8 @@ Excluded surfaces:
 - `.orc/runs/**`
 - run snapshots and run-store artifacts
 - arbitrary project docs
-- user-created unreferenced workflows, agents, or runtime descriptors unless a
-  specific migration explicitly owns them
 - deleted or renamed files not covered by an explicit migration
+- unknown file types under `.orc` unless a migration explicitly targets them
 
 `.orc/runs/**` is a hard exclusion. The planner and apply path must not inspect
 run snapshots as a source of truth for live setup upgrades and must never plan
@@ -138,16 +143,81 @@ snapshots. After applying live setup changes, users may need
 `orc run refresh-config <run-id>`, but `orc init upgrade` must not refresh runs
 automatically.
 
-## Migration Source Of Truth
+## Schema Migrations
 
-Behavior-changing setup upgrades use explicit versioned migrations. The current
+Schema migrations handle file-format compatibility. They are separate from
+scaffold refresh, which is limited to Orc-owned default content and prose when
+ownership proof is available.
+
+Schema migrations run under `orc init upgrade`. There is no separate
+`orc project upgrade` command. The production registry may be empty until a
+real migration is added. Test-only migrations must be wired only through
+package tests and must not appear in production binaries, runtime output, or
+docs.
+
+Each schema migration declares a stable migration id, a target matcher, a
+summary, a structural predicate, planned surgical edits, and path-scoped
+conflict or skipped behavior. Action reasons include the migration id and
+summary, for example
+`schema migration <id>: <summary>`.
+
+Schema migration discovery is deterministic. It considers `.orc/config.yaml`
+plus files under `.orc/workflows/**`, `.orc/agents/**`, and
+`.orc/runtimes/**`, sorted by slash-separated project-relative path.
+`.orc/scaffold.lock.yaml` is considered only when an ownership-metadata
+migration targets it. Discovery must reject traversal outside the project-local
+`.orc` tree and must not recurse into `.orc/runs/**`.
+
+Schema migrations plan against raw YAML or Markdown frontmatter before normal
+config validation. They must not require `config.Load` to succeed because the
+loader for the current binary may reject an older file format that a migration
+needs to repair. Invalid targeted files are path-scoped skipped actions or
+conflicts. A valid targeted file can still plan and apply when another targeted
+file is invalid.
+
+Existing files are changed only through surgical edits that operate on the
+original bytes. YAML edits preserve comments and key order where feasible.
+Markdown agent descriptors are migrated only through YAML frontmatter when the
+file begins with `---` and has a closing `---`. Bytes after the frontmatter are
+preserved exactly. Files without frontmatter are no-ops unless a migration
+explicitly documents a different metadata rule. Schema migrations do not
+semantically merge Markdown body prose.
+
+Structural predicates must be idempotent:
+
+- old field only: migrate with the exact owned edit.
+- new field only: no-op.
+- old and new fields: path-scoped conflict.
+- neither field: no-op unless the migration explicitly defines a default.
+
+User-created or customized files may be schema-migrated automatically only when
+a narrow structural predicate matches. A workflow file under
+`.orc/workflows/**` does not need to be referenced from `.orc/config.yaml` to be
+eligible. The same rule applies to agent and runtime descriptors under their
+known subtrees. Unknown file types under `.orc` are ignored by default and do
+not create conflicts unless a migration explicitly targets them.
+
+Do not follow or mutate symlinks. Directories, devices, sockets, FIFOs, and
+other non-regular files are path-scoped conflicts when an explicit migration
+targets them. They are ignored when no migration targets them.
+
+If two schema migrations edit the same path, they may compose only when the
+edit engine can apply non-overlapping surgical edits deterministically.
+Overlapping field edits, duplicate actions, or schema edits competing with a
+whole-file scaffold replacement are path-scoped conflicts that name the
+relevant migration id through the action reason, conflict message, or guidance.
+
+## Scaffold Refresh Source Of Truth
+
+Scaffold refresh handles Orc-owned default content and prose. The current
 embedded scaffold may be used for new default file content and for recognizing
 known scaffold baselines, but it is not enough to infer semantic migrations or
 destructive changes.
 
-Each migration must define per-file predicates such as known content hashes,
-known old scaffold ids, or narrow structural predicates. Migrations must not
-depend on unavailable VCS history or broad textual similarity.
+Each scaffold setup migration must define per-file predicates such as known
+content hashes, known old scaffold ids, or narrow structural predicates.
+Migrations must not depend on unavailable VCS history or broad textual
+similarity.
 
 Existing YAML files should be represented as surgical edits where feasible so
 comments and key order are preserved. Whole-file normalized rewrites of

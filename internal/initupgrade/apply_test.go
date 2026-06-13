@@ -66,7 +66,7 @@ func TestApplyRejectsChangedDuringApplyButWritesIndependentActions(t *testing.T)
 		t.Fatalf("Apply error = %v, want changed-during-apply message", err)
 	}
 
-	if applied == nil || !slices.Contains(applied.CreatedPaths, ".orc/runtimes/codex.yaml") {
+	if applied == nil || !slices.Contains(applied.CreatedPaths, testRuntimePath) {
 		t.Fatalf("applied = %#v, want independent runtime create", applied)
 	}
 
@@ -90,7 +90,7 @@ func TestApplyCreatesMissingScaffoldFileFromPlan(t *testing.T) {
 		t.Fatalf("Apply returned error: %v", err)
 	}
 
-	if !slices.Contains(applied.CreatedPaths, ".orc/runtimes/codex.yaml") {
+	if !slices.Contains(applied.CreatedPaths, testRuntimePath) {
 		t.Fatalf("created paths = %#v, want runtime", applied.CreatedPaths)
 	}
 
@@ -626,7 +626,7 @@ func TestApplySkipsScaffoldCreateWhenConfigDependencyConflicts(t *testing.T) {
 		return
 	}
 
-	if slices.Contains(applied.CreatedPaths, ".orc/runtimes/codex.yaml") {
+	if slices.Contains(applied.CreatedPaths, testRuntimePath) {
 		t.Fatalf("created paths = %#v, want dependent runtime skipped", applied.CreatedPaths)
 	}
 
@@ -635,7 +635,7 @@ func TestApplySkipsScaffoldCreateWhenConfigDependencyConflicts(t *testing.T) {
 	}
 
 	if !slices.ContainsFunc(applied.SkippedActions, func(skipped SkippedAction) bool {
-		return skipped.Path == ".orc/runtimes/codex.yaml" &&
+		return skipped.Path == testRuntimePath &&
 			skipped.Code == dependencySkippedCode &&
 			skipped.ActionKind == ActionCreate &&
 			slices.Contains(skipped.DependsOn, ".orc/config.yaml")

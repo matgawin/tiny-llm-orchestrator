@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"tiny-llm-orchestrator/orc/internal/initupgrade"
 )
 
 func TestExecuteInitDryRunUsesCurrentDirectory(t *testing.T) {
@@ -388,6 +390,42 @@ func TestExecuteInitUpgradeJSONPlanReportsDependencySkippedAction(t *testing.T) 
 
 	if len(payload.SkippedActions[0].DependsOn) == 0 {
 		t.Fatalf("skipped actions = %#v, want depends_on", payload.SkippedActions)
+	}
+}
+
+func TestInitUpgradeOutputIncludesSchemaMigrationReason(t *testing.T) {
+	const schemaMigrationReason = "schema migration test-output: rename custom workflow field"
+
+	plan := &initupgrade.Result{
+		ProjectRoot:         "/tmp/project",
+		ConfigSchemaVersion: 1,
+		CurrentSetupVersion: 1,
+		TargetSetupVersion:  1,
+		Actions: []initupgrade.Action{{
+			Kind:   initupgrade.ActionModify,
+			Path:   ".orc/workflows/custom.yaml",
+			Reason: schemaMigrationReason,
+			Edits: []initupgrade.SurgicalEdit{{
+				Kind:  initupgrade.EditAddYAMLField,
+				Path:  "new_field",
+				Value: "true",
+			}},
+		}},
+	}
+
+	var stdout bytes.Buffer
+	if err := printInitUpgradePlan(&stdout, plan); err != nil {
+		t.Fatalf("printInitUpgradePlan returned error: %v", err)
+	}
+
+	assertCLIOutputContainsAll(t, stdout.String(), []string{
+		schemaMigrationReason,
+		"edit: add_yaml_field new_field",
+	})
+
+	payload := initUpgradePlanJSON(plan)
+	if len(payload.Actions) != 1 || payload.Actions[0].Reason != schemaMigrationReason {
+		t.Fatalf("JSON actions = %#v, want schema migration reason", payload.Actions)
 	}
 }
 

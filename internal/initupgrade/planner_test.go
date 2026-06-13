@@ -12,6 +12,7 @@ import (
 
 const (
 	testPlannerPath  = ".orc/agents/planner.md"
+	testRuntimePath  = ".orc/runtimes/codex.yaml"
 	testWorkflowPath = ".orc/workflows/implementation.yaml"
 )
 
@@ -84,7 +85,7 @@ func TestPlanMissingNewScaffoldFileCreatesWhenAbsent(t *testing.T) {
 
 	result := mustPlan(t, root)
 
-	action := assertAction(t, result, ActionCreate, ".orc/runtimes/codex.yaml")
+	action := assertAction(t, result, ActionCreate, testRuntimePath)
 	if !strings.Contains(string(action.Content), "id: codex\n") {
 		t.Fatalf("runtime create content missing scaffold runtime:\n%s", string(action.Content))
 	}
@@ -116,7 +117,7 @@ func TestPlanMissingManifestCreatesOwnershipManifest(t *testing.T) {
 		"version: 1\n",
 		"setup_version: 1\n",
 		"  - path: " + testPlannerPath + "\n",
-		"  - path: .orc/runtimes/codex.yaml\n",
+		"  - path: " + testRuntimePath + "\n",
 		"  - path: .orc/workflows/implementation.yaml\n",
 	} {
 		if !strings.Contains(content, want) {
@@ -421,6 +422,14 @@ func removeFile(t *testing.T, path string) {
 
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove %s: %v", path, err)
+	}
+}
+
+func renameFile(t *testing.T, oldPath, newPath string) {
+	t.Helper()
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatalf("rename %s to %s: %v", oldPath, newPath, err)
 	}
 }
 
