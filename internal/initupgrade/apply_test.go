@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/initconfig"
 )
 
 func TestApplyWritesIndependentActionsDespiteCustomizedScaffoldSkip(t *testing.T) {
@@ -31,7 +32,7 @@ func TestApplyWritesIndependentActionsDespiteCustomizedScaffoldSkip(t *testing.T
 	}
 
 	if !slices.ContainsFunc(applied.SkippedActions, func(skipped SkippedAction) bool {
-		return skipped.Path == ".orc/agents/planner.md" && skipped.Code == "customized-scaffold-file"
+		return skipped.Path == testPlannerPath && skipped.Code == "customized-scaffold-file"
 	}) {
 		t.Fatalf("skipped actions = %#v, want customized planner", applied.SkippedActions)
 	}
@@ -101,6 +102,197 @@ func TestApplyCreatesMissingScaffoldFileFromPlan(t *testing.T) {
 	assertCurrentSetupConfig(t, root)
 }
 
+func TestApplyCreatesManifestForExistingProject(t *testing.T) {
+	root := legacyScaffold(t)
+
+	result := mustPlan(t, root)
+
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	if !slices.Contains(applied.CreatedPaths, initconfig.ScaffoldManifestPath()) {
+		t.Fatalf("created paths = %#v, want manifest", applied.CreatedPaths)
+	}
+
+	content := readFile(t, filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath())))
+	if !strings.Contains(content, "  - path: "+testPlannerPath+"\n") || strings.Contains(content, "path: .orc/config.yaml") {
+		t.Fatalf("manifest content did not record managed scaffold scope:\n%s", content)
+	}
+}
+
+func TestOrderPreparedWritesPlacesManifestAfterSameApplyScaffoldDependency(t *testing.T) {
+	writes := []preparedWrite{
+		{relPath: initconfig.ScaffoldManifestPath()},
+		{relPath: testWorkflowPath},
+	}
+	actions := []Action{
+		{Path: initconfig.ScaffoldManifestPath(), DependsOn: []string{testWorkflowPath}},
+		{Path: testWorkflowPath},
+	}
+
+	ordered := orderPreparedWritesForApply(writes, actions)
+
+	if got := orderedPaths(ordered); !slices.Equal(got, []string{testWorkflowPath, initconfig.ScaffoldManifestPath()}) {
+		t.Fatalf("ordered paths = %#v, want scaffold dependency before manifest", got)
+	}
+}
+
+func TestOrderPreparedWritesPlacesManifestBeforeReciprocalRefreshGroup(t *testing.T) {
+	writes := []preparedWrite{
+		{relPath: testPlannerPath},
+		{relPath: initconfig.ScaffoldManifestPath()},
+	}
+	actions := []Action{
+		{Path: testPlannerPath, DependsOn: []string{initconfig.ScaffoldManifestPath()}},
+		{Path: initconfig.ScaffoldManifestPath(), DependsOn: []string{testPlannerPath}},
+	}
+
+	ordered := orderPreparedWritesForApply(writes, actions)
+
+	if got := orderedPaths(ordered); !slices.Equal(got, []string{initconfig.ScaffoldManifestPath(), testPlannerPath}) {
+		t.Fatalf("ordered paths = %#v, want manifest before reciprocal refresh", got)
+	}
+}
+
+func TestApplyRefreshesManifestManagedFileAndManifest(t *testing.T) {
+	root := currentScaffold(t)
+	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")
+	oldContent := []byte("old managed planner\n")
+	writeFile(t, plannerPath, string(oldContent))
+	writeManifest(t, root, []initconfig.ScaffoldManifestFile{{
+		Path:   testPlannerPath,
+		SHA256: initconfig.SHA256Hex(oldContent),
+	}})
+
+	result := mustPlan(t, root)
+
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	for _, path := range []string{testPlannerPath, initconfig.ScaffoldManifestPath()} {
+		if !slices.Contains(applied.ModifiedPaths, path) {
+			t.Fatalf("modified paths = %#v, want %s", applied.ModifiedPaths, path)
+		}
+	}
+
+	wantPlanner := string(scaffoldByPath()[testPlannerPath])
+	if got := readFile(t, plannerPath); got != wantPlanner {
+		t.Fatalf("planner content = %q, want current scaffold", got)
+	}
+
+	manifest := readFile(t, filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath())))
+	if !strings.Contains(manifest, initconfig.SHA256Hex([]byte(wantPlanner))) {
+		t.Fatalf("manifest did not record refreshed planner hash:\n%s", manifest)
+	}
+}
+
+func TestApplyDoesNotRefreshManifestManagedFileWhenManifestWriteFails(t *testing.T) {
+	root := currentScaffold(t)
+	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")
+	oldContent := []byte("old managed planner\n")
+	writeFile(t, plannerPath, string(oldContent))
+	writeManifest(t, root, []initconfig.ScaffoldManifestFile{{
+		Path:   testPlannerPath,
+		SHA256: initconfig.SHA256Hex(oldContent),
+	}})
+
+	result := mustPlan(t, root)
+
+	orcDir := filepath.Join(root, ".orc")
+	if err := os.Chmod(orcDir, 0o500); err != nil {
+		t.Fatalf("chmod .orc: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if err := os.Chmod(orcDir, 0o750); err != nil {
+			t.Fatalf("restore .orc permissions: %v", err)
+		}
+	})
+
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
+	if err == nil {
+		t.Fatal("Apply returned nil error, want manifest write failure")
+	}
+
+	if !strings.Contains(err.Error(), initconfig.ScaffoldManifestPath()) {
+		t.Fatalf("Apply error = %v, want manifest write failure", err)
+	}
+
+	if got := readFile(t, plannerPath); got != string(oldContent) {
+		t.Fatalf("planner content = %q, want preserved old managed content", got)
+	}
+
+	if applied != nil && slices.Contains(applied.ModifiedPaths, testPlannerPath) {
+		t.Fatalf("modified paths = %#v, want planner omitted after manifest failure", applied.ModifiedPaths)
+	}
+}
+
+func TestApplyRestoresManifestWhenManifestManagedFileWriteFails(t *testing.T) {
+	root := currentScaffold(t)
+	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")
+	oldContent := []byte("old managed planner\n")
+	writeFile(t, plannerPath, string(oldContent))
+	writeManifest(t, root, []initconfig.ScaffoldManifestFile{{
+		Path:   testPlannerPath,
+		SHA256: initconfig.SHA256Hex(oldContent),
+	}})
+
+	manifestFile := filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath()))
+	oldManifest := readFile(t, manifestFile)
+	result := mustPlan(t, root)
+
+	agentsDir := filepath.Join(root, ".orc", "agents")
+	if err := os.Chmod(agentsDir, 0o500); err != nil {
+		t.Fatalf("chmod .orc/agents: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if err := os.Chmod(agentsDir, 0o750); err != nil {
+			t.Fatalf("restore .orc/agents permissions: %v", err)
+		}
+	})
+
+	_, err := Apply(context.Background(), result, ApplyOptions{})
+	if err == nil {
+		t.Fatal("Apply returned nil error, want scaffold file write failure")
+	}
+
+	if got := readFile(t, plannerPath); got != string(oldContent) {
+		t.Fatalf("planner content = %q, want preserved old managed content", got)
+	}
+
+	if got := readFile(t, manifestFile); got != oldManifest {
+		t.Fatalf("manifest content changed to:\n%s\nwant restored:\n%s", got, oldManifest)
+	}
+}
+
+func TestApplyPreservesCustomizedFileWhenManifestHashDiffers(t *testing.T) {
+	root := currentScaffold(t)
+	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")
+	writeFile(t, plannerPath, "custom planner\n")
+
+	result := mustPlan(t, root)
+
+	applied, err := Apply(context.Background(), result, ApplyOptions{})
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	if got := readFile(t, plannerPath); got != "custom planner\n" {
+		t.Fatalf("planner changed to %q, want preserved customization", got)
+	}
+
+	if !slices.ContainsFunc(applied.SkippedActions, func(skipped SkippedAction) bool {
+		return skipped.Path == testPlannerPath && skipped.Code == "customized-scaffold-file"
+	}) {
+		t.Fatalf("skipped actions = %#v, want customized planner", applied.SkippedActions)
+	}
+}
+
 func TestApplyRefusesCreateThroughSymlinkedParent(t *testing.T) {
 	root := legacyScaffold(t)
 
@@ -146,7 +338,7 @@ func TestApplyRefusesCreateThroughSymlinkedParent(t *testing.T) {
 func TestApplyReplacesKnownBaselineWithCurrentScaffold(t *testing.T) {
 	original := knownReplacementBaselines
 	knownReplacementBaselines = map[string][][]byte{
-		".orc/agents/planner.md": {[]byte("known v0 planner\n")},
+		testPlannerPath: {[]byte("known v0 planner\n")},
 	}
 
 	t.Cleanup(func() { knownReplacementBaselines = original })
@@ -160,7 +352,7 @@ func TestApplyReplacesKnownBaselineWithCurrentScaffold(t *testing.T) {
 		t.Fatalf("Apply returned error: %v", err)
 	}
 
-	want := string(scaffoldByPath()[".orc/agents/planner.md"])
+	want := string(scaffoldByPath()[testPlannerPath])
 	if got := readFile(t, target); got != want {
 		t.Fatalf("planner content = %q, want current scaffold %q", got, want)
 	}
@@ -379,7 +571,7 @@ func TestApplySkipsScaffoldCreateWhenConfigDependencyConflicts(t *testing.T) {
 	}
 
 	if !slices.ContainsFunc(applied.Conflicts, func(conflict Conflict) bool {
-		return conflict.Path == ".orc/runtimes/codex.yaml" && conflict.Code == "dependency-skipped"
+		return conflict.Path == ".orc/runtimes/codex.yaml" && conflict.Code == dependencySkippedCode
 	}) {
 		t.Fatalf("conflicts = %#v, want runtime dependency-skipped", applied.Conflicts)
 	}
@@ -439,6 +631,15 @@ func readFile(t *testing.T, path string) string {
 	}
 
 	return string(content)
+}
+
+func orderedPaths(writes []preparedWrite) []string {
+	paths := make([]string, 0, len(writes))
+	for _, write := range writes {
+		paths = append(paths, write.relPath)
+	}
+
+	return paths
 }
 
 func fakeVCSPath(t *testing.T, scripts map[string]string) string {

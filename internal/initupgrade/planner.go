@@ -62,6 +62,7 @@ type planner struct {
 	scaffold map[string][]byte
 	result   Result
 	config   configFile
+	manifest scaffoldManifestState
 }
 
 func (p *planner) plan() error {
@@ -73,6 +74,7 @@ func (p *planner) plan() error {
 	p.config = cfg
 	p.result.ConfigSchemaVersion = cfg.schemaVersion
 	p.result.CurrentSetupVersion = cfg.setupVersion
+	p.manifest = p.readManifest()
 
 	if warning, ok := config.OlderSetupWarning(cfg.data); ok {
 		p.warn("", "older-setup", warning, "")
@@ -80,8 +82,12 @@ func (p *planner) plan() error {
 
 	if cfg.setupVersion == 0 {
 		p.planMigration0To1()
+	} else {
+		p.planRequiredScaffoldFiles()
+		p.planStaleFiles()
 	}
 
+	p.planScaffoldManifest()
 	p.planRunsFollowUp()
 	p.sortResult()
 
@@ -251,6 +257,15 @@ func (p *planner) planRequiredScaffoldFiles() {
 			continue
 		}
 
+		if p.manifestProvesManaged(path, existing) {
+			action := p.modifyReturning(path, "refresh manifest-managed scaffold file with current scaffold content", identity(existing), []SurgicalEdit{{Kind: EditReplaceIfBaseline, Value: string(content)}})
+			if action != nil {
+				action.DependsOn = append(action.DependsOn, initconfig.ScaffoldManifestPath())
+			}
+
+			continue
+		}
+
 		if replacementBaselineMatches(path, existing) {
 			p.modify(path, "replace known setup v0 scaffold baseline with setup v1 scaffold content", identity(existing), []SurgicalEdit{{Kind: EditReplaceIfBaseline, Value: string(content)}})
 			continue
@@ -349,14 +364,20 @@ func (p *planner) create(path, reason string, content []byte) *Action {
 }
 
 func (p *planner) modify(path, reason string, fileID FileIdentity, edits []SurgicalEdit) {
+	_ = p.modifyReturning(path, reason, fileID, edits)
+}
+
+func (p *planner) modifyReturning(path, reason string, fileID FileIdentity, edits []SurgicalEdit) *Action {
 	if isRunsPath(path) {
 		p.conflict(path, "runs-path-excluded", ".orc/runs is excluded from setup upgrade planning", "do not plan setup upgrades under .orc/runs")
-		return
+		return nil
 	}
 
 	id := fileID
 	p.result.Actions = append(p.result.Actions, Action{Kind: ActionModify, Path: path, Reason: reason, Edits: edits, FileIdentity: &id})
 	p.result.AffectedPaths = append(p.result.AffectedPaths, AffectedPath{Path: path, Exists: true, FileIdentity: &id})
+
+	return &p.result.Actions[len(p.result.Actions)-1]
 }
 
 func (p *planner) warn(path, code, message, guidance string) {

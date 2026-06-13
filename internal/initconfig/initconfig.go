@@ -24,8 +24,8 @@ const (
 	runsIgnoreEntry     = ".orc/runs/"
 	filePermPrivate     = 0o600
 	dirPermPrivate      = 0o750
-	plannedExtraActions = 3
-	confirmYes          = "yes"
+	plannedExtraActions = 4
+	yesAnswer           = "yes"
 )
 
 var errUserDeclined = errors.New("user declined")
@@ -135,7 +135,14 @@ func (r runner) plan() ([]plannedAction, error) {
 		actions = append(actions, action)
 	}
 
-	action, err := r.planRuntimeDir()
+	action, err := r.planManifest(files)
+	if err != nil {
+		return nil, err
+	}
+
+	actions = append(actions, action)
+
+	action, err = r.planRuntimeDir()
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +235,18 @@ func (r runner) planFile(item scaffoldFile) (plannedAction, error) {
 	}
 
 	return plannedAction{}, target.err
+}
+
+func (r runner) planManifest(files []scaffoldFile) (plannedAction, error) {
+	scaffold := make([]ScaffoldFile, 0, len(files))
+	for _, file := range files {
+		scaffold = append(scaffold, ScaffoldFile{Path: file.path, Content: append([]byte(nil), file.content...)})
+	}
+
+	managed := ManagedScaffoldFiles(scaffold)
+	content := ScaffoldManifestContent(ManifestFilesForScaffold(managed))
+
+	return r.planFile(scaffoldFile{path: ScaffoldManifestPath(), content: content})
 }
 
 func (r runner) planGitignore() (plannedAction, error) {
@@ -434,7 +453,7 @@ func (r runner) confirm(prompt string) (bool, error) {
 
 	normalized := strings.ToLower(strings.TrimSpace(answer))
 
-	return normalized == "y" || normalized == confirmYes, nil
+	return normalized == "y" || normalized == yesAnswer, nil
 }
 
 func (r runner) report(action, target string) error {

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"tiny-llm-orchestrator/orc/internal/initconfig"
 	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
@@ -103,6 +104,8 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 	conflicts = append(conflicts, depConflicts...)
 	addBlockedConflicts(blocked, depConflicts)
 
+	writes = orderPreparedWritesForApply(writes, actions)
+
 	result := &ApplyResult{
 		ProjectRoot:          root,
 		ConfigSchemaVersion:  plan.ConfigSchemaVersion,
@@ -124,6 +127,13 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 		}
 
 		if err := writePreparedFile(write); err != nil {
+			rolledBack, rollbackErr := rollbackManifestRefreshGroupAfterFailure(write, actions, writesAppliedBefore(writes, result))
+			if rollbackErr != nil {
+				return nil, rollbackErr
+			}
+
+			removeModifiedPaths(result, rolledBack)
+
 			conflict, ok := actionConflict(write.relPath, err)
 			if !ok {
 				return nil, err
@@ -149,6 +159,25 @@ func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, 
 	}
 
 	return result, nil
+}
+
+func writesAppliedBefore(writes []preparedWrite, result *ApplyResult) []preparedWrite {
+	applied := make([]preparedWrite, 0, len(result.CreatedPaths)+len(result.ModifiedPaths))
+	for _, write := range writes {
+		if slices.Contains(result.CreatedPaths, write.relPath) || slices.Contains(result.ModifiedPaths, write.relPath) {
+			applied = append(applied, write)
+		}
+	}
+
+	return applied
+}
+
+func removeModifiedPaths(result *ApplyResult, paths []string) {
+	for _, path := range paths {
+		result.ModifiedPaths = slices.DeleteFunc(result.ModifiedPaths, func(modified string) bool {
+			return modified == path
+		})
+	}
 }
 
 type preparedWrite struct {
@@ -372,6 +401,35 @@ func filterPreparedWritesByDependencies(writes []preparedWrite, actions []Action
 	return out, orderedConflicts(conflicts)
 }
 
+func orderPreparedWritesForApply(writes []preparedWrite, actions []Action) []preparedWrite {
+	ordered := append([]preparedWrite(nil), writes...)
+
+	slices.SortStableFunc(ordered, func(a, b preparedWrite) int {
+		aDependsOnB := actionDependsOn(actions, a.relPath, b.relPath)
+		bDependsOnA := actionDependsOn(actions, b.relPath, a.relPath)
+
+		switch {
+		case aDependsOnB && !bDependsOnA:
+			return 1
+		case bDependsOnA && !aDependsOnB:
+			return -1
+		}
+
+		if aDependsOnB && bDependsOnA {
+			switch {
+			case a.relPath == initconfig.ScaffoldManifestPath():
+				return -1
+			case b.relPath == initconfig.ScaffoldManifestPath():
+				return 1
+			}
+		}
+
+		return strings.Compare(a.relPath, b.relPath)
+	})
+
+	return ordered
+}
+
 func blockedByDependency(path string, actions []Action, blocked map[string]struct{}) bool {
 	for _, action := range actions {
 		if action.Path != path {
@@ -413,10 +471,70 @@ func dependencyConflict(path string, actions []Action) Conflict {
 func dependencyConflictFor(path, dep string) Conflict {
 	return Conflict{
 		Path:     path,
-		Code:     "dependency-skipped",
+		Code:     dependencySkippedCode,
 		Message:  fmt.Sprintf("planned action depends on %s, which was not safe to apply", dep),
 		Guidance: "resolve the dependency conflict and rerun orc init upgrade",
 	}
+}
+
+func rollbackManifestRefreshGroupAfterFailure(failed preparedWrite, actions []Action, applied []preparedWrite) ([]string, error) {
+	if !actionDependsOn(actions, failed.relPath, initconfig.ScaffoldManifestPath()) {
+		return nil, nil
+	}
+
+	var rolledBack []string
+
+	for i := len(applied) - 1; i >= 0; i-- {
+		write := applied[i]
+		if write.kind != ActionModify {
+			continue
+		}
+
+		if write.relPath != initconfig.ScaffoldManifestPath() && !actionDependsOn(actions, write.relPath, initconfig.ScaffoldManifestPath()) {
+			continue
+		}
+
+		if err := rollbackModifyWrite(write); err != nil {
+			return rolledBack, fmt.Errorf("rollback %s after %s failed: %w", write.relPath, failed.relPath, err)
+		}
+
+		rolledBack = append(rolledBack, write.relPath)
+	}
+
+	return rolledBack, nil
+}
+
+func rollbackModifyWrite(write preparedWrite) error {
+	if err := validateSafeExistingFile(write.root, write.relPath); err != nil {
+		return err
+	}
+
+	current, err := os.ReadFile(write.absPath) // #nosec G304 -- path is constrained to a planned project-local target.
+	if err != nil {
+		return fmt.Errorf("read %s: %w", write.relPath, err)
+	}
+
+	if !bytes.Equal(current, write.next) {
+		return stableerr.Errorf("%s changed before init upgrade rollback; leaving it unchanged", write.relPath)
+	}
+
+	if err := writeExistingAtomic(write.absPath, write.expected); err != nil {
+		return fmt.Errorf("restore %s: %w", write.relPath, err)
+	}
+
+	return nil
+}
+
+func actionDependsOn(actions []Action, path, dep string) bool {
+	for _, action := range actions {
+		if action.Path != path {
+			continue
+		}
+
+		return slices.Contains(action.DependsOn, dep)
+	}
+
+	return false
 }
 
 func blockedConflictPaths(conflicts []Conflict) map[string]struct{} {

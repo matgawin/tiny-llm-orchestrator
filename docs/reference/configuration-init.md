@@ -35,6 +35,9 @@ directory:
   `AGENTS.md`; `--yes` skips `AGENTS.md` creation or update; v1 only supports
   `AGENTS.md`.
 - `orc init` creates and ignores `.orc/runs/`.
+- `orc init` creates `.orc/scaffold.lock.yaml` with SHA-256 ownership hashes
+  for scaffold-managed files under `.orc/agents/`, `.orc/workflows/`, and
+  `.orc/runtimes/`.
 - Persistent files under `.orc/` are user-owned and reviewable; runtime run
   state belongs under the ignored `.orc/runs/` directory; see
   [run-store-layout.md](run-store-layout.md) for the durable file contract.
@@ -73,6 +76,24 @@ The scaffold also includes `.orc/runtimes/codex.yaml` and references it from
 `defaults.runtime: codex`, so existing agent-only steps have an explicit
 effective runtime while preserving the agent descriptor ids used in persisted
 attempt metadata.
+
+The scaffold ownership manifest is `.orc/scaffold.lock.yaml`:
+
+```yaml
+version: 1
+setup_version: 1
+files:
+  - path: .orc/agents/planner.md
+    sha256: <sha256>
+```
+
+Manifest paths are slash-separated project-relative paths sorted
+lexicographically. `sha256` is the SHA-256 digest of the exact bytes Orc last
+wrote for that scaffold file. The manifest excludes `.orc/config.yaml`,
+`.orc/runs/**`, `.gitignore`, and `AGENTS.md`. Config stays under explicit
+semantic migration rules, `.orc/runs/**` is runtime state, and `.gitignore` plus
+`AGENTS.md` use append or section policies instead of whole-file scaffold
+ownership.
 
 The scaffolded Codex runtime descriptor is:
 

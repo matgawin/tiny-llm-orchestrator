@@ -22,6 +22,7 @@ func TestRunDryRunReportsWithoutWriting(t *testing.T) {
 	output := stdout.String()
 	for _, want := range append([]string{
 		"orc init dry-run:",
+		"would create .orc/scaffold.lock.yaml",
 		"would create .orc/runs",
 		"would create .gitignore with " + runsIgnoreEntry,
 		"would prompt before creating AGENTS.md",
@@ -56,6 +57,7 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 	}
 
 	assertGeneratedScaffoldMatchesFixture(t, root)
+	assertGeneratedScaffoldManifest(t, root)
 	assertGeneratedSkippableWorkflowPolicy(t, root)
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "setup_version: 1\n")
 	assertFileContains(t, filepath.Join(root, ".orc", "config.yaml"), "  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4")
@@ -128,6 +130,7 @@ func TestRunYesIsIdempotentForMatchingFiles(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"exists .orc/config.yaml",
+		"exists .orc/scaffold.lock.yaml",
 		"exists .gitignore entry " + runsIgnoreEntry,
 	} {
 		if !strings.Contains(output, want) {
@@ -577,6 +580,40 @@ func assertFileMatchesFixture(t *testing.T, root, relPath string) {
 	}
 }
 
+func assertGeneratedScaffoldManifest(t *testing.T, root string) {
+	t.Helper()
+
+	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(scaffoldManifestPath)))
+	if err != nil {
+		t.Fatalf("read scaffold manifest: %v", err)
+	}
+
+	text := string(content)
+	for _, want := range []string{
+		"version: 1\n",
+		"setup_version: 1\n",
+		"  - path: .orc/agents/planner.md\n",
+		"  - path: .orc/runtimes/codex.yaml\n",
+		"  - path: .orc/workflows/implementation.yaml\n",
+		"    sha256: ",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("manifest missing %q:\n%s", want, text)
+		}
+	}
+
+	for _, excluded := range []string{
+		"path: .orc/config.yaml",
+		"path: .orc/runs",
+		"path: .gitignore",
+		"path: AGENTS.md",
+	} {
+		if strings.Contains(text, excluded) {
+			t.Fatalf("manifest contains excluded entry %q:\n%s", excluded, text)
+		}
+	}
+}
+
 func projectWithGitignoreAndInstructions(t *testing.T, instructions string) (string, string) {
 	t.Helper()
 
@@ -650,7 +687,7 @@ func runWithGitignore(t *testing.T, content string, opts Options) gitignoreRun {
 }
 
 func confirmOverwriteConfigCreateGitignoreAndInstructions() *strings.Reader {
-	return strings.NewReader(strings.Join([]string{confirmYes, confirmYes, confirmYes}, "\n") + "\n")
+	return strings.NewReader(strings.Join([]string{yesAnswer, yesAnswer, yesAnswer}, "\n") + "\n")
 }
 
 func readGitignore(t *testing.T, path string) []byte {

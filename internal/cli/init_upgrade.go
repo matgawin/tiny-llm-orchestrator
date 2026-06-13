@@ -86,7 +86,7 @@ func initUpgradeHelpLong() string {
 
 Bare orc init upgrade is plan-only and writes nothing. Use --apply to write safe independent planned changes; conflicts block only their own path and dependent actions when the rest of the plan is safe. No separate dry-run flag exists for this command because the bare command is the dry-run behavior.
 
-The upgrade scope is .orc/config.yaml setup_version, .orc/runtimes/*.yaml, .orc/workflows/*.yaml, .orc/agents/*.md, .gitignore only for .orc/runs/, and managed Tiny Orc guidance in AGENTS.md. It never modifies .orc/runs/**. Existing runs keep pinned config snapshots; after applying live setup changes, run orc run refresh-config <run-id> for runs that should adopt the new setup.`
+The upgrade scope is .orc/config.yaml setup_version, .orc/scaffold.lock.yaml ownership metadata, .orc/runtimes/*.yaml, .orc/workflows/*.yaml, .orc/agents/*.md, .gitignore only for .orc/runs/, and managed Tiny Orc guidance in AGENTS.md. It never modifies .orc/runs/**. Existing runs keep pinned config snapshots; after applying live setup changes, run orc run refresh-config <run-id> for runs that should adopt the new setup.`
 }
 
 func executeInitUpgrade(opts initUpgradeOptions, stdout, stderr io.Writer) error {
@@ -246,7 +246,7 @@ func printInitUpgradePlan(stdout io.Writer, plan *initupgrade.Result) error {
 		return fmt.Errorf("print init upgrade plan: %w", err)
 	}
 
-	if _, err := fmt.Fprintln(stdout, "includes: .orc/config.yaml setup_version, .orc/runtimes/*.yaml, .orc/workflows/*.yaml, .orc/agents/*.md, .gitignore only for .orc/runs/, managed Tiny Orc guidance in AGENTS.md"); err != nil {
+	if _, err := fmt.Fprintln(stdout, "includes: .orc/config.yaml setup_version, .orc/scaffold.lock.yaml ownership metadata, .orc/runtimes/*.yaml, .orc/workflows/*.yaml, .orc/agents/*.md, .gitignore only for .orc/runs/, managed Tiny Orc guidance in AGENTS.md"); err != nil {
 		return fmt.Errorf("print init upgrade plan: %w", err)
 	}
 

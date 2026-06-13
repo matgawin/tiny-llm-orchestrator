@@ -99,6 +99,7 @@ upgrade implementation. V1 defines current setup version `1`. New scaffolded
 Included surfaces:
 
 - `.orc/config.yaml`
+- `.orc/scaffold.lock.yaml`
 - `.orc/runtimes/*.yaml`
 - `.orc/workflows/*.yaml` referenced by `.orc/config.yaml`
 - `.orc/agents/*.md` referenced by `.orc/config.yaml`
@@ -138,6 +139,54 @@ Existing YAML files should be represented as surgical edits where feasible so
 comments and key order are preserved. Whole-file normalized rewrites of
 existing files are out of scope. New files may use scaffold formatting.
 
+## Scaffold Ownership Manifest
+
+The scaffold ownership manifest is `.orc/scaffold.lock.yaml`. It records the
+setup version and the exact byte identity Orc last wrote for manifest-managed
+scaffold files:
+
+```yaml
+version: 1
+setup_version: 1
+files:
+  - path: .orc/agents/planner.md
+    sha256: <hex sha256 of last Orc-written bytes>
+```
+
+Manifest paths are slash-separated project-relative paths sorted
+lexicographically. Hashes are SHA-256 over exact file bytes. Orc does not
+normalize line endings, YAML formatting, comments, or trailing newlines before
+hashing.
+
+The manifest owns embedded scaffold descriptors under `.orc/agents/`,
+`.orc/workflows/`, and `.orc/runtimes/`. It excludes `.orc/config.yaml`,
+`.orc/runs/**`, `.gitignore`, and `AGENTS.md`. `.orc/config.yaml` remains
+migrated only by explicit semantic or surgical rules. The manifest must not
+justify whole-file config replacement.
+
+`orc init` creates the manifest for new projects. `orc init upgrade` creates it
+for existing projects when the target path is missing and the entries can be
+derived from safe managed content. Safe manifest entries are current embedded
+scaffold files that are byte-equal on disk, files created by the same apply, or
+files replaced from an exact known baseline or a valid manifest ownership
+proof. Customized or skipped files are not recorded as managed.
+
+For future scaffold refreshes, a valid manifest entry whose `sha256` matches
+the live file hash is the primary proof that the file is still Orc-managed. If
+the embedded scaffold changes, upgrade planning may replace that file with the
+current scaffold content and update its manifest entry in the same plan. If the
+live file hash differs from the manifest entry, the file is customized and is
+preserved as a `customized-scaffold-file` skipped action unless a narrow
+explicit migration rule handles that exact content.
+
+When the manifest is missing, invalid, or incomplete, upgrade planning remains
+conservative. Orc falls back to byte-for-byte current scaffold checks, exact
+known replacement baselines, missing-file creation, and manual-refresh skipped
+items. Invalid manifest data must not make replacement more permissive. If an
+existing manifest cannot be parsed or uses an unsupported schema, Orc reports a
+path-specific `invalid-scaffold-manifest` conflict and leaves the file
+unchanged.
+
 ## Safety Rules
 
 Local project customizations are preserved. The upgrader may apply only
@@ -150,6 +199,7 @@ Safe changes include:
 - adding structurally unambiguous missing fields
 - creating required scaffold files when the target path does not exist
 - replacing an exact known scaffold baseline
+- replacing a scaffold file whose live bytes match a valid manifest entry
 - removing or migrating deprecated fields only when semantics are unambiguous
 
 Unsafe or ambiguous cases become warnings or conflicts with exact operator
@@ -171,8 +221,8 @@ Conflict behavior:
   specific config edit, and `.orc/runs/**` exclusions.
 - Customized or unknown existing scaffold-managed files under `.orc/agents/`,
   `.orc/workflows/`, and `.orc/runtimes/` become nonfatal skipped actions with
-  stable code `customized-scaffold-file` unless an exact current scaffold match
-  or exact known replacement baseline applies.
+  stable code `customized-scaffold-file` unless an exact current scaffold match,
+  an exact known replacement baseline, or valid manifest hash match applies.
 - Path conflicts for missing new files become conflicts.
 - Deprecated fields with no unambiguous replacement become warnings or
   conflicts, not silent removals.
@@ -212,6 +262,9 @@ Existing scaffold-file behavior:
 
 - Byte-for-byte equality with the current embedded scaffold is a no-op. No
   action and no skipped item is emitted for that file.
+- A valid `.orc/scaffold.lock.yaml` entry whose hash matches the live file is
+  the primary ownership proof for automatic scaffold refresh when the embedded
+  scaffold changes.
 - Exact known replacement baselines remain the automatic replacement mechanism
   for pre-manifest historical scaffolds. When a file exactly matches such a
   baseline, apply may replace it with the current embedded scaffold content
@@ -227,6 +280,9 @@ Existing scaffold-file behavior:
   current embedded scaffold or docs.
 - `.orc/config.yaml` is not a whole-file scaffold replacement target. It remains
   migrated only by explicit surgical YAML rules.
+- `.orc/scaffold.lock.yaml` is updated only through the same safe write path as
+  other upgrade files. Apply rejects symlink parents or targets, `.orc/runs/**`
+  paths, unsafe overwrites, and changed-during-apply identity mismatches.
 
 Stale-file behavior:
 
@@ -249,14 +305,22 @@ Local-edit behavior:
   but it must warn that affected-file dirtiness could not be checked.
 - Changed-during-apply content verification still applies per action. If one
   target changes after planning, reject that write and continue with unrelated
-  safe writes. Earlier successful writes are not rolled back.
+  safe writes. Earlier successful independent writes are not rolled back. When a
+  manifest-managed scaffold refresh fails after `.orc/scaffold.lock.yaml` or
+  another file in the same manifest refresh group was written, apply restores
+  the already-written manifest refresh group entries before reporting the
+  failure.
 - Do not create backup files by default.
 
 Apply ordering:
 
 - Compute the safe actionable subset and dependency-skipped subset before
   writing.
-- Write actions in stable path order.
+- Write actions after dependency ordering. Stable path order is the tie-breaker
+  for independent actions.
+- When manifest refresh actions depend on each other, write
+  `.orc/scaffold.lock.yaml` before the paired scaffold file so a later scaffold
+  write failure can restore the manifest refresh group.
 - If a later action fails a changed-during-apply or filesystem safety check
   after earlier independent writes succeeded, report partial failure with both
   the written paths and the unresolved conflict.

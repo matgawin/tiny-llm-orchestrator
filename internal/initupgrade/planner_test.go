@@ -10,6 +10,11 @@ import (
 	"tiny-llm-orchestrator/orc/internal/initconfig"
 )
 
+const (
+	testPlannerPath  = ".orc/agents/planner.md"
+	testWorkflowPath = ".orc/workflows/implementation.yaml"
+)
+
 func TestPlanAlreadyCurrentSetupHasNoUpgradeActions(t *testing.T) {
 	root := currentScaffold(t)
 
@@ -91,10 +96,95 @@ func TestPlanCustomizedExistingScaffoldFileIsSkippedForManualRefresh(t *testing.
 
 	result := mustPlan(t, root)
 
-	assertSkippedAction(t, result, ".orc/agents/planner.md", "customized-scaffold-file")
+	assertSkippedAction(t, result, testPlannerPath, "customized-scaffold-file")
 
 	if len(result.Conflicts) != 0 {
 		t.Fatalf("conflicts = %#v, want none for customized scaffold", result.Conflicts)
+	}
+}
+
+func TestPlanMissingManifestCreatesOwnershipManifest(t *testing.T) {
+	root := currentScaffold(t)
+	removeFile(t, filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath())))
+
+	result := mustPlan(t, root)
+
+	action := assertAction(t, result, ActionCreate, initconfig.ScaffoldManifestPath())
+	content := string(action.Content)
+
+	for _, want := range []string{
+		"version: 1\n",
+		"setup_version: 1\n",
+		"  - path: " + testPlannerPath + "\n",
+		"  - path: .orc/runtimes/codex.yaml\n",
+		"  - path: .orc/workflows/implementation.yaml\n",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("manifest create missing %q:\n%s", want, content)
+		}
+	}
+
+	for _, excluded := range []string{"path: .orc/config.yaml", "path: .orc/runs", "path: .gitignore", "path: AGENTS.md"} {
+		if strings.Contains(content, excluded) {
+			t.Fatalf("manifest create contains excluded entry %q:\n%s", excluded, content)
+		}
+	}
+}
+
+func TestPlanInvalidManifestFallsBackWithoutOverwritingManifest(t *testing.T) {
+	root := currentScaffold(t)
+	writeFile(t, filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath())), "version: nope\n")
+	writeFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "custom planner\n")
+
+	result := mustPlan(t, root)
+
+	assertConflict(t, result, initconfig.ScaffoldManifestPath(), "invalid-scaffold-manifest")
+	assertSkippedAction(t, result, testPlannerPath, "customized-scaffold-file")
+
+	for _, action := range result.Actions {
+		if action.Path == initconfig.ScaffoldManifestPath() {
+			t.Fatalf("manifest action = %#v, want none for invalid manifest", action)
+		}
+	}
+}
+
+func TestPlanManifestHashMatchEnablesManagedRefresh(t *testing.T) {
+	root := currentScaffold(t)
+	plannerPath := filepath.Join(root, ".orc", "agents", "planner.md")
+	oldContent := []byte("old managed planner\n")
+	writeFile(t, plannerPath, string(oldContent))
+	writeManifest(t, root, []initconfig.ScaffoldManifestFile{{
+		Path:   testPlannerPath,
+		SHA256: initconfig.SHA256Hex(oldContent),
+	}})
+
+	result := mustPlan(t, root)
+
+	action := assertAction(t, result, ActionModify, testPlannerPath)
+	assertEdit(t, action, EditReplaceIfBaseline, "")
+
+	if !slices.Contains(action.DependsOn, initconfig.ScaffoldManifestPath()) {
+		t.Fatalf("planner action dependencies = %#v, want manifest dependency", action.DependsOn)
+	}
+
+	manifest := assertAction(t, result, ActionModify, initconfig.ScaffoldManifestPath())
+	if !slices.Contains(manifest.DependsOn, testPlannerPath) {
+		t.Fatalf("manifest dependencies = %#v, want planner dependency", manifest.DependsOn)
+	}
+}
+
+func TestPlanManifestHashMismatchPreservesCustomizedFile(t *testing.T) {
+	root := currentScaffold(t)
+	writeFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "custom planner\n")
+
+	result := mustPlan(t, root)
+
+	assertSkippedAction(t, result, testPlannerPath, "customized-scaffold-file")
+
+	for _, action := range result.Actions {
+		if action.Path == testPlannerPath {
+			t.Fatalf("planner action = %#v, want no refresh for hash mismatch", action)
+		}
 	}
 }
 
@@ -104,7 +194,7 @@ func TestPlanUnknownHistoricalFileIsSkippedForManualRefresh(t *testing.T) {
 
 	result := mustPlan(t, root)
 
-	assertSkippedAction(t, result, ".orc/agents/planner.md", "customized-scaffold-file")
+	assertSkippedAction(t, result, testPlannerPath, "customized-scaffold-file")
 
 	if len(result.Conflicts) != 0 {
 		t.Fatalf("conflicts = %#v, want none for unknown scaffold content", result.Conflicts)
@@ -218,6 +308,7 @@ func legacyScaffold(t *testing.T) string {
 
 	root := currentScaffold(t)
 	replaceInFile(t, filepath.Join(root, ".orc", "config.yaml"), "setup_version: 1\n", "")
+	removeFile(t, filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath())))
 
 	return root
 }
@@ -323,4 +414,18 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func removeFile(t *testing.T, path string) {
+	t.Helper()
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove %s: %v", path, err)
+	}
+}
+
+func writeManifest(t *testing.T, root string, files []initconfig.ScaffoldManifestFile) {
+	t.Helper()
+
+	writeFile(t, filepath.Join(root, filepath.FromSlash(initconfig.ScaffoldManifestPath())), string(initconfig.ScaffoldManifestContent(files)))
 }
