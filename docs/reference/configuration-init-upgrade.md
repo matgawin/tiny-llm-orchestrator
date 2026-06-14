@@ -265,9 +265,10 @@ must not block unrelated valid workflow files in the same plan.
 
 Config, runtime, and agent helpers expose the same structured map operations.
 They inspect nested map fields through `YAMLPath` segments and return
-AST-backed edits such as add, set, remove, and map-entry addition. They must not
-build line edits, pre-render whole-file replacements, or add list mutation
-syntax.
+AST-backed edits with `ast_add_yaml_field`, `ast_set_yaml_field`,
+`ast_remove_yaml_field`, or `ast_add_yaml_map_entry` kinds. Schema migrations
+must not emit the legacy line-oriented YAML edit kinds, pre-render whole-file
+replacements, or add list mutation syntax.
 
 Structural predicates must be idempotent:
 
@@ -296,9 +297,9 @@ relevant migration id through the action reason, conflict message, or guidance.
 ### `config-defaults-max-loops-to-loop-caps`
 
 `config-defaults-max-loops-to-loop-caps` is the first production schema
-migration. It targets only `.orc/config.yaml`. It does not target workflow
-files, runtime descriptors, agent descriptors, `.orc/scaffold.lock.yaml`, or
-anything under `.orc/runs/**`.
+migration ported to the AST edit engine. It targets only `.orc/config.yaml`. It
+does not target workflow files, runtime descriptors, agent descriptors,
+`.orc/scaffold.lock.yaml`, or anything under `.orc/runs/**`.
 
 The migration reads raw `.orc/config.yaml` YAML before typed project config
 validation. It can plan when the current `config.Load` path would reject another
@@ -322,10 +323,12 @@ defaults:
     hard: 4
 ```
 
-The edit is surgical. Comments and surrounding key order are preserved where
-the YAML edit engine can preserve them. The migration is not limited to
-scaffold-owned config files, so customized `.orc/config.yaml` files are eligible
-when the same structural predicate matches.
+The edit is surgical. It plans `ast_remove_yaml_field defaults.max_loops` and
+`ast_add_yaml_field defaults.loop_caps`, then applies those edits through the
+AST renderer after the file identity check. Comments and surrounding key order
+are preserved where the YAML edit engine can preserve them. The migration is
+not limited to scaffold-owned config files, so customized `.orc/config.yaml`
+files are eligible when the same structural predicate matches.
 
 Current shape:
 

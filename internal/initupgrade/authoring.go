@@ -72,6 +72,22 @@ func (h yamlMapHandle) AddMapEntry(field, value string) SurgicalEdit {
 	return SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: h.path, Key: field, Value: value}
 }
 
+func (h yamlMapHandle) AddASTField(field, value string) SurgicalEdit {
+	return SurgicalEdit{Kind: EditASTAddYAMLField, Path: h.path.Child(field), Value: value}
+}
+
+func (h yamlMapHandle) SetASTField(field, value string) SurgicalEdit {
+	return SurgicalEdit{Kind: EditASTSetYAMLField, Path: h.path.Child(field), Value: value}
+}
+
+func (h yamlMapHandle) RemoveASTField(field string) SurgicalEdit {
+	return SurgicalEdit{Kind: EditASTRemoveYAMLField, Path: h.path.Child(field)}
+}
+
+func (h yamlMapHandle) AddASTMapEntry(field, value string) SurgicalEdit {
+	return SurgicalEdit{Kind: EditASTAddYAMLMapEntry, Path: h.path, Key: field, Value: value}
+}
+
 type workflowStepVisit struct {
 	ID   string
 	Path YAMLPath

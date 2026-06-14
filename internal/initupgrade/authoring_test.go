@@ -67,7 +67,7 @@ func TestWorkflowStepVisitorPlansScaffoldAndOrphanWorkflowSteps(t *testing.T) {
 
 	for _, path := range []string{testWorkflowPath, orphanPath} {
 		action := assertAction(t, result, ActionModify, path)
-		assertEditPathPrefix(t, action, EditAddYAMLField, "steps.")
+		assertEditPathPrefix(t, action, EditASTAddYAMLField, "steps.")
 	}
 
 	applied, err := Apply(context.Background(), result, ApplyOptions{})
@@ -152,8 +152,8 @@ func TestAgentFrontmatterHelperPreservesBodyAndNoOpsWithoutFrontmatter(t *testin
 			}
 
 			return schemaMigrationDecision{Edits: []SurgicalEdit{
-				frontmatter.RemoveField("legacy"),
-				frontmatter.AddField("modern", yamlScalarTrue),
+				frontmatter.RemoveASTField("legacy"),
+				frontmatter.AddASTField("modern", yamlScalarTrue),
 			}}
 		},
 	})
@@ -196,15 +196,15 @@ func TestRuntimeYAMLHelperMutatesNestedMapThroughSharedEngine(t *testing.T) {
 			}
 
 			return schemaMigrationDecision{Edits: []SurgicalEdit{
-				options.RemoveField("legacy"),
-				options.AddField("modern", yamlScalarTrue),
+				options.RemoveASTField("legacy"),
+				options.AddASTField("modern", yamlScalarTrue),
 			}}
 		},
 	})
 
 	action := assertAction(t, result, ActionModify, runtimePath)
-	assertEdit(t, action, EditRemoveYAMLField, "options.legacy")
-	assertEdit(t, action, EditAddYAMLField, "options.modern")
+	assertEdit(t, action, EditASTRemoveYAMLField, "options.legacy")
+	assertEdit(t, action, EditASTAddYAMLField, "options.modern")
 
 	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
 		t.Fatalf("Apply returned error: %v", err)
@@ -227,7 +227,7 @@ func testWorkflowStepMigration() schemaMigration {
 					return nil, nil
 				}
 
-				return []SurgicalEdit{step.Map.AddField("visited", step.ID)}, nil
+				return []SurgicalEdit{step.Map.AddASTField("visited", step.ID)}, nil
 			})
 		},
 	}

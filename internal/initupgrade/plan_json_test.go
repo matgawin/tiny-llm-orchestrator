@@ -13,8 +13,8 @@ func TestSurgicalEditJSONUsesPathOnlyForStructuredYAMLEdits(t *testing.T) {
 		wantPath bool
 	}{
 		{
-			name:     "YAML edit",
-			edit:     SurgicalEdit{Kind: EditAddYAMLField, Path: mustYAMLPath("defaults.loop_caps"), Value: yamlEnabledTrue},
+			name:     "AST YAML edit",
+			edit:     SurgicalEdit{Kind: EditASTAddYAMLField, Path: mustYAMLPath("defaults.loop_caps"), Value: yamlEnabledTrue},
 			wantPath: true,
 		},
 		{

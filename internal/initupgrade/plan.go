@@ -22,6 +22,11 @@ const (
 type EditKind string
 
 const (
+	EditASTAddYAMLField    EditKind = "ast_add_yaml_field"
+	EditASTSetYAMLField    EditKind = "ast_set_yaml_field"
+	EditASTRemoveYAMLField EditKind = "ast_remove_yaml_field"
+	EditASTAddYAMLMapEntry EditKind = "ast_add_yaml_map_entry"
+
 	EditAddYAMLField      EditKind = "add_yaml_field"
 	EditSetYAMLField      EditKind = "set_yaml_field"
 	EditRemoveYAMLField   EditKind = "remove_yaml_field"

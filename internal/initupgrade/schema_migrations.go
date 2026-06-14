@@ -113,8 +113,8 @@ func exactSchemaMigrationTarget(path string) func(string) bool {
 
 func maxLoopsToLoopCapsEdits(soft, hard string) []SurgicalEdit {
 	return []SurgicalEdit{
-		{Kind: EditRemoveYAMLField, Path: mustYAMLPath("defaults.max_loops")},
-		{Kind: EditAddYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: "enabled: true\nsoft: " + soft + "\nhard: " + hard},
+		{Kind: EditASTRemoveYAMLField, Path: mustYAMLPath("defaults.max_loops")},
+		{Kind: EditASTAddYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: "enabled: true\nsoft: " + soft + "\nhard: " + hard},
 	}
 }
 

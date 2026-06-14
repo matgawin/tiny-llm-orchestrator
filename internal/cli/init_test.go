@@ -413,7 +413,7 @@ func TestInitUpgradeOutputIncludesSchemaMigrationReason(t *testing.T) {
 			Path:   ".orc/workflows/custom.yaml",
 			Reason: schemaMigrationReason,
 			Edits: []initupgrade.SurgicalEdit{{
-				Kind:  initupgrade.EditAddYAMLField,
+				Kind:  initupgrade.EditASTAddYAMLField,
 				Path:  editPath,
 				Value: "true",
 			}},
@@ -427,7 +427,7 @@ func TestInitUpgradeOutputIncludesSchemaMigrationReason(t *testing.T) {
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		schemaMigrationReason,
-		"edit: add_yaml_field new_field",
+		"edit: ast_add_yaml_field new_field",
 	})
 
 	payload := initUpgradePlanJSON(plan)
@@ -457,16 +457,16 @@ func TestExecuteInitUpgradeOutputsProductionSchemaMigration(t *testing.T) {
 		t.Fatalf("action reason = %q, want production schema migration", action.Reason)
 	}
 
-	if !hasInitUpgradeJSONEdit(action.Edits, string(initupgrade.EditRemoveYAMLField), "defaults.max_loops") ||
-		!hasInitUpgradeJSONEdit(action.Edits, string(initupgrade.EditAddYAMLField), "defaults.loop_caps") {
+	if !hasInitUpgradeJSONEdit(action.Edits, string(initupgrade.EditASTRemoveYAMLField), "defaults.max_loops") ||
+		!hasInitUpgradeJSONEdit(action.Edits, string(initupgrade.EditASTAddYAMLField), "defaults.loop_caps") {
 		t.Fatalf("action edits = %#v, want max_loops removal and loop_caps add", action.Edits)
 	}
 
 	output := executeCLICommand(t, []string{commandInit, commandUpgrade})
 	assertCLIOutputContainsAll(t, output, []string{
 		"schema migration config-defaults-max-loops-to-loop-caps: migrate defaults.max_loops to defaults.loop_caps",
-		"edit: remove_yaml_field defaults.max_loops",
-		"edit: add_yaml_field defaults.loop_caps",
+		"edit: ast_remove_yaml_field defaults.max_loops",
+		"edit: ast_add_yaml_field defaults.loop_caps",
 	})
 }
 

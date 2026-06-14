@@ -27,8 +27,8 @@ func TestProductionConfigMaxLoopsMigrationPlansAndApplies(t *testing.T) {
 		t.Fatalf("reason = %q, want production schema migration id", action.Reason)
 	}
 
-	assertEdit(t, action, EditRemoveYAMLField, "defaults.max_loops")
-	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
+	assertEdit(t, action, EditASTRemoveYAMLField, "defaults.max_loops")
+	assertEdit(t, action, EditASTAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
 
 	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
 		t.Fatalf("Apply returned error: %v", err)
@@ -112,7 +112,7 @@ func TestProductionConfigMaxLoopsMigrationPreservesLegacyBlankBehavior(t *testin
 
 	result := mustPlan(t, root)
 	action := assertAction(t, result, ActionModify, configPath)
-	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
+	assertEdit(t, action, EditASTAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
 
 	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
 		t.Fatalf("Apply returned error: %v", err)
@@ -169,8 +169,8 @@ func TestSchemaMigrationPlansOrphanEligibleWorkflow(t *testing.T) {
 		t.Fatalf("reason = %q, want schema migration id and summary", action.Reason)
 	}
 
-	assertEdit(t, action, EditRemoveYAMLField, "legacy_field")
-	assertEdit(t, action, EditAddYAMLField, "modern_field")
+	assertEdit(t, action, EditASTRemoveYAMLField, "legacy_field")
+	assertEdit(t, action, EditASTAddYAMLField, "modern_field")
 }
 
 func TestSchemaMigrationPlansAndAppliesEligibleSurfaces(t *testing.T) {
@@ -217,20 +217,20 @@ func TestSchemaMigrationConflictsOnOverlappingYAMLEditPaths(t *testing.T) {
 		second SurgicalEdit
 	}{
 		"equal path": {
-			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: "enabled: false"},
-			second: SurgicalEdit{Kind: EditRemoveYAMLField, Path: configDefaultsLoopCapsYAMLPath},
+			first:  SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: "enabled: false"},
+			second: SurgicalEdit{Kind: EditASTRemoveYAMLField, Path: configDefaultsLoopCapsYAMLPath},
 		},
 		"parent then child": {
-			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
-			second: SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			first:  SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
+			second: SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
 		},
 		"child then parent": {
-			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
-			second: SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
+			first:  SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			second: SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
 		},
 		"map entry child": {
-			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
-			second: SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: configDefaultsYAMLPath, Key: "loop_caps", Value: "enabled: false"},
+			first:  SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			second: SurgicalEdit{Kind: EditASTAddYAMLMapEntry, Path: configDefaultsYAMLPath, Key: "loop_caps", Value: "enabled: false"},
 		},
 	}
 
@@ -258,13 +258,13 @@ func TestSchemaMigrationConflictBlocksLaterSamePathActions(t *testing.T) {
 		t,
 		root,
 		testEditMigration("test-parent", "parent edit", configPath, []SurgicalEdit{
-			{Kind: EditSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
+			{Kind: EditASTSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
 		}),
 		testEditMigration("test-child", "child edit", configPath, []SurgicalEdit{
-			{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			{Kind: EditASTSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
 		}),
 		testEditMigration("test-later", "later compatible edit", configPath, []SurgicalEdit{
-			{Kind: EditSetYAMLField, Path: mustYAMLPath(testRuntimesCodexYAMLPath), Value: yamlEnabledTrue},
+			{Kind: EditASTSetYAMLField, Path: mustYAMLPath(testRuntimesCodexYAMLPath), Value: yamlEnabledTrue},
 		}),
 	)
 
@@ -280,14 +280,14 @@ func TestSchemaMigrationComposesNonOverlappingYAMLEditPaths(t *testing.T) {
 		secondPath string
 	}{
 		"raw prefix siblings": {
-			first:      SurgicalEdit{Kind: EditSetYAMLField, Path: mustYAMLPath("defaults.loop"), Value: "5"},
-			second:     SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			first:      SurgicalEdit{Kind: EditASTSetYAMLField, Path: mustYAMLPath("defaults.loop"), Value: "5"},
+			second:     SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
 			firstPath:  "defaults.loop",
 			secondPath: configDefaultsLoopCapsYAMLPath.String(),
 		},
 		"different branches": {
-			first:      SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
-			second:     SurgicalEdit{Kind: EditSetYAMLField, Path: mustYAMLPath(testRuntimesCodexYAMLPath), Value: yamlEnabledTrue},
+			first:      SurgicalEdit{Kind: EditASTSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			second:     SurgicalEdit{Kind: EditASTSetYAMLField, Path: mustYAMLPath(testRuntimesCodexYAMLPath), Value: yamlEnabledTrue},
 			firstPath:  configDefaultsLoopCapsYAMLPath.String(),
 			secondPath: testRuntimesCodexYAMLPath,
 		},
@@ -585,8 +585,8 @@ func testRenameMigration(id, summary string, target func(string) bool, oldField,
 				}
 
 				return schemaMigrationDecision{Edits: []SurgicalEdit{
-					{Kind: EditRemoveYAMLField, Path: mustYAMLPath(oldField)},
-					{Kind: EditAddYAMLField, Path: mustYAMLPath(newField), Value: value},
+					{Kind: EditASTRemoveYAMLField, Path: mustYAMLPath(oldField)},
+					{Kind: EditASTAddYAMLField, Path: mustYAMLPath(newField), Value: value},
 				}}
 			case hasOld && hasNew:
 				return schemaMigrationDecision{Conflict: "old and new fields both exist", Guidance: "remove one of the fields before applying this schema migration"}
