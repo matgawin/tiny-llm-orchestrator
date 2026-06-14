@@ -190,12 +190,13 @@ semantically merge Markdown body prose.
 
 ### AST YAML Edit Engine
 
-YAML and Markdown-frontmatter schema migrations must use the
-`internal/initupgrade` AST edit engine. The engine parses targeted raw bytes
-with `github.com/goccy/go-yaml` before typed config validation, carries planned
-edits as structured path segments, and applies those edits after the existing
-file-identity check. A schema migration must not pre-render a full replacement
-for YAML or frontmatter content.
+YAML and Markdown-frontmatter schema migrations, plus the setup `0 -> 1`
+`.orc/config.yaml` YAML edits, must use the `internal/initupgrade` AST edit
+engine. The engine parses targeted raw bytes with `github.com/goccy/go-yaml`
+before typed config validation, carries planned edits as structured path
+segments, and applies those edits after the existing file-identity check. A
+migration must not pre-render a full replacement for YAML or frontmatter
+content.
 
 Structured paths are segment slices. Dot strings such as
 `defaults.loop_caps.soft` are allowed only at boundaries: JSON output, test
@@ -262,10 +263,11 @@ must tell the operator to rewrite the file to a top-level `steps` mapping with
 step ids as keys and step mappings as values. One unsupported workflow file
 must not block unrelated valid workflow files in the same plan.
 
-Runtime and agent helpers expose the same structured map operations as config
-helpers. They inspect nested map fields through `YAMLPath` segments and return
-AST-backed edits such as add, set, and remove. They must not build line edits,
-pre-render whole-file replacements, or add list mutation syntax.
+Config, runtime, and agent helpers expose the same structured map operations.
+They inspect nested map fields through `YAMLPath` segments and return
+AST-backed edits such as add, set, remove, and map-entry addition. They must not
+build line edits, pre-render whole-file replacements, or add list mutation
+syntax.
 
 Structural predicates must be idempotent:
 
@@ -678,6 +680,13 @@ Safe `0 -> 1` rules:
 - Append `.orc/runs/` to `.gitignore` when no equivalent ignore entry exists
   and no broad `.orc` ignore hides persistent config.
 - Apply the v1 `AGENTS.md` policy above.
+
+Setup `0 -> 1` edits to `.orc/config.yaml` are planned as AST-backed add, set,
+and map-entry edits after raw YAML inspection. The migration does not use
+line-oriented YAML helpers or whole-file replacement for `.orc/config.yaml`.
+Scaffold refresh can still use whole-file replacement for ownership-proven
+default files. `.gitignore` and `AGENTS.md` remain text edits because they are
+not YAML migration surfaces.
 
 If a current scaffold file exists and matches the current embedded scaffold, the
 migration emits no action or skipped item for that file. If it matches an exact

@@ -75,6 +75,29 @@ func TestPlanMissingSetupVersionAddsSurgicalConfigEdit(t *testing.T) {
 	}
 }
 
+func TestPlanSetupDefaultLoopCapsOnlyWhenMaxLoopsAndLoopCapsMissing(t *testing.T) {
+	for name, replacement := range map[string]string{
+		"max-loops-present": "defaults:\n  max_loops: 3\n",
+		"loop-caps-present": "defaults:\n  loop_caps:\n    enabled: false\n",
+		"neither-present":   "defaults:\n  retry_limit: 2\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := legacyScaffold(t)
+			replaceInFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", replacement)
+
+			result := mustPlanWithSchemaMigrations(t, root)
+			action := assertAction(t, result, ActionModify, configPath)
+			hasDefaultLoopCapsEdit := slices.ContainsFunc(action.Edits, func(edit SurgicalEdit) bool {
+				return edit.Kind == EditAddYAMLField && edit.Path.String() == configDefaultsLoopCapsYAMLPath.String()
+			})
+
+			if got, want := hasDefaultLoopCapsEdit, name == "neither-present"; got != want {
+				t.Fatalf("setup default loop_caps edit = %v, want %v; edits = %#v", got, want, action.Edits)
+			}
+		})
+	}
+}
+
 func TestPlanMissingNewScaffoldFileCreatesWhenAbsent(t *testing.T) {
 	root := legacyScaffold(t)
 

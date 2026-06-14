@@ -127,11 +127,9 @@ func (p *planner) readConfig() (configFile, error) {
 		return configFile{}, err
 	}
 
-	var raw yaml.MapSlice
-
 	var cfg config.ProjectConfig
 
-	rawErr := yaml.Unmarshal(content, &raw)
+	doc, rawErr := parseYAMLASTDocument(content)
 	loadErr := yaml.Unmarshal(content, &cfg)
 	schemaVersion := cfg.Version
 	setupVersion := cfg.SetupVersion
@@ -141,8 +139,8 @@ func (p *planner) readConfig() (configFile, error) {
 		schemaVersion = 0
 		setupVersion = 0
 	} else if loadErr != nil {
-		schemaVersion = intScalarField(raw, "version")
-		setupVersion = intScalarField(raw, setupVersionField)
+		schemaVersion = intScalarField(doc, "version")
+		setupVersion = intScalarField(doc, setupVersionField)
 	}
 
 	return configFile{
@@ -151,7 +149,7 @@ func (p *planner) readConfig() (configFile, error) {
 		schemaVersion: schemaVersion,
 		setupVersion:  setupVersion,
 		data:          cfg,
-		doc:           raw,
+		doc:           doc,
 		loadErr:       loadErr,
 	}, nil
 }
@@ -169,38 +167,46 @@ func (p *planner) planConfigMigration0To1() {
 		return
 	}
 
+	configMap := p.config.rootMap()
+
 	var edits []SurgicalEdit
-	if !p.config.has(setupVersionField) {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: mustYAMLPath(setupVersionField), Value: fmt.Sprint(config.CurrentSetupVersion)})
+	if !configMap.Exists(setupVersionField) {
+		edits = append(edits, configMap.AddField(setupVersionField, fmt.Sprint(config.CurrentSetupVersion)))
 	} else if p.config.setupVersion < config.CurrentSetupVersion {
-		edits = append(edits, SurgicalEdit{Kind: EditSetYAMLField, Path: mustYAMLPath(setupVersionField), Value: fmt.Sprint(config.CurrentSetupVersion)})
+		edits = append(edits, configMap.SetField(setupVersionField, fmt.Sprint(config.CurrentSetupVersion)))
 	}
 
-	if !p.config.hasNested(configDefaultsYAMLPath, "max_loops") && !p.config.hasNested(configDefaultsYAMLPath, "loop_caps") {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: fmt.Sprintf("enabled: true\nsoft: %d\nhard: %d", defaultLoopSoftCap, defaultLoopHardCap)})
+	defaults := configMap.ChildMap("defaults")
+	if !defaults.Exists("max_loops") && !defaults.Exists("loop_caps") {
+		edits = append(edits, defaults.AddField("loop_caps", fmt.Sprintf("enabled: true\nsoft: %d\nhard: %d", defaultLoopSoftCap, defaultLoopHardCap)))
 	}
 
-	if p.config.hasNested(configDefaultsYAMLPath, "legacy_runtime") {
+	if defaults.Exists("legacy_runtime") {
 		p.conflict(configPath, "deprecated-field", "defaults.legacy_runtime has no unambiguous setup v1 replacement", "remove defaults.legacy_runtime or migrate it to explicit workflow defaults before applying an upgrade")
 	}
 
+	runtimes := configMap.ChildMap("runtimes")
 	if p.config.runtimePath("codex") == "" {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: mustYAMLPath("runtimes"), Key: "codex", Value: "runtimes/codex.yaml"})
+		edits = append(edits, runtimes.AddMapEntry("codex", "runtimes/codex.yaml"))
 	} else if p.config.runtimePath("codex") != "runtimes/codex.yaml" {
 		p.conflict(configPath, "runtime-reference-conflict", `runtimes.codex does not point at "runtimes/codex.yaml"`, "review the existing Codex runtime reference before applying the setup migration")
 	}
 
+	workflows := configMap.ChildMap("workflows")
+
 	for _, path := range scaffoldConfigEntries(p.scaffold, ".orc/workflows/") {
 		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/workflows/"), ".yaml")
 		if p.config.workflowPath(name) == "" {
-			edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: mustYAMLPath("workflows"), Key: name, Value: "workflows/" + name + ".yaml"})
+			edits = append(edits, workflows.AddMapEntry(name, "workflows/"+name+".yaml"))
 		}
 	}
+
+	agents := configMap.ChildMap("agents")
 
 	for _, path := range scaffoldConfigEntries(p.scaffold, ".orc/agents/") {
 		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/agents/"), ".md")
 		if p.config.agentPath(name) == "" {
-			edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: mustYAMLPath("agents"), Key: name, Value: "agents/" + name + ".md"})
+			edits = append(edits, agents.AddMapEntry(name, "agents/"+name+".md"))
 		}
 	}
 

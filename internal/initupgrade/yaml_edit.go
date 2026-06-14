@@ -1,12 +1,11 @@
 package initupgrade
 
 import (
-	"fmt"
 	"strconv"
 
 	"tiny-llm-orchestrator/orc/internal/config"
 
-	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 )
 
 type configFile struct {
@@ -15,89 +14,69 @@ type configFile struct {
 	schemaVersion int
 	setupVersion  int
 	data          config.ProjectConfig
-	doc           yaml.MapSlice
+	doc           *yamlASTDocument
 	loadErr       error
 }
 
-func (c configFile) has(key string) bool {
-	_, ok := mapLookup(c.doc, key)
-	return ok
-}
-
-func (c configFile) hasNested(parent YAMLPath, key string) bool {
-	node, ok := mapLookup(c.doc, parent.String())
-	if !ok {
-		return false
-	}
-
-	nested, ok := asMapSlice(node)
-	if !ok {
-		return false
-	}
-
-	_, ok = mapLookup(nested, key)
-
-	return ok
+func (c configFile) rootMap() yamlMapHandle {
+	return rootYAMLMapHandle(c.doc)
 }
 
 func (c configFile) runtimePath(name string) string {
-	if c.data.Runtimes == nil {
-		return ""
-	}
-
-	return c.data.Runtimes[name]
+	return c.mapScalarPath("runtimes", name)
 }
 
 func (c configFile) workflowPath(name string) string {
-	if c.data.Workflows == nil {
+	workflows, ok := c.rootMap().Map("workflows")
+	if !ok {
 		return ""
 	}
 
-	return c.data.Workflows[name].Path
+	value, ok := workflows.Value(name)
+	if !ok {
+		return ""
+	}
+
+	if path := yamlScalarString(value); path != "" {
+		return path
+	}
+
+	workflow, ok := workflows.Map(name)
+	if !ok {
+		return ""
+	}
+
+	return scalarNodeString(workflow.Value("path"))
 }
 
 func (c configFile) agentPath(name string) string {
-	if c.data.Agents == nil {
+	return c.mapScalarPath("agents", name)
+}
+
+func (c configFile) mapScalarPath(parent, name string) string {
+	handle, ok := c.rootMap().Map(parent)
+	if !ok {
 		return ""
 	}
 
-	return c.data.Agents[name]
+	return scalarNodeString(handle.Value(name))
 }
 
-func mapLookup(items yaml.MapSlice, key string) (any, bool) {
-	for _, item := range items {
-		name, ok := item.Key.(string)
-		if ok && name == key {
-			return item.Value, true
-		}
+func scalarNodeString(node ast.Node, ok bool) string {
+	if !ok {
+		return ""
 	}
 
-	return nil, false
+	return yamlScalarString(node)
 }
 
-func asMapSlice(value any) (yaml.MapSlice, bool) {
-	switch typed := value.(type) {
-	case yaml.MapSlice:
-		return typed, true
-	case map[string]any:
-		items := make(yaml.MapSlice, 0, len(typed))
-		for key, value := range typed {
-			items = append(items, yaml.MapItem{Key: key, Value: value})
-		}
-
-		return items, true
-	default:
-		return nil, false
-	}
-}
-
-func intScalarField(items yaml.MapSlice, key string) int {
-	value, ok := mapLookup(items, key)
+func intScalarField(doc *yamlASTDocument, key string) int {
+	node, ok := doc.Value(mustYAMLPath(key))
 	if !ok {
 		return 0
 	}
 
-	parsed, err := strconv.Atoi(fmt.Sprint(value))
+	parsed, err := strconv.Atoi(yamlScalarString(node))
 	if err != nil {
 		return 0
 	}

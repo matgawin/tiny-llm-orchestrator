@@ -523,6 +523,39 @@ func TestApplyMigratesConfigSurgically(t *testing.T) {
 	assertCurrentSetupConfig(t, root)
 }
 
+func TestApplySetupConfigASTEditsPreserveCommentsAndKeyOrder(t *testing.T) {
+	root := legacyScaffold(t)
+	configPath := filepath.Join(root, ".orc", "config.yaml")
+	replaceInFile(t, configPath, "version: 1\n", "# keep top comment\nversion: 1\n")
+	replaceInFile(t, configPath, "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  # keep unrelated defaults comment\n  retry_limit: 2\n")
+	replaceInFile(t, configPath, "workflows:\n", "# keep before workflows\nworkflows:\n")
+
+	result := mustPlanWithSchemaMigrations(t, root)
+	action := assertAction(t, result, ActionModify, ".orc/config.yaml")
+	assertEdit(t, action, EditAddYAMLField, "setup_version")
+	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
+
+	if len(action.Content) != 0 {
+		t.Fatalf("config modify content length = %d, want AST surgical edits only", len(action.Content))
+	}
+
+	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	content := readFile(t, configPath)
+	for _, want := range []string{
+		"# keep top comment\nversion: 1\nsetup_version: 1\n",
+		"defaults:\n  # keep unrelated defaults comment\n  retry_limit: 2\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n# keep before workflows\nworkflows:\n",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("config content missing %q:\n%s", want, content)
+		}
+	}
+
+	assertCurrentSetupConfig(t, root)
+}
+
 func TestApplyPreservesInlineCommentWhenSettingYAMLField(t *testing.T) {
 	root := currentScaffold(t)
 	configPath := filepath.Join(root, ".orc", "config.yaml")
