@@ -68,6 +68,7 @@ type planner struct {
 	config           configFile
 	manifest         scaffoldManifestState
 	schemaMigrations []schemaMigration
+	blockedActions   map[string]struct{}
 }
 
 func (p *planner) plan() error {
@@ -175,11 +176,11 @@ func (p *planner) planConfigMigration0To1() {
 		edits = append(edits, SurgicalEdit{Kind: EditSetYAMLField, Path: setupVersionField, Value: fmt.Sprint(config.CurrentSetupVersion)})
 	}
 
-	if !p.config.hasNested("defaults", "max_loops") && !p.config.hasNested("defaults", "loop_caps") {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: fmt.Sprintf("enabled: true\nsoft: %d\nhard: %d", defaultLoopSoftCap, defaultLoopHardCap)})
+	if !p.config.hasNested(configDefaultsYAMLPath, "max_loops") && !p.config.hasNested(configDefaultsYAMLPath, "loop_caps") {
+		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: fmt.Sprintf("enabled: true\nsoft: %d\nhard: %d", defaultLoopSoftCap, defaultLoopHardCap)})
 	}
 
-	if p.config.hasNested("defaults", "legacy_runtime") {
+	if p.config.hasNested(configDefaultsYAMLPath, "legacy_runtime") {
 		p.conflict(configPath, "deprecated-field", "defaults.legacy_runtime has no unambiguous setup v1 replacement", "remove defaults.legacy_runtime or migrate it to explicit workflow defaults before applying an upgrade")
 	}
 
@@ -283,6 +284,7 @@ func (p *planner) planRequiredScaffoldFiles() {
 		if p.hasAction(path) {
 			if p.manifestProvesManaged(path, existing) || replacementBaselineMatches(path, existing) {
 				p.conflict(path, "duplicate-upgrade-action", "schema migration and scaffold refresh both target this path", "apply one compatible migration at a time or add an explicit composed migration for this path")
+				p.blockAction(path)
 			}
 
 			continue
@@ -383,6 +385,10 @@ func (p *planner) create(path, reason string, content []byte) *Action {
 		return nil
 	}
 
+	if p.isActionBlocked(path) {
+		return nil
+	}
+
 	if info, err := os.Stat(filepath.Join(p.root, filepath.FromSlash(path))); err == nil && info.IsDir() {
 		p.conflict(path, "path-conflict", "target path exists as a directory", "move or remove the conflicting directory before applying the upgrade")
 		return nil
@@ -390,6 +396,8 @@ func (p *planner) create(path, reason string, content []byte) *Action {
 
 	if p.hasAction(path) {
 		p.conflict(path, "duplicate-upgrade-action", "multiple upgrade actions target this path", "resolve the competing migrations or scaffold refresh before applying")
+		p.blockAction(path)
+
 		return nil
 	}
 
@@ -409,10 +417,16 @@ func (p *planner) modifyReturning(path, reason string, fileID FileIdentity, edit
 		return nil
 	}
 
+	if p.isActionBlocked(path) {
+		return nil
+	}
+
 	id := fileID
 	if existing := p.actionForPath(path); existing != nil {
 		if existing.Kind != ActionModify || existing.FileIdentity == nil || !sameIdentity(*existing.FileIdentity, id) || !compatibleSurgicalEdits(existing.Edits, edits) {
 			p.conflict(path, "duplicate-upgrade-action", "multiple incompatible upgrade actions target this path", "resolve the competing migrations or scaffold refresh before applying")
+			p.blockAction(path)
+
 			return nil
 		}
 
@@ -430,6 +444,29 @@ func (p *planner) modifyReturning(path, reason string, fileID FileIdentity, edit
 
 func (p *planner) hasAction(path string) bool {
 	return p.actionForPath(path) != nil
+}
+
+func (p *planner) removeAction(path string) {
+	p.result.Actions = slices.DeleteFunc(p.result.Actions, func(action Action) bool {
+		return action.Path == path
+	})
+	p.result.AffectedPaths = slices.DeleteFunc(p.result.AffectedPaths, func(affected AffectedPath) bool {
+		return affected.Path == path
+	})
+}
+
+func (p *planner) blockAction(path string) {
+	if p.blockedActions == nil {
+		p.blockedActions = make(map[string]struct{})
+	}
+
+	p.blockedActions[path] = struct{}{}
+	p.removeAction(path)
+}
+
+func (p *planner) isActionBlocked(path string) bool {
+	_, ok := p.blockedActions[path]
+	return ok
 }
 
 func (p *planner) actionForPath(path string) *Action {

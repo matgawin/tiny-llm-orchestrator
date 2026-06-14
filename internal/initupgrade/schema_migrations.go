@@ -14,7 +14,11 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-const schemaMigrationConflictCode = "schema-migration-conflict"
+const (
+	schemaMigrationConflictCode    = "schema-migration-conflict"
+	configDefaultsYAMLPath         = "defaults"
+	configDefaultsLoopCapsYAMLPath = "defaults.loop_caps"
+)
 
 var errSchemaMigrationOutsideOrc = errors.New("schema migration path is outside .orc")
 
@@ -65,7 +69,7 @@ func configDefaultsMaxLoopsToLoopCapsMigration() schemaMigration {
 				return schemaMigrationDecision{Skipped: "targeted YAML is invalid"}
 			}
 
-			defaults, _ := nestedYAMLMap(file.Doc, "defaults")
+			defaults, _ := nestedYAMLMap(file.Doc, configDefaultsYAMLPath)
 			hasMaxLoops := hasYAMLFieldInMap(defaults, "max_loops")
 			hasLoopCaps := hasYAMLFieldInMap(defaults, "loop_caps")
 
@@ -105,7 +109,7 @@ func exactSchemaMigrationTarget(path string) func(string) bool {
 func maxLoopsToLoopCapsEdits(soft, hard string) []SurgicalEdit {
 	return []SurgicalEdit{
 		{Kind: EditRemoveYAMLField, Path: "defaults.max_loops"},
-		{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + soft + "\nhard: " + hard},
+		{Kind: EditAddYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: "enabled: true\nsoft: " + soft + "\nhard: " + hard},
 	}
 }
 

@@ -1525,7 +1525,7 @@ func sameIdentity(a, b FileIdentity) bool {
 }
 
 func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
-	seen := make(map[string]struct{}, len(existing))
+	seen := make([]string, 0, len(existing)+len(next))
 	for _, edit := range existing {
 		if edit.Kind == EditReplaceIfBaseline {
 			return false
@@ -1534,7 +1534,7 @@ func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
 		key := surgicalEditKey(edit)
 
 		if key != "" {
-			seen[key] = struct{}{}
+			seen = append(seen, key)
 		}
 	}
 
@@ -1549,11 +1549,13 @@ func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
 			continue
 		}
 
-		if _, ok := seen[key]; ok {
-			return false
+		for _, existingKey := range seen {
+			if yamlEditPathsOverlap(existingKey, key) {
+				return false
+			}
 		}
 
-		seen[key] = struct{}{}
+		seen = append(seen, key)
 	}
 
 	return true
@@ -1570,6 +1572,10 @@ func surgicalEditKey(edit SurgicalEdit) string {
 	default:
 		return ""
 	}
+}
+
+func yamlEditPathsOverlap(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
 }
 
 // ConflictError reports conflicts that prevented an upgrade apply from writing.

@@ -11,6 +11,12 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+const (
+	testLoopCapsDisabledValue = "loop_caps:\n  enabled: false"
+	testLoopCapsValue         = "enabled: true\nsoft: 5\nhard: 7"
+	testRuntimesCodexYAMLPath = "runtimes.codex"
+)
+
 func TestProductionConfigMaxLoopsMigrationPlansAndApplies(t *testing.T) {
 	root := currentScaffold(t)
 	configFilePath := filepath.Join(root, ".orc", "config.yaml")
@@ -24,7 +30,7 @@ func TestProductionConfigMaxLoopsMigrationPlansAndApplies(t *testing.T) {
 	}
 
 	assertEdit(t, action, EditRemoveYAMLField, "defaults.max_loops")
-	assertEdit(t, action, EditAddYAMLField, "defaults.loop_caps")
+	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath)
 
 	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
 		t.Fatalf("Apply returned error: %v", err)
@@ -108,7 +114,7 @@ func TestProductionConfigMaxLoopsMigrationPreservesLegacyBlankBehavior(t *testin
 
 	result := mustPlan(t, root)
 	action := assertAction(t, result, ActionModify, configPath)
-	assertEdit(t, action, EditAddYAMLField, "defaults.loop_caps")
+	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath)
 
 	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
 		t.Fatalf("Apply returned error: %v", err)
@@ -204,6 +210,110 @@ func TestSchemaMigrationPlansAndAppliesEligibleSurfaces(t *testing.T) {
 	agent := readFile(t, filepath.Join(root, ".orc", "agents", "planner.md"))
 	if !strings.Contains(agent, "agent_new: true\n---\n\nKeep this body exactly.\n") || strings.Contains(agent, "agent_old") {
 		t.Fatalf("agent frontmatter/body not migrated surgically:\n%s", agent)
+	}
+}
+
+func TestSchemaMigrationConflictsOnOverlappingYAMLEditPaths(t *testing.T) {
+	tests := map[string]struct {
+		first  SurgicalEdit
+		second SurgicalEdit
+	}{
+		"equal path": {
+			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: "enabled: false"},
+			second: SurgicalEdit{Kind: EditRemoveYAMLField, Path: configDefaultsLoopCapsYAMLPath},
+		},
+		"parent then child": {
+			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
+			second: SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+		},
+		"child then parent": {
+			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			second: SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
+		},
+		"map entry child": {
+			first:  SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			second: SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: configDefaultsYAMLPath, Key: "loop_caps", Value: "enabled: false"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := currentScaffold(t)
+
+			result := mustPlanWithSchemaMigrations(
+				t,
+				root,
+				testEditMigration("test-first", "first edit", configPath, []SurgicalEdit{tt.first}),
+				testEditMigration("test-second", "second edit", configPath, []SurgicalEdit{tt.second}),
+			)
+
+			assertConflict(t, result, configPath, "duplicate-upgrade-action")
+			assertNoActionForPath(t, result, configPath)
+		})
+	}
+}
+
+func TestSchemaMigrationConflictBlocksLaterSamePathActions(t *testing.T) {
+	root := currentScaffold(t)
+
+	result := mustPlanWithSchemaMigrations(
+		t,
+		root,
+		testEditMigration("test-parent", "parent edit", configPath, []SurgicalEdit{
+			{Kind: EditSetYAMLField, Path: configDefaultsYAMLPath, Value: testLoopCapsDisabledValue},
+		}),
+		testEditMigration("test-child", "child edit", configPath, []SurgicalEdit{
+			{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+		}),
+		testEditMigration("test-later", "later compatible edit", configPath, []SurgicalEdit{
+			{Kind: EditSetYAMLField, Path: testRuntimesCodexYAMLPath, Value: "enabled: true"},
+		}),
+	)
+
+	assertConflict(t, result, configPath, "duplicate-upgrade-action")
+	assertNoActionForPath(t, result, configPath)
+}
+
+func TestSchemaMigrationComposesNonOverlappingYAMLEditPaths(t *testing.T) {
+	tests := map[string]struct {
+		first      SurgicalEdit
+		second     SurgicalEdit
+		firstPath  string
+		secondPath string
+	}{
+		"raw prefix siblings": {
+			first:      SurgicalEdit{Kind: EditSetYAMLField, Path: "defaults.loop", Value: "5"},
+			second:     SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			firstPath:  "defaults.loop",
+			secondPath: configDefaultsLoopCapsYAMLPath,
+		},
+		"different branches": {
+			first:      SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
+			second:     SurgicalEdit{Kind: EditSetYAMLField, Path: testRuntimesCodexYAMLPath, Value: "enabled: true"},
+			firstPath:  configDefaultsLoopCapsYAMLPath,
+			secondPath: testRuntimesCodexYAMLPath,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := currentScaffold(t)
+
+			result := mustPlanWithSchemaMigrations(
+				t,
+				root,
+				testEditMigration("test-first", "first edit", configPath, []SurgicalEdit{tt.first}),
+				testEditMigration("test-second", "second edit", configPath, []SurgicalEdit{tt.second}),
+			)
+
+			action := assertAction(t, result, ActionModify, configPath)
+			assertEdit(t, action, tt.first.Kind, tt.firstPath)
+			assertEdit(t, action, tt.second.Kind, tt.secondPath)
+
+			if len(action.Edits) != 2 {
+				t.Fatalf("edits = %#v, want exactly two composed edits", action.Edits)
+			}
+		})
 	}
 }
 
@@ -402,6 +512,14 @@ func hasActionForPath(result *Result, path string) bool {
 	})
 }
 
+func assertNoActionForPath(t *testing.T, result *Result, path string) {
+	t.Helper()
+
+	if hasActionForPath(result, path) {
+		t.Fatalf("actions = %#v, want no action for %s", result.Actions, path)
+	}
+}
+
 func hasSchemaMigrationAction(result *Result, migrationID string) bool {
 	return slices.ContainsFunc(result.Actions, func(action Action) bool {
 		return strings.Contains(action.Reason, "schema migration "+migrationID+":")
@@ -424,6 +542,17 @@ func schemaMigrationConflictForPath(t *testing.T, result *Result, path string) C
 
 func exactTarget(path string) func(string) bool {
 	return func(candidate string) bool { return candidate == path }
+}
+
+func testEditMigration(id, summary, path string, edits []SurgicalEdit) schemaMigration {
+	return schemaMigration{
+		ID:      id,
+		Summary: summary,
+		Target:  exactTarget(path),
+		Plan: func(schemaMigrationFile) schemaMigrationDecision {
+			return schemaMigrationDecision{Edits: edits}
+		},
+	}
 }
 
 func testRenameMigration(id, summary string, target func(string) bool, oldField, newField string) schemaMigration {
