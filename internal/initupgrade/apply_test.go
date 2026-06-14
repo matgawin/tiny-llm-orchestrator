@@ -86,13 +86,13 @@ func TestApplyReportsEditFailureAsConflictAndWritesIndependentActions(t *testing
 			name:    "invalid YAML",
 			path:    ".orc/workflows/bad.yaml",
 			content: "legacy: [\n",
-			edit:    SurgicalEdit{Kind: EditAddYAMLField, Path: mustYAMLPath("modern"), Value: yamlScalarTrue},
+			edit:    SurgicalEdit{Kind: EditASTAddYAMLField, Path: mustYAMLPath("modern"), Value: yamlScalarTrue},
 		},
 		{
 			name:    "invalid Markdown frontmatter",
 			path:    ".orc/agents/bad.md",
 			content: "---\nlegacy: [\n---\n\nBody stays local.\n",
-			edit:    SurgicalEdit{Kind: EditAddYAMLField, Path: mustYAMLPath("modern"), Value: yamlScalarTrue},
+			edit:    SurgicalEdit{Kind: EditASTAddYAMLField, Path: mustYAMLPath("modern"), Value: yamlScalarTrue},
 		},
 	}
 
@@ -143,6 +143,28 @@ func TestApplyReportsEditFailureAsConflictAndWritesIndependentActions(t *testing
 				return conflict.Path == tt.path && conflict.Code == "edit-failed" && strings.Contains(conflict.Message, "edit "+tt.path+":")
 			}) {
 				t.Fatalf("conflicts = %#v, want edit-failed for %s", applied.Conflicts, tt.path)
+			}
+		})
+	}
+}
+
+func TestApplyEditsRejectsLegacyLineOrientedYAMLKinds(t *testing.T) {
+	for _, kind := range []EditKind{
+		"add_yaml_field",
+		"set_yaml_field",
+		"remove_yaml_field",
+		"add_yaml_map_entry",
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			_, err := applyEdits([]byte("version: 1\n"), []SurgicalEdit{
+				{Kind: kind, Path: mustYAMLPath("setup_version"), Value: "1"},
+			})
+			if err == nil {
+				t.Fatalf("applyEdits returned nil error for legacy edit kind %q", kind)
+			}
+
+			if !strings.Contains(err.Error(), "unsupported surgical edit kind") {
+				t.Fatalf("applyEdits error = %q, want unsupported edit kind", err)
 			}
 		})
 	}
@@ -532,8 +554,8 @@ func TestApplySetupConfigASTEditsPreserveCommentsAndKeyOrder(t *testing.T) {
 
 	result := mustPlanWithSchemaMigrations(t, root)
 	action := assertAction(t, result, ActionModify, ".orc/config.yaml")
-	assertEdit(t, action, EditAddYAMLField, "setup_version")
-	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
+	assertEdit(t, action, EditASTAddYAMLField, "setup_version")
+	assertEdit(t, action, EditASTAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
 
 	if len(action.Content) != 0 {
 		t.Fatalf("config modify content length = %d, want AST surgical edits only", len(action.Content))

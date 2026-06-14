@@ -267,8 +267,12 @@ Config, runtime, and agent helpers expose the same structured map operations.
 They inspect nested map fields through `YAMLPath` segments and return
 AST-backed edits with `ast_add_yaml_field`, `ast_set_yaml_field`,
 `ast_remove_yaml_field`, or `ast_add_yaml_map_entry` kinds. Schema migrations
-must not emit the legacy line-oriented YAML edit kinds, pre-render whole-file
-replacements, or add list mutation syntax.
+and setup `.orc/config.yaml` migrations must not add ad hoc line-oriented YAML
+edit logic, pre-render whole-file replacements, or add list mutation syntax.
+Text-only upgrade edits remain outside this rule: `.gitignore` may use
+`append_line`, `AGENTS.md` may use `append_section`, and scaffold refresh may
+use `replace_if_baseline` when ownership proof allows replacing Orc-owned
+default content.
 
 Structural predicates must be idempotent:
 

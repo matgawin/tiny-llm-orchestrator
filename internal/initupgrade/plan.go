@@ -27,10 +27,6 @@ const (
 	EditASTRemoveYAMLField EditKind = "ast_remove_yaml_field"
 	EditASTAddYAMLMapEntry EditKind = "ast_add_yaml_map_entry"
 
-	EditAddYAMLField      EditKind = "add_yaml_field"
-	EditSetYAMLField      EditKind = "set_yaml_field"
-	EditRemoveYAMLField   EditKind = "remove_yaml_field"
-	EditAddYAMLMapEntry   EditKind = "add_yaml_map_entry"
 	EditAppendLine        EditKind = "append_line"
 	EditAppendSection     EditKind = "append_section"
 	EditReplaceIfBaseline EditKind = "replace_if_baseline"

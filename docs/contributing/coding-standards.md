@@ -59,3 +59,9 @@ The bad pattern loses the workflow or config surface that made the error actiona
 
 - Do not manually edit generated files.
 - This repo currently has no generated Go or API surface. If one is added later, document the canonical input and regeneration command in the same change.
+
+## Init Upgrade Migrations
+
+- Structural YAML and Markdown-frontmatter migrations under `orc init upgrade` must use the `internal/initupgrade` AST edit engine and structured `YAMLPath` values.
+- Do not add line-oriented YAML migration helpers or pre-rendered whole-file YAML replacements for schema migrations or setup `.orc/config.yaml` migrations.
+- Keep text and ownership refresh paths separate: `.gitignore` may use append-line edits, `AGENTS.md` may use append-section edits, and scaffold refresh may use whole-file replacement only with ownership or baseline proof.

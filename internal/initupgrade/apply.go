@@ -1039,8 +1039,7 @@ func applyEditsForPath(path string, content []byte, edits []SurgicalEdit) ([]byt
 func hasYAMLEdit(edits []SurgicalEdit) bool {
 	for _, edit := range edits {
 		switch edit.Kind {
-		case EditASTAddYAMLField, EditASTSetYAMLField, EditASTRemoveYAMLField, EditASTAddYAMLMapEntry,
-			EditAddYAMLField, EditSetYAMLField, EditRemoveYAMLField, EditAddYAMLMapEntry:
+		case EditASTAddYAMLField, EditASTSetYAMLField, EditASTRemoveYAMLField, EditASTAddYAMLMapEntry:
 			return true
 		case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
 			continue
@@ -1130,22 +1129,22 @@ func applyEdits(content []byte, edits []SurgicalEdit) ([]byte, error) {
 			next = appendSection(next, edit.Value)
 		case EditReplaceIfBaseline:
 			next = []byte(edit.Value)
-		case EditASTAddYAMLField, EditAddYAMLField:
+		case EditASTAddYAMLField:
 			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
 			if err == nil {
 				err = yamlDoc.Add(edit.Path, edit.Value)
 			}
-		case EditASTSetYAMLField, EditSetYAMLField:
+		case EditASTSetYAMLField:
 			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
 			if err == nil {
 				err = yamlDoc.Set(edit.Path, edit.Value)
 			}
-		case EditASTRemoveYAMLField, EditRemoveYAMLField:
+		case EditASTRemoveYAMLField:
 			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
 			if err == nil {
 				err = yamlDoc.Remove(edit.Path)
 			}
-		case EditASTAddYAMLMapEntry, EditAddYAMLMapEntry:
+		case EditASTAddYAMLMapEntry:
 			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
 			if err == nil {
 				err = yamlDoc.Add(edit.Path.Child(edit.Key), edit.Value)
@@ -1179,13 +1178,13 @@ func applyYAMLEdits(doc *yamlASTDocument, edits []SurgicalEdit) ([]byte, error) 
 		var err error
 
 		switch edit.Kind {
-		case EditASTAddYAMLField, EditAddYAMLField:
+		case EditASTAddYAMLField:
 			err = doc.Add(edit.Path, edit.Value)
-		case EditASTSetYAMLField, EditSetYAMLField:
+		case EditASTSetYAMLField:
 			err = doc.Set(edit.Path, edit.Value)
-		case EditASTRemoveYAMLField, EditRemoveYAMLField:
+		case EditASTRemoveYAMLField:
 			err = doc.Remove(edit.Path)
-		case EditASTAddYAMLMapEntry, EditAddYAMLMapEntry:
+		case EditASTAddYAMLMapEntry:
 			err = doc.Add(edit.Path.Child(edit.Key), edit.Value)
 		case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
 			return nil, stableerr.Errorf("non-YAML edit kind %q cannot apply to Markdown frontmatter", edit.Kind)
@@ -1293,10 +1292,9 @@ func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
 
 func surgicalEditKey(edit SurgicalEdit) (YAMLPath, bool) {
 	switch edit.Kind {
-	case EditASTAddYAMLField, EditASTSetYAMLField, EditASTRemoveYAMLField,
-		EditAddYAMLField, EditSetYAMLField, EditRemoveYAMLField:
+	case EditASTAddYAMLField, EditASTSetYAMLField, EditASTRemoveYAMLField:
 		return edit.Path, true
-	case EditASTAddYAMLMapEntry, EditAddYAMLMapEntry:
+	case EditASTAddYAMLMapEntry:
 		return edit.Path.Child(edit.Key), true
 	case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
 		return YAMLPath{}, false

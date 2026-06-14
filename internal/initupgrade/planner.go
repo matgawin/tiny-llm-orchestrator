@@ -171,14 +171,14 @@ func (p *planner) planConfigMigration0To1() {
 
 	var edits []SurgicalEdit
 	if !configMap.Exists(setupVersionField) {
-		edits = append(edits, configMap.AddField(setupVersionField, fmt.Sprint(config.CurrentSetupVersion)))
+		edits = append(edits, configMap.AddASTField(setupVersionField, fmt.Sprint(config.CurrentSetupVersion)))
 	} else if p.config.setupVersion < config.CurrentSetupVersion {
-		edits = append(edits, configMap.SetField(setupVersionField, fmt.Sprint(config.CurrentSetupVersion)))
+		edits = append(edits, configMap.SetASTField(setupVersionField, fmt.Sprint(config.CurrentSetupVersion)))
 	}
 
 	defaults := configMap.ChildMap("defaults")
 	if !defaults.Exists("max_loops") && !defaults.Exists("loop_caps") {
-		edits = append(edits, defaults.AddField("loop_caps", fmt.Sprintf("enabled: true\nsoft: %d\nhard: %d", defaultLoopSoftCap, defaultLoopHardCap)))
+		edits = append(edits, defaults.AddASTField("loop_caps", fmt.Sprintf("enabled: true\nsoft: %d\nhard: %d", defaultLoopSoftCap, defaultLoopHardCap)))
 	}
 
 	if defaults.Exists("legacy_runtime") {
@@ -187,7 +187,7 @@ func (p *planner) planConfigMigration0To1() {
 
 	runtimes := configMap.ChildMap("runtimes")
 	if p.config.runtimePath("codex") == "" {
-		edits = append(edits, runtimes.AddMapEntry("codex", "runtimes/codex.yaml"))
+		edits = append(edits, runtimes.AddASTMapEntry("codex", "runtimes/codex.yaml"))
 	} else if p.config.runtimePath("codex") != "runtimes/codex.yaml" {
 		p.conflict(configPath, "runtime-reference-conflict", `runtimes.codex does not point at "runtimes/codex.yaml"`, "review the existing Codex runtime reference before applying the setup migration")
 	}
@@ -197,7 +197,7 @@ func (p *planner) planConfigMigration0To1() {
 	for _, path := range scaffoldConfigEntries(p.scaffold, ".orc/workflows/") {
 		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/workflows/"), ".yaml")
 		if p.config.workflowPath(name) == "" {
-			edits = append(edits, workflows.AddMapEntry(name, "workflows/"+name+".yaml"))
+			edits = append(edits, workflows.AddASTMapEntry(name, "workflows/"+name+".yaml"))
 		}
 	}
 
@@ -206,7 +206,7 @@ func (p *planner) planConfigMigration0To1() {
 	for _, path := range scaffoldConfigEntries(p.scaffold, ".orc/agents/") {
 		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/agents/"), ".md")
 		if p.config.agentPath(name) == "" {
-			edits = append(edits, agents.AddMapEntry(name, "agents/"+name+".md"))
+			edits = append(edits, agents.AddASTMapEntry(name, "agents/"+name+".md"))
 		}
 	}
 

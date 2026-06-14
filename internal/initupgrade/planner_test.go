@@ -55,7 +55,7 @@ func TestPlanOlderSetupVersionWarns(t *testing.T) {
 	}
 
 	action := assertAction(t, result, ActionModify, ".orc/config.yaml")
-	assertEdit(t, action, EditSetYAMLField, "setup_version")
+	assertEdit(t, action, EditASTSetYAMLField, "setup_version")
 }
 
 func TestPlanMissingSetupVersionAddsSurgicalConfigEdit(t *testing.T) {
@@ -68,7 +68,7 @@ func TestPlanMissingSetupVersionAddsSurgicalConfigEdit(t *testing.T) {
 		t.Fatalf("config modify content length = %d, want surgical edit without whole-file content", len(action.Content))
 	}
 
-	assertEdit(t, action, EditAddYAMLField, "setup_version")
+	assertEdit(t, action, EditASTAddYAMLField, "setup_version")
 
 	if action.FileIdentity == nil || action.FileIdentity.SHA256 == "" {
 		t.Fatalf("config action identity = %#v, want content metadata", action.FileIdentity)
@@ -88,7 +88,7 @@ func TestPlanSetupDefaultLoopCapsOnlyWhenMaxLoopsAndLoopCapsMissing(t *testing.T
 			result := mustPlanWithSchemaMigrations(t, root)
 			action := assertAction(t, result, ActionModify, configPath)
 			hasDefaultLoopCapsEdit := slices.ContainsFunc(action.Edits, func(edit SurgicalEdit) bool {
-				return edit.Kind == EditAddYAMLField && edit.Path.String() == configDefaultsLoopCapsYAMLPath.String()
+				return edit.Kind == EditASTAddYAMLField && edit.Path.String() == configDefaultsLoopCapsYAMLPath.String()
 			})
 
 			if got, want := hasDefaultLoopCapsEdit, name == "neither-present"; got != want {

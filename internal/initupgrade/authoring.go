@@ -56,22 +56,6 @@ func (h yamlMapHandle) ChildMap(field string) yamlMapHandle {
 	return newYAMLMapHandle(h.doc, path, node)
 }
 
-func (h yamlMapHandle) AddField(field, value string) SurgicalEdit {
-	return SurgicalEdit{Kind: EditAddYAMLField, Path: h.path.Child(field), Value: value}
-}
-
-func (h yamlMapHandle) SetField(field, value string) SurgicalEdit {
-	return SurgicalEdit{Kind: EditSetYAMLField, Path: h.path.Child(field), Value: value}
-}
-
-func (h yamlMapHandle) RemoveField(field string) SurgicalEdit {
-	return SurgicalEdit{Kind: EditRemoveYAMLField, Path: h.path.Child(field)}
-}
-
-func (h yamlMapHandle) AddMapEntry(field, value string) SurgicalEdit {
-	return SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: h.path, Key: field, Value: value}
-}
-
 func (h yamlMapHandle) AddASTField(field, value string) SurgicalEdit {
 	return SurgicalEdit{Kind: EditASTAddYAMLField, Path: h.path.Child(field), Value: value}
 }
