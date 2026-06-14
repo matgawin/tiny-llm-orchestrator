@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	schemaMigrationConflictCode = "schema-migration-conflict"
+	schemaMigrationConflictCode              = "schema-migration-conflict"
+	schemaMigrationInvalidYAMLMessage        = "targeted YAML is invalid"
+	schemaMigrationInvalidFrontmatterMessage = "targeted Markdown frontmatter is invalid"
 )
 
 var (
@@ -69,7 +71,7 @@ func configDefaultsMaxLoopsToLoopCapsMigration() schemaMigration {
 		Target:  exactSchemaMigrationTarget(configPath),
 		Plan: func(file schemaMigrationFile) schemaMigrationDecision {
 			if file.InvalidYAML != nil {
-				return schemaMigrationDecision{Skipped: "targeted YAML is invalid"}
+				return schemaMigrationDecision{Skipped: schemaMigrationInvalidYAMLMessage}
 			}
 
 			defaults, _ := file.Doc.Map(configDefaultsYAMLPath)

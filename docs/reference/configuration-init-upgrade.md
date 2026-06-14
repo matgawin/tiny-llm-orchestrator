@@ -230,6 +230,43 @@ path and continue evaluating unrelated targeted files. Apply-time parse or
 render errors must be reported on the action path and must not become a global
 process failure when other safe actions can still be applied.
 
+Migration authors should start from the surface helper that matches the file
+being changed:
+
+| Surface | Target matching | Parse mode | Supported shape | Authoring expectation |
+| --- | --- | --- | --- | --- |
+| Config | `.orc/config.yaml` | YAML AST | top-level YAML mapping | Use map helpers for raw config fields before typed config validation. |
+| Workflow | regular `.yaml` or `.yml` files under `.orc/workflows/**` | YAML AST | top-level mapping with a `steps` mapping | Use the workflow step visitor for step changes. User-created workflows are eligible even when `.orc/config.yaml` does not reference them. |
+| Runtime | regular `.yaml` or `.yml` files under `.orc/runtimes/**` | YAML AST | top-level YAML mapping | Use map helpers for top-level and nested runtime fields. |
+| Agent frontmatter | Markdown files under `.orc/agents/**` | Markdown frontmatter YAML AST | leading `---` YAML frontmatter | Edit frontmatter only. Preserve Markdown body bytes exactly. Files without frontmatter no-op unless the migration documents another rule. |
+| Scaffold manifest metadata | `.orc/scaffold.lock.yaml` only when explicitly targeted | scaffold manifest metadata YAML | manifest ownership metadata | Target only explicit metadata migrations. Do not change scaffold refresh or ownership rules through a generic surface migration. |
+
+The workflow step visitor handles the current workflow shape:
+
+```yaml
+steps:
+  code:
+    agent: coder
+```
+
+It visits each value under the top-level `steps` mapping when the step value is
+also a mapping. The visitor exposes the step id, the structured path
+`steps.<step-id>`, and an AST-backed map handle for inspecting fields and
+planning `SurgicalEdit` values. Iteration follows YAML document order as
+exposed by `github.com/goccy/go-yaml`, not lexical order.
+
+Unsupported workflow shapes are path-scoped skipped or conflict outcomes. A
+workflow with missing `steps`, scalar `steps`, list `steps`, or a non-map step
+value must not be normalized by a migration. The skipped or conflict guidance
+must tell the operator to rewrite the file to a top-level `steps` mapping with
+step ids as keys and step mappings as values. One unsupported workflow file
+must not block unrelated valid workflow files in the same plan.
+
+Runtime and agent helpers expose the same structured map operations as config
+helpers. They inspect nested map fields through `YAMLPath` segments and return
+AST-backed edits such as add, set, and remove. They must not build line edits,
+pre-render whole-file replacements, or add list mutation syntax.
+
 Structural predicates must be idempotent:
 
 - old field only: migrate with the exact owned edit.

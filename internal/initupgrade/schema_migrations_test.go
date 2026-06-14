@@ -182,13 +182,13 @@ func TestSchemaMigrationPlansAndAppliesEligibleSurfaces(t *testing.T) {
 
 	result := mustPlanWithSchemaMigrations(
 		t, root,
-		testRenameMigration("test-config", "config field", exactTarget(".orc/config.yaml"), "config_old", "config_new"),
+		testRenameMigration("test-config", "config field", exactTarget(configPath), "config_old", "config_new"),
 		testRenameMigration("test-workflow", "workflow field", exactTarget(".orc/workflows/implementation.yaml"), "workflow_old", "workflow_new"),
 		testRenameMigration("test-runtime", "runtime field", exactTarget(testRuntimePath), "runtime_old", "runtime_new"),
 		testRenameMigration("test-agent", "agent frontmatter field", exactTarget(".orc/agents/planner.md"), "agent_old", "agent_new"),
 	)
 
-	for _, path := range []string{".orc/config.yaml", ".orc/workflows/implementation.yaml", testRuntimePath, ".orc/agents/planner.md"} {
+	for _, path := range []string{configPath, ".orc/workflows/implementation.yaml", testRuntimePath, ".orc/agents/planner.md"} {
 		if !hasActionForPath(result, path) {
 			t.Fatalf("missing action for %s; actions = %#v conflicts = %#v skipped = %#v", path, result.Actions, result.Conflicts, result.SkippedActions)
 		}
@@ -566,12 +566,12 @@ func testRenameMigration(id, summary string, target func(string) bool, oldField,
 				}
 
 				if file.InvalidMarkdown != nil || file.InvalidYAML != nil {
-					return schemaMigrationDecision{Skipped: "targeted Markdown frontmatter is invalid"}
+					return schemaMigrationDecision{Skipped: schemaMigrationInvalidFrontmatterMessage}
 				}
 
 				doc = file.Frontmatter
 			} else if file.InvalidYAML != nil {
-				return schemaMigrationDecision{Skipped: "targeted YAML is invalid"}
+				return schemaMigrationDecision{Skipped: schemaMigrationInvalidYAMLMessage}
 			}
 
 			hasOld := hasYAMLField(doc, oldField)
