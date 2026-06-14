@@ -398,6 +398,11 @@ func TestExecuteInitUpgradeJSONPlanReportsDependencySkippedAction(t *testing.T) 
 func TestInitUpgradeOutputIncludesSchemaMigrationReason(t *testing.T) {
 	const schemaMigrationReason = "schema migration test-output: rename custom workflow field"
 
+	editPath, err := initupgrade.ParseYAMLPath("new_field")
+	if err != nil {
+		t.Fatalf("ParseYAMLPath returned error: %v", err)
+	}
+
 	plan := &initupgrade.Result{
 		ProjectRoot:         "/tmp/project",
 		ConfigSchemaVersion: 1,
@@ -409,7 +414,7 @@ func TestInitUpgradeOutputIncludesSchemaMigrationReason(t *testing.T) {
 			Reason: schemaMigrationReason,
 			Edits: []initupgrade.SurgicalEdit{{
 				Kind:  initupgrade.EditAddYAMLField,
-				Path:  "new_field",
+				Path:  editPath,
 				Value: "true",
 			}},
 		}},

@@ -188,6 +188,48 @@ preserved exactly. Files without frontmatter are no-ops unless a migration
 explicitly documents a different metadata rule. Schema migrations do not
 semantically merge Markdown body prose.
 
+### AST YAML Edit Engine
+
+YAML and Markdown-frontmatter schema migrations must use the
+`internal/initupgrade` AST edit engine. The engine parses targeted raw bytes
+with `github.com/goccy/go-yaml` before typed config validation, carries planned
+edits as structured path segments, and applies those edits after the existing
+file-identity check. A schema migration must not pre-render a full replacement
+for YAML or frontmatter content.
+
+Structured paths are segment slices. Dot strings such as
+`defaults.loop_caps.soft` are allowed only at boundaries: JSON output, test
+display, docs, and parsing fixture input. Overlap checks compare segment
+equality and ancestry. `defaults` overlaps `defaults.loop_caps`.
+`defaults.loop` does not overlap `defaults.loop_caps`.
+
+Supported map operations are:
+
+- existence checks on nested map keys.
+- add, set, and remove for map entries.
+- nested map traversal for structural predicates.
+- wildcard map visits for read-only patterns such as `steps.*.model`.
+
+Wildcard paths are read-only. They are for inspecting matching map entries
+while planning a migration and must not be used as mutation syntax.
+
+List mutation is excluded until a concrete migration requires it. The engine
+may read list nodes when the YAML AST exposes them, but migrations must not
+plan list insert, update, remove, or wildcard list writes in this version.
+
+The renderer preserves comments, key order, and unrelated YAML formatting
+where `goccy/go-yaml` retains that information. Edits that add or replace a
+node use the library renderer for the changed node and can normalize
+indentation or scalar spelling around that node. Tests for each migration must
+pin any accepted whitespace normalization. Markdown agent body bytes after the
+closing frontmatter delimiter must remain byte-for-byte identical.
+
+Invalid YAML and invalid Markdown frontmatter are path-scoped migration
+outcomes. Planning should record a skipped action or conflict for the targeted
+path and continue evaluating unrelated targeted files. Apply-time parse or
+render errors must be reported on the action path and must not become a global
+process failure when other safe actions can still be applied.
+
 Structural predicates must be idempotent:
 
 - old field only: migrate with the exact owned edit.

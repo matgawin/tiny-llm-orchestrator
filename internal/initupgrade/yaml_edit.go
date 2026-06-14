@@ -24,8 +24,8 @@ func (c configFile) has(key string) bool {
 	return ok
 }
 
-func (c configFile) hasNested(parent, key string) bool {
-	node, ok := mapLookup(c.doc, parent)
+func (c configFile) hasNested(parent YAMLPath, key string) bool {
+	node, ok := mapLookup(c.doc, parent.String())
 	if !ok {
 		return false
 	}

@@ -75,6 +75,79 @@ func TestApplyRejectsChangedDuringApplyButWritesIndependentActions(t *testing.T)
 	}
 }
 
+func TestApplyReportsEditFailureAsConflictAndWritesIndependentActions(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		content string
+		edit    SurgicalEdit
+	}{
+		{
+			name:    "invalid YAML",
+			path:    ".orc/workflows/bad.yaml",
+			content: "legacy: [\n",
+			edit:    SurgicalEdit{Kind: EditAddYAMLField, Path: mustYAMLPath("modern"), Value: yamlScalarTrue},
+		},
+		{
+			name:    "invalid Markdown frontmatter",
+			path:    ".orc/agents/bad.md",
+			content: "---\nlegacy: [\n---\n\nBody stays local.\n",
+			edit:    SurgicalEdit{Kind: EditAddYAMLField, Path: mustYAMLPath("modern"), Value: yamlScalarTrue},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := legacyScaffold(t)
+			target := filepath.Join(root, filepath.FromSlash(tt.path))
+			writeFile(t, target, tt.content)
+
+			createPath := ".orc/workflows/independent-" + strings.ReplaceAll(tt.name, " ", "-") + ".yaml"
+			targetIdentity := identity([]byte(tt.content))
+			result := &Result{
+				ProjectRoot:         root,
+				ConfigSchemaVersion: 1,
+				CurrentSetupVersion: 0,
+				TargetSetupVersion:  1,
+				Actions: []Action{
+					{
+						Kind:         ActionModify,
+						Path:         tt.path,
+						Reason:       "test invalid YAML edit failure",
+						FileIdentity: &targetIdentity,
+						Edits:        []SurgicalEdit{tt.edit},
+					},
+					{
+						Kind:    ActionCreate,
+						Path:    createPath,
+						Reason:  "test independent create",
+						Content: []byte("name: independent\n"),
+					},
+				},
+			}
+
+			applied, err := Apply(context.Background(), result, ApplyOptions{})
+			if err == nil {
+				t.Fatal("Apply returned nil error, want path-scoped edit conflict")
+			}
+
+			if applied == nil {
+				t.Fatal("Apply result is nil, want partial result")
+			}
+
+			if !slices.Contains(applied.CreatedPaths, createPath) {
+				t.Fatalf("created paths = %#v, want independent create", applied.CreatedPaths)
+			}
+
+			if !slices.ContainsFunc(applied.Conflicts, func(conflict Conflict) bool {
+				return conflict.Path == tt.path && conflict.Code == "edit-failed" && strings.Contains(conflict.Message, "edit "+tt.path+":")
+			}) {
+				t.Fatalf("conflicts = %#v, want edit-failed for %s", applied.Conflicts, tt.path)
+			}
+		})
+	}
+}
+
 func TestApplyCreatesMissingScaffoldFileFromPlan(t *testing.T) {
 	root := legacyScaffold(t)
 

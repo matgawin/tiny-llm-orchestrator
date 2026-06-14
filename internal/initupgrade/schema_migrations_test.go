@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/goccy/go-yaml"
 )
 
 const (
@@ -30,7 +28,7 @@ func TestProductionConfigMaxLoopsMigrationPlansAndApplies(t *testing.T) {
 	}
 
 	assertEdit(t, action, EditRemoveYAMLField, "defaults.max_loops")
-	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath)
+	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
 
 	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
 		t.Fatalf("Apply returned error: %v", err)
@@ -114,7 +112,7 @@ func TestProductionConfigMaxLoopsMigrationPreservesLegacyBlankBehavior(t *testin
 
 	result := mustPlan(t, root)
 	action := assertAction(t, result, ActionModify, configPath)
-	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath)
+	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
 
 	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
 		t.Fatalf("Apply returned error: %v", err)
@@ -266,7 +264,7 @@ func TestSchemaMigrationConflictBlocksLaterSamePathActions(t *testing.T) {
 			{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
 		}),
 		testEditMigration("test-later", "later compatible edit", configPath, []SurgicalEdit{
-			{Kind: EditSetYAMLField, Path: testRuntimesCodexYAMLPath, Value: "enabled: true"},
+			{Kind: EditSetYAMLField, Path: mustYAMLPath(testRuntimesCodexYAMLPath), Value: yamlEnabledTrue},
 		}),
 	)
 
@@ -282,15 +280,15 @@ func TestSchemaMigrationComposesNonOverlappingYAMLEditPaths(t *testing.T) {
 		secondPath string
 	}{
 		"raw prefix siblings": {
-			first:      SurgicalEdit{Kind: EditSetYAMLField, Path: "defaults.loop", Value: "5"},
+			first:      SurgicalEdit{Kind: EditSetYAMLField, Path: mustYAMLPath("defaults.loop"), Value: "5"},
 			second:     SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
 			firstPath:  "defaults.loop",
-			secondPath: configDefaultsLoopCapsYAMLPath,
+			secondPath: configDefaultsLoopCapsYAMLPath.String(),
 		},
 		"different branches": {
 			first:      SurgicalEdit{Kind: EditSetYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: testLoopCapsValue},
-			second:     SurgicalEdit{Kind: EditSetYAMLField, Path: testRuntimesCodexYAMLPath, Value: "enabled: true"},
-			firstPath:  configDefaultsLoopCapsYAMLPath,
+			second:     SurgicalEdit{Kind: EditSetYAMLField, Path: mustYAMLPath(testRuntimesCodexYAMLPath), Value: yamlEnabledTrue},
+			firstPath:  configDefaultsLoopCapsYAMLPath.String(),
 			secondPath: testRuntimesCodexYAMLPath,
 		},
 	}
@@ -583,12 +581,12 @@ func testRenameMigration(id, summary string, target func(string) bool, oldField,
 			case hasOld && !hasNew:
 				value := fmtScalar(mapValue(doc, oldField))
 				if value == "" {
-					value = "true"
+					value = yamlScalarTrue
 				}
 
 				return schemaMigrationDecision{Edits: []SurgicalEdit{
-					{Kind: EditRemoveYAMLField, Path: oldField},
-					{Kind: EditAddYAMLField, Path: newField, Value: value},
+					{Kind: EditRemoveYAMLField, Path: mustYAMLPath(oldField)},
+					{Kind: EditAddYAMLField, Path: mustYAMLPath(newField), Value: value},
 				}}
 			case hasOld && hasNew:
 				return schemaMigrationDecision{Conflict: "old and new fields both exist", Guidance: "remove one of the fields before applying this schema migration"}
@@ -599,27 +597,15 @@ func testRenameMigration(id, summary string, target func(string) bool, oldField,
 	}
 }
 
-func hasYAMLField(doc yaml.MapSlice, field string) bool {
-	_, ok := mapLookup(doc, field)
-	return ok
+func hasYAMLField(doc *yamlASTDocument, field string) bool {
+	return doc.Exists(mustYAMLPath(field))
 }
 
-func mapValue(doc yaml.MapSlice, field string) any {
-	value, _ := mapLookup(doc, field)
+func mapValue(doc *yamlASTDocument, field string) string {
+	value, _ := doc.Value(mustYAMLPath(field))
+	return yamlScalarString(value)
+}
+
+func fmtScalar(value string) string {
 	return value
-}
-
-func fmtScalar(value any) string {
-	switch typed := value.(type) {
-	case bool:
-		if typed {
-			return "true"
-		}
-
-		return "false"
-	case string:
-		return typed
-	default:
-		return ""
-	}
 }

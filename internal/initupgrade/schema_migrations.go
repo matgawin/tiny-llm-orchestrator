@@ -11,13 +11,16 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
 
-	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 )
 
 const (
-	schemaMigrationConflictCode    = "schema-migration-conflict"
-	configDefaultsYAMLPath         = "defaults"
-	configDefaultsLoopCapsYAMLPath = "defaults.loop_caps"
+	schemaMigrationConflictCode = "schema-migration-conflict"
+)
+
+var (
+	configDefaultsYAMLPath         = mustYAMLPath("defaults")
+	configDefaultsLoopCapsYAMLPath = mustYAMLPath("defaults.loop_caps")
 )
 
 var errSchemaMigrationOutsideOrc = errors.New("schema migration path is outside .orc")
@@ -36,9 +39,9 @@ type schemaMigration struct {
 type schemaMigrationFile struct {
 	Path            string
 	Content         []byte
-	Doc             yaml.MapSlice
+	Doc             *yamlASTDocument
 	Markdown        bool
-	Frontmatter     yaml.MapSlice
+	Frontmatter     *yamlASTDocument
 	HasFrontmatter  bool
 	InvalidYAML     error
 	InvalidMarkdown error
@@ -69,7 +72,7 @@ func configDefaultsMaxLoopsToLoopCapsMigration() schemaMigration {
 				return schemaMigrationDecision{Skipped: "targeted YAML is invalid"}
 			}
 
-			defaults, _ := nestedYAMLMap(file.Doc, configDefaultsYAMLPath)
+			defaults, _ := file.Doc.Map(configDefaultsYAMLPath)
 			hasMaxLoops := hasYAMLFieldInMap(defaults, "max_loops")
 			hasLoopCaps := hasYAMLFieldInMap(defaults, "loop_caps")
 
@@ -80,7 +83,7 @@ func configDefaultsMaxLoopsToLoopCapsMigration() schemaMigration {
 					Guidance: "remove defaults.max_loops after confirming defaults.loop_caps is correct, or remove defaults.loop_caps before rerunning this schema migration",
 				}
 			case hasMaxLoops:
-				value := strings.TrimSpace(fmt.Sprint(yamlMapValue(defaults, "max_loops")))
+				value := strings.TrimSpace(yamlScalarString(yamlMapValue(defaults, "max_loops")))
 				if value == "" {
 					value = strconv.Itoa(defaultLoopSoftCap)
 					return schemaMigrationDecision{Edits: maxLoopsToLoopCapsEdits(value, strconv.Itoa(defaultLoopHardCap))}
@@ -108,28 +111,22 @@ func exactSchemaMigrationTarget(path string) func(string) bool {
 
 func maxLoopsToLoopCapsEdits(soft, hard string) []SurgicalEdit {
 	return []SurgicalEdit{
-		{Kind: EditRemoveYAMLField, Path: "defaults.max_loops"},
+		{Kind: EditRemoveYAMLField, Path: mustYAMLPath("defaults.max_loops")},
 		{Kind: EditAddYAMLField, Path: configDefaultsLoopCapsYAMLPath, Value: "enabled: true\nsoft: " + soft + "\nhard: " + hard},
 	}
 }
 
-func nestedYAMLMap(doc yaml.MapSlice, key string) (yaml.MapSlice, bool) {
-	value, ok := mapLookup(doc, key)
-	if !ok {
-		return nil, false
+func hasYAMLFieldInMap(doc *ast.MappingNode, key string) bool {
+	return mappingValue(doc, key) != nil
+}
+
+func yamlMapValue(doc *ast.MappingNode, key string) ast.Node {
+	value := mappingValue(doc, key)
+	if value == nil {
+		return nil
 	}
 
-	return asMapSlice(value)
-}
-
-func hasYAMLFieldInMap(doc yaml.MapSlice, key string) bool {
-	_, ok := mapLookup(doc, key)
-	return ok
-}
-
-func yamlMapValue(doc yaml.MapSlice, key string) any {
-	value, _ := mapLookup(doc, key)
-	return value
+	return value.Value
 }
 
 func (p *planner) planSchemaMigrations() {
@@ -337,14 +334,13 @@ func parseSchemaMigrationFile(path string, content []byte) schemaMigrationFile {
 		file.InvalidMarkdown = err
 
 		if ok && err == nil {
-			err = yaml.Unmarshal(frontmatter, &file.Frontmatter)
-			file.InvalidYAML = err
+			file.Frontmatter, file.InvalidYAML = parseYAMLASTDocument(frontmatter)
 		}
 
 		return file
 	}
 
-	file.InvalidYAML = yaml.Unmarshal(content, &file.Doc)
+	file.Doc, file.InvalidYAML = parseYAMLASTDocument(content)
 
 	return file
 }

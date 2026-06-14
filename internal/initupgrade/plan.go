@@ -1,6 +1,15 @@
 // Package initupgrade plans no-write upgrades for project-local Tiny Orc setup.
 package initupgrade
 
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
+
+	"tiny-llm-orchestrator/orc/internal/stableerr"
+)
+
 // ActionKind classifies a planned write candidate.
 type ActionKind string
 
@@ -51,9 +60,158 @@ type Action struct {
 // SurgicalEdit describes a localized edit for an existing file.
 type SurgicalEdit struct {
 	Kind  EditKind `json:"kind"`
-	Path  string   `json:"path,omitempty"`
+	Path  YAMLPath `json:"path"`
 	Key   string   `json:"key,omitempty"`
 	Value string   `json:"value,omitempty"`
+}
+
+func (e SurgicalEdit) MarshalJSON() ([]byte, error) {
+	type surgicalEditJSON struct {
+		Kind  EditKind `json:"kind"`
+		Path  string   `json:"path,omitempty"`
+		Key   string   `json:"key,omitempty"`
+		Value string   `json:"value,omitempty"`
+	}
+
+	out := surgicalEditJSON{
+		Kind:  e.Kind,
+		Key:   e.Key,
+		Value: e.Value,
+	}
+
+	if !e.Path.Empty() {
+		out.Path = e.Path.String()
+	}
+
+	content, err := json.Marshal(out)
+	if err != nil {
+		return nil, fmt.Errorf("marshal surgical edit: %w", err)
+	}
+
+	return content, nil
+}
+
+func (e *SurgicalEdit) UnmarshalJSON(data []byte) error {
+	type surgicalEditJSON struct {
+		Kind  EditKind `json:"kind"`
+		Path  string   `json:"path,omitempty"`
+		Key   string   `json:"key,omitempty"`
+		Value string   `json:"value,omitempty"`
+	}
+
+	var in surgicalEditJSON
+	if err := json.Unmarshal(data, &in); err != nil {
+		return fmt.Errorf("unmarshal surgical edit: %w", err)
+	}
+
+	path, err := yamlPathFromDot(in.Path)
+	if err != nil {
+		return err
+	}
+
+	*e = SurgicalEdit{
+		Kind:  in.Kind,
+		Path:  path,
+		Key:   in.Key,
+		Value: in.Value,
+	}
+
+	return nil
+}
+
+// YAMLPath identifies a YAML map path as structured segments. Dot strings are
+// accepted only at process boundaries such as JSON, tests, and display.
+//
+//nolint:recvcheck // JSON unmarshalling requires a pointer receiver.
+type YAMLPath struct {
+	segments []string
+}
+
+func yamlPath(segments ...string) YAMLPath {
+	out := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if segment == "" {
+			continue
+		}
+
+		out = append(out, segment)
+	}
+
+	return YAMLPath{segments: out}
+}
+
+func yamlPathFromDot(path string) (YAMLPath, error) {
+	if path == "" {
+		return YAMLPath{}, nil
+	}
+
+	segments := strings.Split(path, ".")
+	if slices.Contains(segments, "") {
+		return YAMLPath{}, stableerr.Errorf("invalid YAML path %q", path)
+	}
+
+	return YAMLPath{segments: segments}, nil
+}
+
+func ParseYAMLPath(path string) (YAMLPath, error) {
+	return yamlPathFromDot(path)
+}
+
+func mustYAMLPath(path string) YAMLPath {
+	parsed, err := yamlPathFromDot(path)
+	if err != nil {
+		panic(err)
+	}
+
+	return parsed
+}
+
+func (p YAMLPath) Empty() bool {
+	return len(p.segments) == 0
+}
+
+func (p YAMLPath) Segments() []string {
+	return append([]string(nil), p.segments...)
+}
+
+func (p YAMLPath) Child(segment string) YAMLPath {
+	if segment == "" {
+		return p
+	}
+
+	segments := p.Segments()
+	segments = append(segments, segment)
+
+	return YAMLPath{segments: segments}
+}
+
+func (p YAMLPath) String() string {
+	return strings.Join(p.segments, ".")
+}
+
+func (p YAMLPath) MarshalJSON() ([]byte, error) {
+	out, err := json.Marshal(p.String())
+	if err != nil {
+		return nil, fmt.Errorf("marshal YAML path: %w", err)
+	}
+
+	return out, nil
+}
+
+func (p *YAMLPath) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("unmarshal YAML path: %w", err)
+	}
+
+	parsed, err := yamlPathFromDot(raw)
+	if err != nil {
+		return err
+	}
+
+	*p = parsed
+
+	return nil
 }
 
 // Warning describes a non-blocking operator-facing condition.

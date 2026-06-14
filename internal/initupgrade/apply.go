@@ -19,8 +19,6 @@ const (
 	filePermPrivate = 0o600
 	dirPermPrivate  = 0o750
 
-	yamlChildIndent           = 2
-	yamlGrandchildIndent      = 4
 	dependencySkippedCode     = "dependency-skipped"
 	dependencySkippedGuidance = "resolve the dependency conflict and rerun orc init upgrade"
 	setupVersionField         = "setup_version"
@@ -741,6 +739,9 @@ func actionConflict(path string, err error) (Conflict, bool) {
 	case strings.Contains(message, "changed during init upgrade apply"):
 		code = "changed-during-apply"
 		guidance = "rerun orc init upgrade after resolving concurrent changes to this path"
+	case strings.HasPrefix(message, "edit "+path+":"):
+		code = "edit-failed"
+		guidance = "fix this file before rerunning orc init upgrade"
 	case strings.Contains(message, "unsafe symlink parent"):
 		code = "unsafe-symlink-parent"
 		guidance = "replace the symlink parent with a real project-local directory before applying the upgrade"
@@ -1015,7 +1016,7 @@ func writeExistingAtomic(path string, content []byte) error {
 
 func applyEditsForPath(path string, content []byte, edits []SurgicalEdit) ([]byte, error) {
 	if strings.HasSuffix(path, ".md") && hasYAMLEdit(edits) {
-		frontmatter, body, ok, err := splitMarkdownFrontmatter(content)
+		doc, body, ok, err := parseMarkdownASTFrontmatter(content)
 		if err != nil {
 			return nil, err
 		}
@@ -1024,7 +1025,7 @@ func applyEditsForPath(path string, content []byte, edits []SurgicalEdit) ([]byt
 			return nil, stableerr.Errorf("%s is missing YAML frontmatter", path)
 		}
 
-		nextFrontmatter, err := applyEdits(frontmatter, edits)
+		nextFrontmatter, err := applyYAMLEdits(doc, edits)
 		if err != nil {
 			return nil, err
 		}
@@ -1116,6 +1117,8 @@ func joinMarkdownFrontmatter(frontmatter, body []byte) []byte {
 func applyEdits(content []byte, edits []SurgicalEdit) ([]byte, error) {
 	next := append([]byte(nil), content...)
 
+	var yamlDoc *yamlASTDocument
+
 	for _, edit := range edits {
 		var err error
 
@@ -1127,13 +1130,25 @@ func applyEdits(content []byte, edits []SurgicalEdit) ([]byte, error) {
 		case EditReplaceIfBaseline:
 			next = []byte(edit.Value)
 		case EditAddYAMLField:
-			next, err = addYAMLField(next, edit.Path, edit.Value)
+			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
+			if err == nil {
+				err = yamlDoc.Add(edit.Path, edit.Value)
+			}
 		case EditSetYAMLField:
-			next, err = setYAMLField(next, edit.Path, edit.Value)
+			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
+			if err == nil {
+				err = yamlDoc.Set(edit.Path, edit.Value)
+			}
 		case EditRemoveYAMLField:
-			next, err = removeYAMLField(next, edit.Path)
+			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
+			if err == nil {
+				err = yamlDoc.Remove(edit.Path)
+			}
 		case EditAddYAMLMapEntry:
-			next, err = addYAMLMapEntry(next, edit.Path, edit.Key, edit.Value)
+			yamlDoc, err = ensureYAMLDoc(yamlDoc, next)
+			if err == nil {
+				err = yamlDoc.Add(edit.Path.Child(edit.Key), edit.Value)
+			}
 		default:
 			err = stableerr.Errorf("unsupported surgical edit kind %q", edit.Kind)
 		}
@@ -1143,7 +1158,46 @@ func applyEdits(content []byte, edits []SurgicalEdit) ([]byte, error) {
 		}
 	}
 
+	if yamlDoc != nil {
+		return yamlDoc.Render()
+	}
+
 	return next, nil
+}
+
+func ensureYAMLDoc(existing *yamlASTDocument, content []byte) (*yamlASTDocument, error) {
+	if existing != nil {
+		return existing, nil
+	}
+
+	return parseYAMLASTDocument(content)
+}
+
+func applyYAMLEdits(doc *yamlASTDocument, edits []SurgicalEdit) ([]byte, error) {
+	for _, edit := range edits {
+		var err error
+
+		switch edit.Kind {
+		case EditAddYAMLField:
+			err = doc.Add(edit.Path, edit.Value)
+		case EditSetYAMLField:
+			err = doc.Set(edit.Path, edit.Value)
+		case EditRemoveYAMLField:
+			err = doc.Remove(edit.Path)
+		case EditAddYAMLMapEntry:
+			err = doc.Add(edit.Path.Child(edit.Key), edit.Value)
+		case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
+			return nil, stableerr.Errorf("non-YAML edit kind %q cannot apply to Markdown frontmatter", edit.Kind)
+		default:
+			err = stableerr.Errorf("unsupported surgical edit kind %q", edit.Kind)
+		}
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return doc.Render()
 }
 
 func appendLine(content []byte, line string) []byte {
@@ -1169,319 +1223,6 @@ func ensureTrailingNewline(content []byte) []byte {
 	return next
 }
 
-func addYAMLField(content []byte, path, value string) ([]byte, error) {
-	if strings.Contains(path, ".") {
-		parent, key, _ := strings.Cut(path, ".")
-		return addNestedYAMLField(content, parent, key, value)
-	}
-
-	lines := splitLines(content)
-	if yamlTopLevelKeyLine(lines, path) >= 0 {
-		return nil, stableerr.Errorf("%s already exists", path)
-	}
-
-	insert := len(lines)
-	if path == setupVersionField {
-		if versionLine := yamlTopLevelKeyLine(lines, "version"); versionLine >= 0 {
-			insert = versionLine + 1
-		}
-	}
-
-	line := path + ": " + strings.TrimSpace(value) + "\n"
-	lines = slices.Insert(lines, insert, line)
-
-	return []byte(strings.Join(lines, "")), nil
-}
-
-func setYAMLField(content []byte, path, value string) ([]byte, error) {
-	if strings.Contains(path, ".") {
-		return nil, stableerr.Errorf("setting nested YAML field %s is not supported", path)
-	}
-
-	lines := splitLines(content)
-
-	idx := yamlTopLevelKeyLine(lines, path)
-	if idx < 0 {
-		return nil, stableerr.Errorf("%s is missing", path)
-	}
-
-	if !isScalarLine(lines[idx]) {
-		return nil, stableerr.Errorf("%s is not a scalar field", path)
-	}
-
-	line, err := setYAMLScalarLineValue(lines[idx], path, strings.TrimSpace(value))
-	if err != nil {
-		return nil, err
-	}
-
-	lines[idx] = line
-
-	return []byte(strings.Join(lines, "")), nil
-}
-
-func setYAMLScalarLineValue(line, path, value string) (string, error) {
-	body, lineEnding := trimYAMLLineEnding(line)
-
-	key, rest, ok := strings.Cut(body, ":")
-	if !ok || key != path {
-		return "", stableerr.Errorf("%s is not a scalar field", path)
-	}
-
-	comment := ""
-	valuePart := rest
-
-	if commentIdx := yamlInlineCommentIndex(rest); commentIdx >= 0 {
-		comment = rest[commentIdx:]
-		valuePart = rest[:commentIdx]
-	}
-
-	if strings.TrimSpace(valuePart) == "" {
-		return "", stableerr.Errorf("%s is not a scalar field", path)
-	}
-
-	separator := rest[:len(rest)-len(strings.TrimLeft(rest, " \t"))]
-	if separator == "" {
-		separator = " "
-	}
-
-	return key + ":" + separator + value + comment + lineEnding, nil
-}
-
-func trimYAMLLineEnding(line string) (string, string) {
-	switch {
-	case strings.HasSuffix(line, "\r\n"):
-		return strings.TrimSuffix(line, "\r\n"), "\r\n"
-	case strings.HasSuffix(line, "\n"):
-		return strings.TrimSuffix(line, "\n"), "\n"
-	default:
-		return line, ""
-	}
-}
-
-func yamlInlineCommentIndex(text string) int {
-	inSingleQuote := false
-	inDoubleQuote := false
-	escaped := false
-
-	for i := range len(text) {
-		char := text[i]
-
-		switch {
-		case escaped:
-			escaped = false
-		case inDoubleQuote && char == '\\':
-			escaped = true
-		case char == '"' && !inSingleQuote:
-			inDoubleQuote = !inDoubleQuote
-		case char == '\'' && !inDoubleQuote:
-			inSingleQuote = !inSingleQuote
-		case char == '#' && !inSingleQuote && !inDoubleQuote && (i == 0 || text[i-1] == ' ' || text[i-1] == '\t'):
-			start := i
-			for start > 0 && (text[start-1] == ' ' || text[start-1] == '\t') {
-				start--
-			}
-
-			return start
-		}
-	}
-
-	return -1
-}
-
-func removeYAMLField(content []byte, path string) ([]byte, error) {
-	parent, key, ok := strings.Cut(path, ".")
-	if !ok {
-		return removeTopLevelYAMLField(content, path)
-	}
-
-	lines := splitLines(content)
-
-	parentIdx, end, err := yamlTopLevelSection(lines, parent)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := parentIdx + 1; i < end; i++ {
-		if yamlIndentedKey(lines[i], yamlChildIndent) == key {
-			removeEnd := i + 1
-			for removeEnd < end && leadingSpaces(lines[removeEnd]) > yamlChildIndent {
-				removeEnd++
-			}
-
-			lines = slices.Delete(lines, i, removeEnd)
-
-			return []byte(strings.Join(lines, "")), nil
-		}
-	}
-
-	return nil, stableerr.Errorf("%s is missing", path)
-}
-
-func removeTopLevelYAMLField(content []byte, key string) ([]byte, error) {
-	lines := splitLines(content)
-
-	idx := yamlTopLevelKeyLine(lines, key)
-	if idx < 0 {
-		return nil, stableerr.Errorf("%s is missing", key)
-	}
-
-	end := idx + 1
-	for end < len(lines) && !isTopLevelYAMLLine(lines[end]) {
-		end++
-	}
-
-	lines = slices.Delete(lines, idx, end)
-
-	return []byte(strings.Join(lines, "")), nil
-}
-
-func addYAMLMapEntry(content []byte, path, key, value string) ([]byte, error) {
-	if key == "" {
-		return nil, stableerr.Errorf("%s map entry key is required", path)
-	}
-
-	lines := splitLines(content)
-
-	parentIdx, end, err := yamlTopLevelSection(lines, path)
-	if err != nil {
-		if !errors.Is(err, errYAMLSectionMissing) {
-			return nil, err
-		}
-
-		next := ensureTrailingNewline(content)
-		if len(next) > 0 {
-			next = append(next, []byte(path+":\n")...)
-		} else {
-			next = []byte(path + ":\n")
-		}
-
-		next = append(next, []byte("  "+key+": "+value+"\n")...)
-
-		return next, nil
-	}
-
-	for i := parentIdx + 1; i < end; i++ {
-		if yamlIndentedKey(lines[i], yamlChildIndent) == key {
-			return nil, stableerr.Errorf("%s.%s already exists", path, key)
-		}
-	}
-
-	lines = slices.Insert(lines, end, "  "+key+": "+value+"\n")
-
-	return []byte(strings.Join(lines, "")), nil
-}
-
-func addNestedYAMLField(content []byte, parent, key, value string) ([]byte, error) {
-	lines := splitLines(content)
-
-	parentIdx, end, err := yamlTopLevelSection(lines, parent)
-	if err != nil {
-		if !errors.Is(err, errYAMLSectionMissing) {
-			return nil, err
-		}
-
-		next := ensureTrailingNewline(content)
-		next = append(next, []byte(parent+":\n"+nestedYAMLBlock(key, value))...)
-
-		return next, nil
-	}
-
-	for i := parentIdx + 1; i < end; i++ {
-		if yamlIndentedKey(lines[i], yamlChildIndent) == key {
-			return nil, stableerr.Errorf("%s.%s already exists", parent, key)
-		}
-	}
-
-	insert := nestedYAMLBlock(key, value)
-	lines = slices.Insert(lines, end, insert)
-
-	return []byte(strings.Join(lines, "")), nil
-}
-
-var errYAMLSectionMissing = errors.New("YAML section missing")
-
-func yamlTopLevelSection(lines []string, key string) (int, int, error) {
-	idx := yamlTopLevelKeyLine(lines, key)
-	if idx < 0 {
-		return -1, -1, errYAMLSectionMissing
-	}
-
-	if isScalarLine(lines[idx]) {
-		return -1, -1, stableerr.Errorf("%s is not a YAML mapping", key)
-	}
-
-	end := idx + 1
-	for end < len(lines) && !isTopLevelYAMLLine(lines[end]) {
-		end++
-	}
-
-	return idx, end, nil
-}
-
-func yamlTopLevelKeyLine(lines []string, key string) int {
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
-			continue
-		}
-
-		if leadingSpaces(line) != 0 {
-			continue
-		}
-
-		if strings.HasPrefix(line, key+":") {
-			return i
-		}
-	}
-
-	return -1
-}
-
-func yamlIndentedKey(line string, indent int) string {
-	if leadingSpaces(line) != indent || strings.HasPrefix(strings.TrimSpace(line), "#") {
-		return ""
-	}
-
-	trimmed := strings.TrimSpace(line)
-
-	key, _, ok := strings.Cut(trimmed, ":")
-	if !ok || key == "" || strings.Contains(key, " ") {
-		return ""
-	}
-
-	return key
-}
-
-func isTopLevelYAMLLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return trimmed != "" && !strings.HasPrefix(trimmed, "#") && leadingSpaces(line) == 0
-}
-
-func isScalarLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-
-	_, value, ok := strings.Cut(trimmed, ":")
-
-	return ok && strings.TrimSpace(value) != ""
-}
-
-func leadingSpaces(line string) int {
-	return len(line) - len(strings.TrimLeft(line, " "))
-}
-
-func splitLines(content []byte) []string {
-	text := string(content)
-	if text == "" {
-		return nil
-	}
-
-	raw := strings.SplitAfter(text, "\n")
-	if raw[len(raw)-1] == "" {
-		raw = raw[:len(raw)-1]
-	}
-
-	return raw
-}
-
 func indentBlock(block string, spaces int) string {
 	prefix := strings.Repeat(" ", spaces)
 
@@ -1492,16 +1233,6 @@ func indentBlock(block string, spaces int) string {
 		out.WriteString(line)
 		out.WriteByte('\n')
 	}
-
-	return out.String()
-}
-
-func nestedYAMLBlock(key, value string) string {
-	var out strings.Builder
-	out.WriteString("  ")
-	out.WriteString(key)
-	out.WriteString(":\n")
-	out.WriteString(indentBlock(value, yamlGrandchildIndent))
 
 	return out.String()
 }
@@ -1525,15 +1256,14 @@ func sameIdentity(a, b FileIdentity) bool {
 }
 
 func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
-	seen := make([]string, 0, len(existing)+len(next))
+	seen := make([]YAMLPath, 0, len(existing)+len(next))
 	for _, edit := range existing {
 		if edit.Kind == EditReplaceIfBaseline {
 			return false
 		}
 
-		key := surgicalEditKey(edit)
-
-		if key != "" {
+		key, ok := surgicalEditKey(edit)
+		if ok {
 			seen = append(seen, key)
 		}
 	}
@@ -1543,14 +1273,13 @@ func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
 			return false
 		}
 
-		key := surgicalEditKey(edit)
-
-		if key == "" {
+		key, ok := surgicalEditKey(edit)
+		if !ok {
 			continue
 		}
 
 		for _, existingKey := range seen {
-			if yamlEditPathsOverlap(existingKey, key) {
+			if yamlPathsOverlap(existingKey, key) {
 				return false
 			}
 		}
@@ -1561,21 +1290,17 @@ func compatibleSurgicalEdits(existing, next []SurgicalEdit) bool {
 	return true
 }
 
-func surgicalEditKey(edit SurgicalEdit) string {
+func surgicalEditKey(edit SurgicalEdit) (YAMLPath, bool) {
 	switch edit.Kind {
 	case EditAddYAMLField, EditSetYAMLField, EditRemoveYAMLField:
-		return edit.Path
+		return edit.Path, true
 	case EditAddYAMLMapEntry:
-		return edit.Path + "." + edit.Key
+		return edit.Path.Child(edit.Key), true
 	case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
-		return ""
+		return YAMLPath{}, false
 	default:
-		return ""
+		return YAMLPath{}, false
 	}
-}
-
-func yamlEditPathsOverlap(a, b string) bool {
-	return a == b || strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
 }
 
 // ConflictError reports conflicts that prevented an upgrade apply from writing.

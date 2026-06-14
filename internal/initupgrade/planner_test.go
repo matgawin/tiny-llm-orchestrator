@@ -235,7 +235,7 @@ func TestPlanDeprecatedFieldWithSafeMigrationUsesSurgicalEdits(t *testing.T) {
 
 	action := assertAction(t, result, ActionModify, ".orc/config.yaml")
 	assertEdit(t, action, EditRemoveYAMLField, "defaults.max_loops")
-	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath)
+	assertEdit(t, action, EditAddYAMLField, configDefaultsLoopCapsYAMLPath.String())
 
 	if len(action.Content) != 0 {
 		t.Fatalf("config modify content length = %d, want surgical edits only", len(action.Content))
@@ -356,7 +356,7 @@ func assertEdit(t *testing.T, action Action, kind EditKind, path string) {
 	t.Helper()
 
 	if slices.ContainsFunc(action.Edits, func(edit SurgicalEdit) bool {
-		return edit.Kind == kind && (path == "" || edit.Path == path)
+		return edit.Kind == kind && (path == "" || edit.Path.String() == path)
 	}) {
 		return
 	}

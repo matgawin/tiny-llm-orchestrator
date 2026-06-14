@@ -505,7 +505,7 @@ func initUpgradeEditSuffix(edit initupgrade.SurgicalEdit) string {
 	switch {
 	case edit.Key != "":
 		return " " + edit.Key
-	case strings.TrimSpace(edit.Value) != "" && edit.Path == "":
+	case strings.TrimSpace(edit.Value) != "" && edit.Path.Empty():
 		return " " + strings.TrimSpace(edit.Value)
 	default:
 		return ""

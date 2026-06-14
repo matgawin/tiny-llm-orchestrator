@@ -171,9 +171,9 @@ func (p *planner) planConfigMigration0To1() {
 
 	var edits []SurgicalEdit
 	if !p.config.has(setupVersionField) {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: setupVersionField, Value: fmt.Sprint(config.CurrentSetupVersion)})
+		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: mustYAMLPath(setupVersionField), Value: fmt.Sprint(config.CurrentSetupVersion)})
 	} else if p.config.setupVersion < config.CurrentSetupVersion {
-		edits = append(edits, SurgicalEdit{Kind: EditSetYAMLField, Path: setupVersionField, Value: fmt.Sprint(config.CurrentSetupVersion)})
+		edits = append(edits, SurgicalEdit{Kind: EditSetYAMLField, Path: mustYAMLPath(setupVersionField), Value: fmt.Sprint(config.CurrentSetupVersion)})
 	}
 
 	if !p.config.hasNested(configDefaultsYAMLPath, "max_loops") && !p.config.hasNested(configDefaultsYAMLPath, "loop_caps") {
@@ -185,7 +185,7 @@ func (p *planner) planConfigMigration0To1() {
 	}
 
 	if p.config.runtimePath("codex") == "" {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: "runtimes", Key: "codex", Value: "runtimes/codex.yaml"})
+		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: mustYAMLPath("runtimes"), Key: "codex", Value: "runtimes/codex.yaml"})
 	} else if p.config.runtimePath("codex") != "runtimes/codex.yaml" {
 		p.conflict(configPath, "runtime-reference-conflict", `runtimes.codex does not point at "runtimes/codex.yaml"`, "review the existing Codex runtime reference before applying the setup migration")
 	}
@@ -193,14 +193,14 @@ func (p *planner) planConfigMigration0To1() {
 	for _, path := range scaffoldConfigEntries(p.scaffold, ".orc/workflows/") {
 		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/workflows/"), ".yaml")
 		if p.config.workflowPath(name) == "" {
-			edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: "workflows", Key: name, Value: "workflows/" + name + ".yaml"})
+			edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: mustYAMLPath("workflows"), Key: name, Value: "workflows/" + name + ".yaml"})
 		}
 	}
 
 	for _, path := range scaffoldConfigEntries(p.scaffold, ".orc/agents/") {
 		name := strings.TrimSuffix(strings.TrimPrefix(path, ".orc/agents/"), ".md")
 		if p.config.agentPath(name) == "" {
-			edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: "agents", Key: name, Value: "agents/" + name + ".md"})
+			edits = append(edits, SurgicalEdit{Kind: EditAddYAMLMapEntry, Path: mustYAMLPath("agents"), Key: name, Value: "agents/" + name + ".md"})
 		}
 	}
 
