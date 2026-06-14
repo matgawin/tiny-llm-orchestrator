@@ -26,7 +26,7 @@ Contributors and maintainers changing config loading, validation, scaffold sourc
 ## Contract Pages
 
 - [configuration-init.md](configuration-init.md): `orc init` scaffold files, overwrite prompts, `.gitignore`, `.orc/runs/`, and scaffolded workflow and agent inventory.
-- [configuration-init-upgrade.md](configuration-init-upgrade.md): `orc init upgrade` plan/apply contract, setup version marker, schema migration scope, scaffold refresh safety rules, and initial `0 -> 1` migration.
+- [configuration-init-upgrade.md](configuration-init-upgrade.md): `orc init upgrade` plan/apply contract, setup version marker, schema migrations as the compatibility path, scaffold refresh ownership proof, and initial `0 -> 1` migration.
 - [configuration-project.md](configuration-project.md): `.orc/config.yaml`, project config validation, loop caps, and sandbox config schema.
 - [configuration-runtimes.md](configuration-runtimes.md): `.orc/runtimes/*.yaml` descriptor schema, runtime selection, descriptor-built argv, prompt delivery, capabilities, sandbox requirements, and Codex migration.
 - [configuration-workflows.md](configuration-workflows.md): workflow files, step contracts, report outcomes, terminal states, and agent descriptor files.

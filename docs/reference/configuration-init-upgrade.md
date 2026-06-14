@@ -145,9 +145,15 @@ automatically.
 
 ## Schema Migrations
 
-Schema migrations handle file-format compatibility. They are separate from
-scaffold refresh, which is limited to Orc-owned default content and prose when
-ownership proof is available.
+Schema migrations are the primary file-format compatibility mechanism. They
+are separate from scaffold refresh, which is limited to Orc-owned default
+content and prose when ownership proof is available.
+
+When a change is needed so old user `.orc` files keep loading, add a schema
+migration. When a change updates bundled default agent, workflow, or runtime
+content or prose, use scaffold refresh only when the live file has ownership
+proof. Scaffold replacement must not be used as a substitute for schema-level
+compatibility in user-created or customized files.
 
 Schema migrations run under `orc init upgrade`. There is no separate
 `orc project upgrade` command. Test-only migrations must be wired only through
@@ -284,14 +290,37 @@ embedded scaffold may be used for new default file content and for recognizing
 known scaffold baselines, but it is not enough to infer semantic migrations or
 destructive changes.
 
-Each scaffold setup migration must define per-file predicates such as known
-content hashes, known old scaffold ids, or narrow structural predicates.
-Migrations must not depend on unavailable VCS history or broad textual
-similarity.
+Each scaffold refresh must have ownership proof for the live file. Accepted
+proof is byte-for-byte equality with the current embedded scaffold, an exact
+known scaffold baseline, or a valid `.orc/scaffold.lock.yaml` entry whose hash
+matches the live bytes. Refresh rules must not depend on unavailable VCS
+history or broad textual similarity.
 
-Existing YAML files should be represented as surgical edits where feasible so
-comments and key order are preserved. Whole-file normalized rewrites of
-existing files are out of scope. New files may use scaffold formatting.
+Scaffold refresh must not perform file-format compatibility work for
+user-created or customized `.orc` files. If compatibility requires a structural
+YAML or frontmatter edit, implement a schema migration with a narrow predicate
+for that structure. Existing scaffold-owned YAML refreshes should use the
+narrowest safe write form where feasible, but ownership proof remains required.
+Whole-file normalized rewrites of existing files are out of scope. New files
+may use scaffold formatting.
+
+Examples:
+
+- User-created workflow schema migration: `.orc/workflows/review.yaml` contains
+  `legacy_field: true` and no replacement field. Add a schema migration that
+  targets workflow YAML files, plans `schema migration <id>: <summary>`, and
+  edits only that field. The workflow does not need a `.orc/config.yaml`
+  reference and does not need scaffold ownership.
+- Customized scaffold file without ownership proof: `.orc/agents/planner.md`
+  differs from the embedded scaffold, differs from every exact known baseline,
+  and has no matching manifest hash. `orc init upgrade` preserves the file and
+  reports a `customized-scaffold-file` skipped action. Operators compare and
+  refresh it manually.
+- Scaffold-owned default content refresh: `.orc/workflows/implementation.yaml`
+  has a valid `.orc/scaffold.lock.yaml` entry and the live file hash matches
+  that entry. When the embedded default workflow prose or content changes,
+  `orc init upgrade` may plan a scaffold refresh for the workflow and update
+  the manifest entry in the same safe write group.
 
 ## Scaffold Ownership Manifest
 
@@ -322,6 +351,11 @@ The manifest owns embedded scaffold descriptors under `.orc/agents/`,
 `.orc/runs/**`, `.gitignore`, and `AGENTS.md`. `.orc/config.yaml` remains
 migrated only by explicit semantic or surgical rules. The manifest must not
 justify whole-file config replacement.
+
+`.orc/scaffold.lock.yaml` is scaffold ownership metadata only. It is not a
+schema migration tracker, and v1 does not add a persistent migration state file.
+Schema migrations stay structurally idempotent by inspecting the live file
+shape.
 
 `orc init` creates the manifest for new projects. `orc init upgrade` creates it
 for existing projects when the target path is missing and the entries can be

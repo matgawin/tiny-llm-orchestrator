@@ -289,7 +289,7 @@ func (p *planner) planRequiredScaffoldFiles() {
 		}
 
 		if p.manifestProvesManaged(path, existing) {
-			action := p.modifyReturning(path, "refresh manifest-managed scaffold file with current scaffold content", identity(existing), []SurgicalEdit{{Kind: EditReplaceIfBaseline, Value: string(content)}})
+			action := p.modifyReturning(path, "scaffold refresh: refresh manifest-managed scaffold file with current scaffold content", identity(existing), []SurgicalEdit{{Kind: EditReplaceIfBaseline, Value: string(content)}})
 			if action != nil {
 				action.DependsOn = append(action.DependsOn, initconfig.ScaffoldManifestPath())
 			}
@@ -298,11 +298,11 @@ func (p *planner) planRequiredScaffoldFiles() {
 		}
 
 		if replacementBaselineMatches(path, existing) {
-			p.modify(path, "replace known setup v0 scaffold baseline with setup v1 scaffold content", identity(existing), []SurgicalEdit{{Kind: EditReplaceIfBaseline, Value: string(content)}})
+			p.modify(path, "scaffold refresh: replace known scaffold baseline with current scaffold content", identity(existing), []SurgicalEdit{{Kind: EditReplaceIfBaseline, Value: string(content)}})
 			continue
 		}
 
-		p.skip(path, "customized-scaffold-file", "existing scaffold file differs from the current embedded scaffold and known safe setup migration baselines", "local customization was preserved; manually compare this file with the current embedded scaffold or docs before refreshing it", ActionModify, nil)
+		p.skip(path, "customized-scaffold-file", "existing scaffold file differs from the current embedded scaffold, exact known scaffold baselines, and any valid ownership manifest hash", "local customization was preserved; manually compare this file with the current embedded scaffold or docs before refreshing it", ActionModify, nil)
 	}
 }
 

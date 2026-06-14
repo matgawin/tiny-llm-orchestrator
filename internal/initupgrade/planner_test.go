@@ -97,7 +97,16 @@ func TestPlanCustomizedExistingScaffoldFileIsSkippedForManualRefresh(t *testing.
 
 	result := mustPlan(t, root)
 
-	assertSkippedAction(t, result, testPlannerPath, "customized-scaffold-file")
+	skipped := assertSkippedAction(t, result, testPlannerPath, "customized-scaffold-file")
+	for _, want := range []string{"current embedded scaffold", "exact known scaffold baselines", "ownership manifest hash"} {
+		if !strings.Contains(skipped.Message, want) {
+			t.Fatalf("skipped message = %q, want %q", skipped.Message, want)
+		}
+	}
+
+	if strings.Contains(skipped.Message, "setup migration") {
+		t.Fatalf("skipped message = %q, should not describe scaffold refresh as setup migration", skipped.Message)
+	}
 
 	if len(result.Conflicts) != 0 {
 		t.Fatalf("conflicts = %#v, want none for customized scaffold", result.Conflicts)
@@ -162,6 +171,10 @@ func TestPlanManifestHashMatchEnablesManagedRefresh(t *testing.T) {
 	result := mustPlan(t, root)
 
 	action := assertAction(t, result, ActionModify, testPlannerPath)
+	if !strings.HasPrefix(action.Reason, "scaffold refresh:") {
+		t.Fatalf("planner action reason = %q, want scaffold refresh classification", action.Reason)
+	}
+
 	assertEdit(t, action, EditReplaceIfBaseline, "")
 
 	if !slices.Contains(action.DependsOn, initconfig.ScaffoldManifestPath()) {

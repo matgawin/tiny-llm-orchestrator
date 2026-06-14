@@ -49,7 +49,7 @@ directory:
   V1 has no `--dry-run` flag for upgrade because the bare command is the dry-run
   behavior. Schema migrations repair eligible live `.orc` file formats before
   normal config validation. Scaffold refresh remains limited to Orc-owned
-  default content when ownership proof is available. See
+  default content and prose when ownership proof is available. See
   [configuration-init-upgrade.md](configuration-init-upgrade.md).
 
 The scaffold includes these workflows:
