@@ -72,6 +72,143 @@ func TestYAMLASTDocumentMapMutationAndRenderPreservesUnrelatedFormatting(t *test
 	}
 }
 
+func TestYAMLASTDocumentSetPreservesScalarAndInlineComment(t *testing.T) {
+	doc, err := parseYAMLASTDocument([]byte("setup_version: 0 # keep setup note\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLASTDocument returned error: %v", err)
+	}
+
+	if err := doc.Set(mustYAMLPath("setup_version"), "1"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	out, err := doc.Render()
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "setup_version: 1 # keep setup note\n"
+	if string(out) != want {
+		t.Fatalf("rendered YAML mismatch\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestYAMLASTDocumentSetPreservesBlankScalarBehavior(t *testing.T) {
+	doc, err := parseYAMLASTDocument([]byte("field: old # keep field note\nnext: keep\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLASTDocument returned error: %v", err)
+	}
+
+	if err := doc.Set(mustYAMLPath("field"), "   "); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	out, err := doc.Render()
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "field: # keep field note\nnext: keep\n"
+	if string(out) != want {
+		t.Fatalf("rendered YAML mismatch\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestYAMLASTDocumentSetAcceptsBlockMappingValue(t *testing.T) {
+	doc, err := parseYAMLASTDocument([]byte("version: 1\ndefaults:\n  loop_caps: legacy\nruntimes:\n  codex: runtimes/codex.yaml\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLASTDocument returned error: %v", err)
+	}
+
+	if err := doc.Set(mustYAMLPath(testDefaultsLoopCapsPath), "enabled: true\nsoft: 2\nhard: 4"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	out, err := doc.Render()
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "version: 1\ndefaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\nruntimes:\n  codex: runtimes/codex.yaml\n"
+	if string(out) != want {
+		t.Fatalf("rendered YAML mismatch\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestYAMLASTDocumentSetReplacesBlockMappingValue(t *testing.T) {
+	doc, err := parseYAMLASTDocument([]byte("# top\nversion: 1\ndefaults:\n  loop_caps:\n    enabled: true\n    soft: 1\n    hard: 2 # old hard note\n  retry_limit: 2\nruntimes:\n  codex: runtimes/codex.yaml\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLASTDocument returned error: %v", err)
+	}
+
+	if err := doc.Set(mustYAMLPath(testDefaultsLoopCapsPath), "enabled: false\nsoft: 3\nhard: 4"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	out, err := doc.Render()
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "# top\nversion: 1\ndefaults:\n  loop_caps:\n    enabled: false\n    soft: 3\n    hard: 4\n  retry_limit: 2\nruntimes:\n  codex: runtimes/codex.yaml\n"
+	if string(out) != want {
+		t.Fatalf("rendered YAML mismatch\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestYAMLASTDocumentSetAcceptsWholeSequenceValue(t *testing.T) {
+	doc, err := parseYAMLASTDocument([]byte("steps: old\nnext: keep\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLASTDocument returned error: %v", err)
+	}
+
+	if err := doc.Set(mustYAMLPath("steps"), "- plan\n- code\n- review"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	out, err := doc.Render()
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "steps:\n  - plan\n  - code\n  - review\nnext: keep\n"
+	if string(out) != want {
+		t.Fatalf("rendered YAML mismatch\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestYAMLASTDocumentSetAcceptsBlockScalarValue(t *testing.T) {
+	doc, err := parseYAMLASTDocument([]byte("description: old\nnext: keep\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLASTDocument returned error: %v", err)
+	}
+
+	if err := doc.Set(mustYAMLPath("description"), "|\n  line one\n  line two"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	out, err := doc.Render()
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	want := "description: |\n    line one\n    line two\nnext: keep\n"
+	if string(out) != want {
+		t.Fatalf("rendered YAML mismatch\nwant:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+func TestYAMLASTDocumentSetRejectsInvalidValue(t *testing.T) {
+	doc, err := parseYAMLASTDocument([]byte("field: old\n"))
+	if err != nil {
+		t.Fatalf("parseYAMLASTDocument returned error: %v", err)
+	}
+
+	if err := doc.Set(mustYAMLPath("field"), "["); err == nil {
+		t.Fatalf("Set returned nil error for invalid value")
+	}
+}
+
 func TestYAMLASTDocumentWildcardVisit(t *testing.T) {
 	doc, err := parseYAMLASTDocument([]byte("steps:\n  plan:\n    model: gpt-5\n  code:\n    model: gpt-5-codex\n  review:\n    timeout: 30\n"))
 	if err != nil {

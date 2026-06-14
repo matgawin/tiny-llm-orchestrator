@@ -188,18 +188,30 @@ func (d *yamlASTDocument) Set(path YAMLPath, value string) error {
 		return stableerr.Errorf("%s is missing", path.String())
 	}
 
-	node, err := newValueNode(value, target.Value.GetToken().Position.Column)
+	key, ok := astMapKey(target)
+	if !ok {
+		return stableerr.Errorf("%s has a non-scalar YAML key", path.String())
+	}
+
+	node, err := newSetValueNode(key, value, target.Key.GetToken().Position.Column, target.Value.GetToken().Position.Column)
 	if err != nil {
 		return err
+	}
+
+	switch value := node.(type) {
+	case *ast.MappingNode:
+		if len(value.Values) > 0 {
+			node.AddColumn(target.Key.GetToken().Position.Column + yamlIndentSpaces - value.Values[0].Key.GetToken().Position.Column)
+		}
+	case *ast.SequenceNode:
+		node.AddColumn(target.Key.GetToken().Position.Column + yamlIndentSpaces - value.GetToken().Position.Column)
 	}
 
 	if comment := target.Value.GetComment(); comment != nil {
 		_ = node.SetComment(comment)
 	}
 
-	if err := target.Replace(node); err != nil {
-		return fmt.Errorf("replace YAML node: %w", err)
-	}
+	target.Value = node
 
 	return nil
 }
@@ -365,7 +377,24 @@ func newMappingValueNode(key, value string, column int) (*ast.MappingValueNode, 
 	return node, nil
 }
 
-func newValueNode(value string, column int) (ast.Node, error) {
+func newSetValueNode(key, value string, keyColumn, valueColumn int) (ast.Node, error) {
+	if strings.TrimSpace(value) == "" {
+		return newScalarValueNode(value, valueColumn)
+	}
+
+	return newValueNode(key, value, keyColumn)
+}
+
+func newValueNode(key, value string, column int) (ast.Node, error) {
+	node, err := newMappingValueNode(key, value, column)
+	if err != nil {
+		return nil, err
+	}
+
+	return node.Value, nil
+}
+
+func newScalarValueNode(value string, column int) (ast.Node, error) {
 	node, err := parseSingleMappingValue([]byte("value: " + strings.TrimSpace(value) + "\n"))
 	if err != nil {
 		return nil, err

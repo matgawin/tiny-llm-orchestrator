@@ -94,6 +94,12 @@ func TestApplyReportsEditFailureAsConflictAndWritesIndependentActions(t *testing
 			content: "---\nlegacy: [\n---\n\nBody stays local.\n",
 			edit:    SurgicalEdit{Kind: EditASTAddYAMLField, Path: mustYAMLPath("modern"), Value: yamlScalarTrue},
 		},
+		{
+			name:    "invalid set replacement value",
+			path:    ".orc/workflows/bad-set.yaml",
+			content: "legacy: true\n",
+			edit:    SurgicalEdit{Kind: EditASTSetYAMLField, Path: mustYAMLPath("legacy"), Value: "["},
+		},
 	}
 
 	for _, tt := range tests {
@@ -133,6 +139,7 @@ func TestApplyReportsEditFailureAsConflictAndWritesIndependentActions(t *testing
 
 			if applied == nil {
 				t.Fatal("Apply result is nil, want partial result")
+				return
 			}
 
 			if !slices.Contains(applied.CreatedPaths, createPath) {
@@ -594,6 +601,85 @@ func TestApplyPreservesInlineCommentWhenSettingYAMLField(t *testing.T) {
 	}
 
 	assertCurrentSetupConfig(t, root)
+}
+
+func TestApplySetYAMLFieldReplacesScalarWithBlockMapping(t *testing.T) {
+	root := currentScaffold(t)
+	path := testCustomRuntimePath
+	target := pathInRoot(root, path)
+	content := []byte("id: custom\nlimits: legacy\ncommand: run\n")
+	writeFile(t, target, string(content))
+
+	fileIdentity := identity(content)
+	result := &Result{
+		ProjectRoot:         root,
+		ConfigSchemaVersion: 1,
+		CurrentSetupVersion: 1,
+		TargetSetupVersion:  1,
+		Actions: []Action{{
+			Kind:         ActionModify,
+			Path:         path,
+			Reason:       "test block mapping set",
+			FileIdentity: &fileIdentity,
+			Edits: []SurgicalEdit{{
+				Kind:  EditASTSetYAMLField,
+				Path:  mustYAMLPath("limits"),
+				Value: "enabled: true\nsoft: 2\nhard: 4",
+			}},
+		}},
+	}
+
+	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	want := "id: custom\nlimits:\n  enabled: true\n  soft: 2\n  hard: 4\ncommand: run\n"
+	if got := readFile(t, target); got != want {
+		t.Fatalf("runtime content mismatch\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestApplySetYAMLFieldReplacesMarkdownFrontmatterWithBlockMappingAndPreservesBody(t *testing.T) {
+	root := currentScaffold(t)
+	path := ".orc/agents/custom.md"
+	target := pathInRoot(root, path)
+	body := "\n# Custom\r\nKeep trailing spaces.  \n\n"
+	content := []byte("---\nid: custom\nlimits: legacy\n---\n" + body)
+	writeFile(t, target, string(content))
+
+	fileIdentity := identity(content)
+	result := &Result{
+		ProjectRoot:         root,
+		ConfigSchemaVersion: 1,
+		CurrentSetupVersion: 1,
+		TargetSetupVersion:  1,
+		Actions: []Action{{
+			Kind:         ActionModify,
+			Path:         path,
+			Reason:       "test frontmatter block mapping set",
+			FileIdentity: &fileIdentity,
+			Edits: []SurgicalEdit{{
+				Kind:  EditASTSetYAMLField,
+				Path:  mustYAMLPath("limits"),
+				Value: "enabled: true\nsoft: 2\nhard: 4",
+			}},
+		}},
+	}
+
+	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	got := readFile(t, target)
+
+	wantPrefix := "---\nid: custom\nlimits:\n  enabled: true\n  soft: 2\n  hard: 4\n---\n"
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Fatalf("frontmatter prefix mismatch\nwant prefix:\n%s\ngot:\n%s", wantPrefix, got)
+	}
+
+	if !strings.HasSuffix(got, body) {
+		t.Fatalf("body tail = %q, want exact body %q", got[len(got)-len(body):], body)
+	}
 }
 
 func TestApplyReportsStaleFilesWithoutDeleting(t *testing.T) {

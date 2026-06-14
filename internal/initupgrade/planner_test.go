@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	testPlannerPath  = ".orc/agents/planner.md"
-	testRuntimePath  = ".orc/runtimes/codex.yaml"
-	testWorkflowPath = ".orc/workflows/implementation.yaml"
+	testCustomRuntimePath = ".orc/runtimes/custom.yaml"
+	testPlannerPath       = ".orc/agents/planner.md"
+	testRuntimePath       = ".orc/runtimes/codex.yaml"
+	testWorkflowPath      = ".orc/workflows/implementation.yaml"
 )
 
 func TestPlanAlreadyCurrentSetupHasNoUpgradeActions(t *testing.T) {
