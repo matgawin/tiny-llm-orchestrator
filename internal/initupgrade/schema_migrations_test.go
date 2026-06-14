@@ -11,6 +11,146 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+func TestProductionConfigMaxLoopsMigrationPlansAndApplies(t *testing.T) {
+	root := currentScaffold(t)
+	configFilePath := filepath.Join(root, ".orc", "config.yaml")
+	replaceInFile(t, configFilePath, "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  # keep default comment\n  max_loops: 3\n")
+
+	result := mustPlan(t, root)
+
+	action := assertAction(t, result, ActionModify, configPath)
+	if !strings.Contains(action.Reason, "schema migration "+configDefaultsMaxLoopsToLoopCapsMigrationID+": migrate defaults.max_loops to defaults.loop_caps") {
+		t.Fatalf("reason = %q, want production schema migration id", action.Reason)
+	}
+
+	assertEdit(t, action, EditRemoveYAMLField, "defaults.max_loops")
+	assertEdit(t, action, EditAddYAMLField, "defaults.loop_caps")
+
+	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	content := readFile(t, configFilePath)
+	if !strings.Contains(content, "defaults:\n  # keep default comment\n  loop_caps:\n    enabled: true\n    soft: 3\n    hard: 4\n") {
+		t.Fatalf("config content did not preserve defaults order/comment:\n%s", content)
+	}
+
+	if strings.Contains(content, "max_loops") {
+		t.Fatalf("config still contains max_loops:\n%s", content)
+	}
+
+	second := mustPlan(t, root)
+	if hasActionForPath(second, configPath) {
+		t.Fatalf("second plan actions = %#v, want config migration idempotent", second.Actions)
+	}
+}
+
+func TestProductionConfigMaxLoopsMigrationNoOpsForNewOrNeitherShape(t *testing.T) {
+	for name, replacement := range map[string]string{
+		"new-only": "defaults:\n  loop_caps:\n    enabled: true\n    soft: 5\n    hard: 6\n",
+		"neither":  "defaults:\n  retry_limit: 2\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := currentScaffold(t)
+			replaceInFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", replacement)
+
+			result := mustPlan(t, root)
+			if hasSchemaMigrationAction(result, configDefaultsMaxLoopsToLoopCapsMigrationID) {
+				t.Fatalf("actions = %#v, want production migration no-op", result.Actions)
+			}
+		})
+	}
+}
+
+func TestProductionConfigMaxLoopsMigrationConflictsForAmbiguousAndInvalidValues(t *testing.T) {
+	for name, replacement := range map[string]string{
+		"both-fields": "defaults:\n  max_loops: 3\n  loop_caps:\n    enabled: true\n    soft: 3\n    hard: 4\n",
+		"non-integer": "defaults:\n  max_loops: sometimes\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := currentScaffold(t)
+			replaceInFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", replacement)
+
+			result := mustPlan(t, root)
+
+			assertConflict(t, result, configPath, schemaMigrationConflictCode)
+
+			conflict := schemaMigrationConflictForPath(t, result, configPath)
+			if !strings.Contains(conflict.Message, configDefaultsMaxLoopsToLoopCapsMigrationID) {
+				t.Fatalf("conflict message = %q, want migration id", conflict.Message)
+			}
+		})
+	}
+}
+
+func TestProductionConfigMaxLoopsMigrationConflictLeavesConfigUneditedButPlansUnrelatedSafeActions(t *testing.T) {
+	root := currentScaffold(t)
+	replaceInFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  max_loops: 3\n  loop_caps:\n    enabled: true\n    soft: 3\n    hard: 4\n")
+	removeFile(t, filepath.Join(root, filepath.FromSlash(testRuntimePath)))
+
+	result := mustPlan(t, root)
+
+	assertConflict(t, result, configPath, schemaMigrationConflictCode)
+
+	for _, action := range result.Actions {
+		if action.Path == configPath {
+			t.Fatalf("config action = %#v, want no config edit while schema migration conflicts", action)
+		}
+	}
+
+	assertAction(t, result, ActionCreate, testRuntimePath)
+}
+
+func TestProductionConfigMaxLoopsMigrationPreservesLegacyBlankBehavior(t *testing.T) {
+	root := currentScaffold(t)
+	configFilePath := filepath.Join(root, ".orc", "config.yaml")
+	replaceInFile(t, configFilePath, "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  max_loops: \"\"\n")
+
+	result := mustPlan(t, root)
+	action := assertAction(t, result, ActionModify, configPath)
+	assertEdit(t, action, EditAddYAMLField, "defaults.loop_caps")
+
+	if _, err := Apply(context.Background(), result, ApplyOptions{}); err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	content := readFile(t, configFilePath)
+	if !strings.Contains(content, "loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n") {
+		t.Fatalf("config content = %s, want legacy blank max_loops default conversion", content)
+	}
+}
+
+func TestProductionConfigMaxLoopsMigrationPlansBeforeTypedConfigValidation(t *testing.T) {
+	root := currentScaffold(t)
+	writeFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: 1\nsetup_version: 1\nworkflows: invalid\ndefaults:\n  max_loops: 3\n")
+
+	result := mustPlan(t, root)
+
+	action := assertAction(t, result, ActionModify, configPath)
+	if !strings.Contains(action.Reason, configDefaultsMaxLoopsToLoopCapsMigrationID) {
+		t.Fatalf("reason = %q, want production schema migration", action.Reason)
+	}
+
+	if len(result.Actions) != 1 {
+		t.Fatalf("actions = %#v, want only schema action while typed config is invalid", result.Actions)
+	}
+}
+
+func TestProductionConfigMaxLoopsMigrationExcludesRunsTree(t *testing.T) {
+	root := currentScaffold(t)
+	runConfig := filepath.Join(root, ".orc", "runs", "run-1", "config.yaml")
+	writeFile(t, runConfig, "defaults:\n  max_loops: 3\n")
+
+	result := mustPlan(t, root)
+	if hasActionForPath(result, ".orc/runs/run-1/config.yaml") {
+		t.Fatalf("actions = %#v, want runs config ignored", result.Actions)
+	}
+
+	if got := readFile(t, runConfig); got != "defaults:\n  max_loops: 3\n" {
+		t.Fatalf("run config changed to %q", got)
+	}
+}
+
 func TestSchemaMigrationPlansOrphanEligibleWorkflow(t *testing.T) {
 	root := currentScaffold(t)
 	path := ".orc/workflows/orphan.yaml"
@@ -126,8 +266,8 @@ func TestSchemaMigrationConfigSymlinkDoesNotBlockValidFile(t *testing.T) {
 		testRenameMigration("test-valid-workflow", "valid workflow", exactTarget(".orc/workflows/good.yaml"), "legacy_field", "modern_field"),
 	)
 
-	assertConflict(t, result, ".orc/config.yaml", schemaMigrationConflictCode)
-	assertConflict(t, result, ".orc/config.yaml", "invalid-project-config")
+	assertConflict(t, result, configPath, schemaMigrationConflictCode)
+	assertConflict(t, result, configPath, "invalid-project-config")
 	assertAction(t, result, ActionModify, ".orc/workflows/good.yaml")
 }
 
@@ -148,8 +288,8 @@ func TestSchemaMigrationConfigDirectoryDoesNotBlockValidFile(t *testing.T) {
 		testRenameMigration("test-valid-workflow", "valid workflow", exactTarget(".orc/workflows/good.yaml"), "legacy_field", "modern_field"),
 	)
 
-	assertConflict(t, result, ".orc/config.yaml", schemaMigrationConflictCode)
-	assertConflict(t, result, ".orc/config.yaml", "invalid-project-config")
+	assertConflict(t, result, configPath, schemaMigrationConflictCode)
+	assertConflict(t, result, configPath, "invalid-project-config")
 	assertAction(t, result, ActionModify, ".orc/workflows/good.yaml")
 }
 
@@ -201,9 +341,9 @@ func TestSchemaMigrationPlansBeforeTypedConfigValidation(t *testing.T) {
 	root := currentScaffold(t)
 	writeFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: 1\nsetup_version: 1\nworkflows: invalid\nlegacy_field: true\n")
 
-	result := mustPlanWithSchemaMigrations(t, root, testRenameMigration("test-config-raw", "raw config field", exactTarget(".orc/config.yaml"), "legacy_field", "modern_field"))
+	result := mustPlanWithSchemaMigrations(t, root, testRenameMigration("test-config-raw", "raw config field", exactTarget(configPath), "legacy_field", "modern_field"))
 
-	assertAction(t, result, ActionModify, ".orc/config.yaml")
+	assertAction(t, result, ActionModify, configPath)
 
 	if len(result.Actions) != 1 {
 		t.Fatalf("actions = %#v, want only schema action while typed config is invalid", result.Actions)
@@ -219,7 +359,7 @@ func TestSchemaMigrationInvalidRawConfigDoesNotBlockValidFile(t *testing.T) {
 		return strings.HasPrefix(path, ".orc/workflows/") && strings.HasSuffix(path, ".yaml")
 	}, "legacy_field", "modern_field"))
 
-	assertConflict(t, result, ".orc/config.yaml", "invalid-project-config")
+	assertConflict(t, result, configPath, "invalid-project-config")
 	assertAction(t, result, ActionModify, ".orc/workflows/good.yaml")
 }
 
@@ -260,6 +400,26 @@ func hasActionForPath(result *Result, path string) bool {
 	return slices.ContainsFunc(result.Actions, func(action Action) bool {
 		return action.Path == path
 	})
+}
+
+func hasSchemaMigrationAction(result *Result, migrationID string) bool {
+	return slices.ContainsFunc(result.Actions, func(action Action) bool {
+		return strings.Contains(action.Reason, "schema migration "+migrationID+":")
+	})
+}
+
+func schemaMigrationConflictForPath(t *testing.T, result *Result, path string) Conflict {
+	t.Helper()
+
+	for _, conflict := range result.Conflicts {
+		if conflict.Path == path && conflict.Code == schemaMigrationConflictCode {
+			return conflict
+		}
+	}
+
+	t.Fatalf("missing schema migration conflict for %s; conflicts = %#v", path, result.Conflicts)
+
+	return Conflict{}
 }
 
 func exactTarget(path string) func(string) bool {

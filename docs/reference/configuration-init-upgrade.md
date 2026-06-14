@@ -150,8 +150,7 @@ scaffold refresh, which is limited to Orc-owned default content and prose when
 ownership proof is available.
 
 Schema migrations run under `orc init upgrade`. There is no separate
-`orc project upgrade` command. The production registry may be empty until a
-real migration is added. Test-only migrations must be wired only through
+`orc project upgrade` command. Test-only migrations must be wired only through
 package tests and must not appear in production binaries, runtime output, or
 docs.
 
@@ -206,6 +205,77 @@ edit engine can apply non-overlapping surgical edits deterministically.
 Overlapping field edits, duplicate actions, or schema edits competing with a
 whole-file scaffold replacement are path-scoped conflicts that name the
 relevant migration id through the action reason, conflict message, or guidance.
+
+### `config-defaults-max-loops-to-loop-caps`
+
+`config-defaults-max-loops-to-loop-caps` is the first production schema
+migration. It targets only `.orc/config.yaml`. It does not target workflow
+files, runtime descriptors, agent descriptors, `.orc/scaffold.lock.yaml`, or
+anything under `.orc/runs/**`.
+
+The migration reads raw `.orc/config.yaml` YAML before typed project config
+validation. It can plan when the current `config.Load` path would reject another
+part of the file, as long as the raw YAML exposes the targeted `defaults`
+structure safely.
+
+Safe old shape:
+
+```yaml
+defaults:
+  max_loops: 3
+```
+
+The migration removes `defaults.max_loops` and adds:
+
+```yaml
+defaults:
+  loop_caps:
+    enabled: true
+    soft: 3
+    hard: 4
+```
+
+The edit is surgical. Comments and surrounding key order are preserved where
+the YAML edit engine can preserve them. The migration is not limited to
+scaffold-owned config files, so customized `.orc/config.yaml` files are eligible
+when the same structural predicate matches.
+
+Current shape:
+
+```yaml
+defaults:
+  loop_caps:
+    enabled: true
+    soft: 3
+    hard: 4
+```
+
+This is a no-op. A file with neither `defaults.max_loops` nor
+`defaults.loop_caps` is also a no-op for this schema migration. The setup
+`0 -> 1` migration may still add the built-in `defaults.loop_caps` default when
+it owns that separate setup decision.
+
+Ambiguous shape:
+
+```yaml
+defaults:
+  max_loops: 3
+  loop_caps:
+    enabled: true
+    soft: 3
+    hard: 4
+```
+
+This reports a path-scoped `schema-migration-conflict` for `.orc/config.yaml`
+and leaves that migration unapplied. Remove `defaults.max_loops` after
+confirming `defaults.loop_caps` is correct, or remove `defaults.loop_caps` and
+rerun `orc init upgrade`.
+
+`defaults.max_loops` must be an integer when it carries a value. Blank
+`defaults.max_loops: ""` uses the legacy setup conversion and becomes
+`defaults.loop_caps.enabled: true`, `soft: 2`, and `hard: 4`. Other non-integer
+values report a path-scoped `schema-migration-conflict`. Replace them manually
+with `defaults.loop_caps` integer values before rerunning `orc init upgrade`.
 
 ## Scaffold Refresh Source Of Truth
 

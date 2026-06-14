@@ -40,25 +40,6 @@ func (c configFile) hasNested(parent, key string) bool {
 	return ok
 }
 
-func (c configFile) scalarNested(parent, key string) string {
-	node, ok := mapLookup(c.doc, parent)
-	if !ok {
-		return ""
-	}
-
-	nested, ok := asMapSlice(node)
-	if !ok {
-		return ""
-	}
-
-	value, ok := mapLookup(nested, key)
-	if !ok {
-		return ""
-	}
-
-	return fmt.Sprint(value)
-}
-
 func (c configFile) runtimePath(name string) string {
 	if c.data.Runtimes == nil {
 		return ""

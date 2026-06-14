@@ -14,6 +14,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/initupgrade"
 )
 
+const initUpgradeStatusPartialLine = "status: partial"
+
 func TestExecuteInitDryRunUsesCurrentDirectory(t *testing.T) {
 	withTempCwd(t)
 
@@ -122,7 +124,7 @@ func TestExecuteInitUpgradeApplyPartiallyAppliesWithManualRefreshSkippedAction(t
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc init upgrade partially applied",
-		"status: partial",
+		initUpgradeStatusPartialLine,
 		"modified files:",
 		cliConfigPath,
 		"skipped actions:",
@@ -154,7 +156,7 @@ func TestExecuteInitUpgradeApplyReportsDirtyAffectedPathConflict(t *testing.T) {
 
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc init upgrade partially applied",
-		"status: partial",
+		initUpgradeStatusPartialLine,
 		"created files:",
 		"AGENTS.md",
 		"conflicts:",
@@ -429,6 +431,84 @@ func TestInitUpgradeOutputIncludesSchemaMigrationReason(t *testing.T) {
 	}
 }
 
+func TestExecuteInitUpgradeOutputsProductionSchemaMigration(t *testing.T) {
+	root := withTempCwd(t)
+	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	replaceCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  max_loops: 3\n")
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{commandInit, commandUpgrade, cliFlagJSON}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+
+	action := initUpgradeJSONActionForPath(t, payload, cliConfigPath)
+	if !strings.Contains(action.Reason, "schema migration config-defaults-max-loops-to-loop-caps: migrate defaults.max_loops to defaults.loop_caps") {
+		t.Fatalf("action reason = %q, want production schema migration", action.Reason)
+	}
+
+	if !hasInitUpgradeJSONEdit(action.Edits, string(initupgrade.EditRemoveYAMLField), "defaults.max_loops") ||
+		!hasInitUpgradeJSONEdit(action.Edits, string(initupgrade.EditAddYAMLField), "defaults.loop_caps") {
+		t.Fatalf("action edits = %#v, want max_loops removal and loop_caps add", action.Edits)
+	}
+
+	output := executeCLICommand(t, []string{commandInit, commandUpgrade})
+	assertCLIOutputContainsAll(t, output, []string{
+		"schema migration config-defaults-max-loops-to-loop-caps: migrate defaults.max_loops to defaults.loop_caps",
+		"edit: remove_yaml_field defaults.max_loops",
+		"edit: add_yaml_field defaults.loop_caps",
+	})
+}
+
+func TestExecuteInitUpgradeReportsProductionSchemaMigrationConflictWithSafeActions(t *testing.T) {
+	root := withTempCwd(t)
+	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	replaceCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  max_loops: 3\n  loop_caps:\n    enabled: true\n    soft: 3\n    hard: 4\n")
+
+	if err := os.Remove(filepath.Join(root, ".orc", "runtimes", "codex.yaml")); err != nil {
+		t.Fatalf("remove runtime: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{commandInit, commandUpgrade, cliFlagJSON}, &stdout, &stderr); err != nil {
+		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
+	}
+
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty for JSON plan", stderr.String())
+	}
+
+	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
+	if payload.Status != initUpgradeStatusPartial {
+		t.Fatalf("status = %q, want partial", payload.Status)
+	}
+
+	if !hasInitUpgradeConflict(payload.Conflicts, "schema-migration-conflict") {
+		t.Fatalf("conflicts = %#v, want schema migration conflict", payload.Conflicts)
+	}
+
+	if hasInitUpgradeAction(payload.Actions, "modify", cliConfigPath) {
+		t.Fatalf("actions = %#v, want no config action while schema migration conflicts", payload.Actions)
+	}
+
+	if !hasInitUpgradeAction(payload.Actions, "create", ".orc/runtimes/codex.yaml") {
+		t.Fatalf("actions = %#v, want unrelated runtime create action", payload.Actions)
+	}
+
+	human := executeCLICommand(t, []string{commandInit, commandUpgrade})
+	assertCLIOutputContainsAll(t, human, []string{
+		initUpgradeStatusPartialLine,
+		"schema-migration-conflict",
+		"schema migration config-defaults-max-loops-to-loop-caps",
+		"create .orc/runtimes/codex.yaml",
+	})
+}
+
 func TestExecuteInitUpgradeHelpDoesNotExposeDryRunFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -607,14 +687,20 @@ type initUpgradeTestJSON struct {
 	CurrentSetupVersion int    `json:"current_setup_version"`
 	TargetSetupVersion  int    `json:"target_setup_version"`
 	Actions             []struct {
-		Kind string `json:"kind"`
-		Path string `json:"path"`
+		Kind   string `json:"kind"`
+		Path   string `json:"path"`
+		Reason string `json:"reason"`
+		Edits  []struct {
+			Kind string `json:"kind"`
+			Path string `json:"path"`
+		} `json:"edits"`
 	} `json:"actions"`
 	Warnings []struct {
 		Code string `json:"code"`
 	} `json:"warnings"`
 	Conflicts []struct {
-		Code string `json:"code"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
 	} `json:"conflicts"`
 	SkippedActions []struct {
 		Path       string   `json:"path"`
@@ -630,6 +716,50 @@ type initUpgradeTestJSON struct {
 	ApplyRefusal  *struct {
 		Reason string `json:"reason"`
 	} `json:"apply_refusal"`
+}
+
+func initUpgradeJSONActionForPath(t *testing.T, payload initUpgradeTestJSON, path string) struct {
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Edits  []struct {
+		Kind string `json:"kind"`
+		Path string `json:"path"`
+	} `json:"edits"`
+} {
+	t.Helper()
+
+	for _, action := range payload.Actions {
+		if action.Path == path {
+			return action
+		}
+	}
+
+	t.Fatalf("missing JSON action for %s; actions = %#v", path, payload.Actions)
+
+	return struct {
+		Kind   string `json:"kind"`
+		Path   string `json:"path"`
+		Reason string `json:"reason"`
+		Edits  []struct {
+			Kind string `json:"kind"`
+			Path string `json:"path"`
+		} `json:"edits"`
+	}{}
+}
+
+func hasInitUpgradeJSONEdit(edits []struct {
+	Kind string `json:"kind"`
+	Path string `json:"path"`
+}, kind, path string,
+) bool {
+	return slices.ContainsFunc(edits, func(edit struct {
+		Kind string `json:"kind"`
+		Path string `json:"path"`
+	},
+	) bool {
+		return edit.Kind == kind && edit.Path == path
+	})
 }
 
 func decodeInitUpgradeJSON(t *testing.T, content []byte) initUpgradeTestJSON {
@@ -678,8 +808,13 @@ func assertInitUpgradeJSONApplyRefusalOmitsConflicts(t *testing.T, content []byt
 }
 
 func hasInitUpgradeAction(actions []struct {
-	Kind string `json:"kind"`
-	Path string `json:"path"`
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Edits  []struct {
+		Kind string `json:"kind"`
+		Path string `json:"path"`
+	} `json:"edits"`
 }, kind, path string,
 ) bool {
 	for _, action := range actions {
@@ -705,7 +840,8 @@ func hasInitUpgradeWarning(warnings []struct {
 }
 
 func hasInitUpgradeConflict(conflicts []struct {
-	Code string `json:"code"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }, code string,
 ) bool {
 	for _, conflict := range conflicts {

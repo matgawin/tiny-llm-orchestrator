@@ -150,7 +150,11 @@ defaults:
 
 `defaults.loop_caps` may be omitted for older configs. Missing loop cap config
 resolves to the built-in default `enabled: true`, `soft: 2`, and `hard: 4`.
-New scaffolded configs include those values explicitly.
+New scaffolded configs include those values explicitly. Older configs may use
+deprecated `defaults.max_loops`. `orc init upgrade` migrates integer
+`defaults.max_loops` values to `defaults.loop_caps` through
+`config-defaults-max-loops-to-loop-caps`. See
+[configuration-init-upgrade.md](configuration-init-upgrade.md).
 
 Workflow-level loop cap overrides use the expanded workflow object form:
 

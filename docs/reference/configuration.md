@@ -62,7 +62,10 @@ The canonical scaffold source for the current v1 shape is
 before `internal/config.Load(projectRoot)` would accept the current schema.
 That raw migration pass covers `.orc/config.yaml`, files under
 `.orc/workflows/**`, `.orc/agents/**`, and `.orc/runtimes/**`, and excludes
-`.orc/runs/**`. See [configuration-init-upgrade.md](configuration-init-upgrade.md).
+`.orc/runs/**`. The production migration
+`config-defaults-max-loops-to-loop-caps` converts deprecated
+`.orc/config.yaml` `defaults.max_loops` values to `defaults.loop_caps`. See
+[configuration-init-upgrade.md](configuration-init-upgrade.md).
 
 ## Environment Variables
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
@@ -47,7 +48,84 @@ type schemaMigrationDecision struct {
 }
 
 func productionSchemaMigrations() []schemaMigration {
-	return nil
+	return []schemaMigration{
+		configDefaultsMaxLoopsToLoopCapsMigration(),
+	}
+}
+
+const configDefaultsMaxLoopsToLoopCapsMigrationID = "config-defaults-max-loops-to-loop-caps"
+
+func configDefaultsMaxLoopsToLoopCapsMigration() schemaMigration {
+	return schemaMigration{
+		ID:      configDefaultsMaxLoopsToLoopCapsMigrationID,
+		Summary: "migrate defaults.max_loops to defaults.loop_caps",
+		Target:  exactSchemaMigrationTarget(configPath),
+		Plan: func(file schemaMigrationFile) schemaMigrationDecision {
+			if file.InvalidYAML != nil {
+				return schemaMigrationDecision{Skipped: "targeted YAML is invalid"}
+			}
+
+			defaults, _ := nestedYAMLMap(file.Doc, "defaults")
+			hasMaxLoops := hasYAMLFieldInMap(defaults, "max_loops")
+			hasLoopCaps := hasYAMLFieldInMap(defaults, "loop_caps")
+
+			switch {
+			case hasMaxLoops && hasLoopCaps:
+				return schemaMigrationDecision{
+					Conflict: "defaults.max_loops and defaults.loop_caps both exist",
+					Guidance: "remove defaults.max_loops after confirming defaults.loop_caps is correct, or remove defaults.loop_caps before rerunning this schema migration",
+				}
+			case hasMaxLoops:
+				value := strings.TrimSpace(fmt.Sprint(yamlMapValue(defaults, "max_loops")))
+				if value == "" {
+					value = strconv.Itoa(defaultLoopSoftCap)
+					return schemaMigrationDecision{Edits: maxLoopsToLoopCapsEdits(value, strconv.Itoa(defaultLoopHardCap))}
+				}
+
+				soft, err := strconv.Atoi(value)
+				if err != nil {
+					return schemaMigrationDecision{
+						Conflict: "defaults.max_loops is not an integer",
+						Guidance: "replace defaults.max_loops with defaults.loop_caps using integer soft and hard values before rerunning orc init upgrade",
+					}
+				}
+
+				return schemaMigrationDecision{Edits: maxLoopsToLoopCapsEdits(value, strconv.Itoa(soft+1))}
+			default:
+				return schemaMigrationDecision{}
+			}
+		},
+	}
+}
+
+func exactSchemaMigrationTarget(path string) func(string) bool {
+	return func(candidate string) bool { return candidate == path }
+}
+
+func maxLoopsToLoopCapsEdits(soft, hard string) []SurgicalEdit {
+	return []SurgicalEdit{
+		{Kind: EditRemoveYAMLField, Path: "defaults.max_loops"},
+		{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + soft + "\nhard: " + hard},
+	}
+}
+
+func nestedYAMLMap(doc yaml.MapSlice, key string) (yaml.MapSlice, bool) {
+	value, ok := mapLookup(doc, key)
+	if !ok {
+		return nil, false
+	}
+
+	return asMapSlice(value)
+}
+
+func hasYAMLFieldInMap(doc yaml.MapSlice, key string) bool {
+	_, ok := mapLookup(doc, key)
+	return ok
+}
+
+func yamlMapValue(doc yaml.MapSlice, key string) any {
+	value, _ := mapLookup(doc, key)
+	return value
 }
 
 func (p *planner) planSchemaMigrations() {

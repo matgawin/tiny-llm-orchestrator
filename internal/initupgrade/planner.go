@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"tiny-llm-orchestrator/orc/internal/config"
@@ -165,6 +164,10 @@ func (p *planner) planMigration0To1() {
 }
 
 func (p *planner) planConfigMigration0To1() {
+	if p.hasConflict(configPath, schemaMigrationConflictCode) {
+		return
+	}
+
 	var edits []SurgicalEdit
 	if !p.config.has(setupVersionField) {
 		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: setupVersionField, Value: fmt.Sprint(config.CurrentSetupVersion)})
@@ -172,24 +175,8 @@ func (p *planner) planConfigMigration0To1() {
 		edits = append(edits, SurgicalEdit{Kind: EditSetYAMLField, Path: setupVersionField, Value: fmt.Sprint(config.CurrentSetupVersion)})
 	}
 
-	if p.config.hasNested("defaults", "max_loops") && !p.config.hasNested("defaults", "loop_caps") {
-		value := strings.TrimSpace(p.config.scalarNested("defaults", "max_loops"))
-		if value == "" {
-			value = strconv.Itoa(defaultLoopSoftCap)
-		}
-
-		hard := strconv.Itoa(defaultLoopHardCap)
-		if parsed, err := strconv.Atoi(value); err == nil {
-			hard = strconv.Itoa(parsed + 1)
-		}
-
-		edits = append(
-			edits,
-			SurgicalEdit{Kind: EditRemoveYAMLField, Path: "defaults.max_loops"},
-			SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + value + "\nhard: " + hard},
-		)
-	} else if !p.config.hasNested("defaults", "loop_caps") {
-		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: "enabled: true\nsoft: " + strconv.Itoa(defaultLoopSoftCap) + "\nhard: " + strconv.Itoa(defaultLoopHardCap)})
+	if !p.config.hasNested("defaults", "max_loops") && !p.config.hasNested("defaults", "loop_caps") {
+		edits = append(edits, SurgicalEdit{Kind: EditAddYAMLField, Path: "defaults.loop_caps", Value: fmt.Sprintf("enabled: true\nsoft: %d\nhard: %d", defaultLoopSoftCap, defaultLoopHardCap)})
 	}
 
 	if p.config.hasNested("defaults", "legacy_runtime") {
