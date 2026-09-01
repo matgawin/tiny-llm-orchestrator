@@ -2,9 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"tiny-llm-orchestrator/orc/internal/attemptdeadline"
+	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
 const (
@@ -77,6 +84,97 @@ func TestExecuteTimeLeftExplicitLookupJSON(t *testing.T) {
 	}
 }
 
+func TestExecuteTimeLeftRootPrecedenceUsesFlagBeforeEnv(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{timeLeftTestTaskFlag, timeLeftTestTask}, nil)
+	startCLIActiveAttemptForStep(t, root, result.runID, timeLeftTestAttemptID, timeLeftTestStepCode, timeLeftTestAgentCoder)
+
+	wrongRoot := t.TempDir()
+	t.Setenv("ORC_PROJECT_ROOT", wrongRoot)
+
+	output := executeCLICommand(t, []string{
+		commandTimeLeft,
+		"--root",
+		root,
+		timeLeftTestRunFlag,
+		result.runID,
+		timeLeftTestFlag,
+		timeLeftTestAttemptID,
+	})
+
+	if !strings.Contains(output, "run: "+result.runID) {
+		t.Fatalf("output = %q, want run loaded from --root", output)
+	}
+}
+
+func TestExecuteTimeLeftUsesProjectRootEnvFromDifferentCwd(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+	result := executeCLIRunStart(t, root, []string{timeLeftTestTaskFlag, timeLeftTestTask}, nil)
+	startCLIActiveAttemptForStep(t, root, result.runID, timeLeftTestAttemptID, timeLeftTestStepCode, timeLeftTestAgentCoder)
+
+	otherDir := filepath.Join(root, "subdir")
+	if err := os.Mkdir(otherDir, 0o750); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	if err := os.Chdir(otherDir); err != nil {
+		t.Fatalf("chdir subdir: %v", err)
+	}
+
+	t.Setenv("ORC_PROJECT_ROOT", root)
+	t.Setenv("ORC_RUN_ID", result.runID)
+	t.Setenv("ORC_STEP_ID", "")
+	t.Setenv("ORC_ATTEMPT_ID", timeLeftTestAttemptID)
+
+	output := executeCLICommand(t, []string{commandTimeLeft})
+	if !strings.Contains(output, "run: "+result.runID) {
+		t.Fatalf("output = %q, want run loaded from ORC_PROJECT_ROOT", output)
+	}
+}
+
+func TestExecuteTimeLeftJSONPhaseActions(t *testing.T) {
+	tests := []struct {
+		name      string
+		attemptID string
+		remaining time.Duration
+		wantPhase string
+	}{
+		{name: "normal", attemptID: "attempt-normal", remaining: 11 * time.Minute, wantPhase: attemptdeadline.PhaseNormal},
+		{name: "narrow", attemptID: "attempt-narrow", remaining: 7 * time.Minute, wantPhase: attemptdeadline.PhaseNarrow},
+		{name: "wrap up", attemptID: "attempt-wrap-up", remaining: 3 * time.Minute, wantPhase: attemptdeadline.PhaseWrapUp},
+		{name: "report now", attemptID: "attempt-report-now", remaining: time.Minute, wantPhase: attemptdeadline.PhaseReportNow},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			result := executeCLIRunStart(t, root, []string{timeLeftTestTaskFlag, timeLeftTestTask}, nil)
+			startCLIActiveAttemptWithRemaining(t, root, result.runID, tt.attemptID, tt.remaining)
+
+			output := executeCLICommand(t, []string{
+				commandTimeLeft,
+				timeLeftTestRunFlag,
+				result.runID,
+				timeLeftTestFlag,
+				tt.attemptID,
+				timeLeftTestJSONFlag,
+			})
+
+			var payload timeLeftJSON
+			if err := json.Unmarshal([]byte(output), &payload); err != nil {
+				t.Fatalf("unmarshal time-left JSON: %v\n%s", err, output)
+			}
+
+			if payload.Phase != tt.wantPhase || payload.Action != attemptdeadline.Action(tt.wantPhase) {
+				t.Fatalf("phase/action = %s/%s, want %s/%s", payload.Phase, payload.Action, tt.wantPhase, attemptdeadline.Action(tt.wantPhase))
+			}
+		})
+	}
+}
+
 func TestExecuteTimeLeftRequiresWorkerEnvOrExplicitIDs(t *testing.T) {
 	t.Setenv("ORC_RUN_ID", "")
 	t.Setenv("ORC_ATTEMPT_ID", "")
@@ -120,5 +218,24 @@ func TestExecuteTimeLeftValidatesEnvStepID(t *testing.T) {
 
 	if got := err.Error(); !strings.Contains(got, `ORC_STEP_ID "review" does not match attempt step "code"`) {
 		t.Fatalf("error = %q, want step mismatch", got)
+	}
+}
+
+func startCLIActiveAttemptWithRemaining(t *testing.T, root, runID, attemptID string, remaining time.Duration) {
+	t.Helper()
+
+	timeout := 30 * time.Minute
+	startedAt := time.Now().UTC().Add(remaining - timeout)
+
+	store := openCLIStore(t, root)
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
+		StepID:          timeLeftTestStepCode,
+		AgentID:         timeLeftTestAgentCoder,
+		AttemptID:       attemptID,
+		Timeout:         timeout,
+		ReportExitGrace: 30 * time.Second,
+		Time:            startedAt,
+	}); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 }

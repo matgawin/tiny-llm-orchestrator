@@ -19,9 +19,13 @@ import (
 
 func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
-		Argv: []string{"sh", "-c", "printf 'stdout-%s-%s-%s-%s' \"$ORC_TEST\" \"$ORC_ATTEMPT_STARTED_AT\" \"$ORC_ATTEMPT_DEADLINE\" \"$ORC_ATTEMPT_TIMEOUT\"; printf stderr >&2"},
-		Env:  map[string]string{"ORC_TEST": "override"},
+		CWD:  "work",
+		Argv: []string{"sh", "-c", "printf 'stdout-%s-%s-%s-%s-%s-%s' \"$(pwd)\" \"$ORC_TEST\" \"$ORC_PROJECT_ROOT\" \"$ORC_ATTEMPT_STARTED_AT\" \"$ORC_ATTEMPT_DEADLINE\" \"$ORC_ATTEMPT_TIMEOUT\"; printf stderr >&2"},
+		Env:  map[string]string{"ORC_PROJECT_ROOT": "/wrong", "ORC_TEST": "override"},
 	})
+	if err := os.Mkdir(filepath.Join(root, "work"), 0o750); err != nil {
+		t.Fatalf("mkdir work: %v", err)
+	}
 
 	result, err := LaunchNext(context.Background(), Options{
 		Root:  root,
@@ -55,7 +59,7 @@ func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 		"# Worker Report\n",
 		"## Metadata\n",
 		"## Summary\n\ncommand step finished with done/passed",
-		"## Commands\n\n- sh -c printf 'stdout-%s-%s-%s-%s'",
+		"## Commands\n\n- sh -c printf 'stdout-%s-%s-%s-%s-%s-%s'",
 		"## Tests\n\n- command step finished with done/passed",
 	} {
 		if !strings.Contains(reportContent, want) {
@@ -63,7 +67,7 @@ func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 		}
 	}
 
-	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "stdout-override-2026-05-04T12:00:00Z-2026-05-04T12:00:00.2Z-200ms")
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "stdout-"+filepath.Join(root, "work")+"-override-"+root+"-2026-05-04T12:00:00Z-2026-05-04T12:00:00.2Z-200ms")
 	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stderr", "stderr")
 }
 
@@ -94,11 +98,16 @@ func TestLaunchNextResolvesCommandStepFromConfiguredPATH(t *testing.T) {
 func TestLaunchNextExecutesScriptStep(t *testing.T) {
 	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
 		Kind:       config.StepKindScript,
+		CWD:        "work",
 		ScriptPath: "scripts/check.sh",
 		ScriptArgs: []string{"alpha"},
-		Env:        map[string]string{"ORC_TEST": "script-env"},
+		Env:        map[string]string{"ORC_PROJECT_ROOT": "/wrong", "ORC_TEST": "script-env"},
 	})
-	writeLauncherExecutable(t, filepath.Join(root, "scripts", "check.sh"), "#!/bin/sh\nprintf 'script-%s-%s' \"$1\" \"$ORC_TEST\"\n")
+	if err := os.Mkdir(filepath.Join(root, "work"), 0o750); err != nil {
+		t.Fatalf("mkdir work: %v", err)
+	}
+
+	writeLauncherExecutable(t, filepath.Join(root, "scripts", "check.sh"), "#!/bin/sh\nprintf 'script-%s-%s-%s' \"$1\" \"$ORC_TEST\" \"$ORC_PROJECT_ROOT\"\n")
 
 	result, err := LaunchNext(context.Background(), Options{
 		Root:  root,
@@ -118,7 +127,7 @@ func TestLaunchNextExecutesScriptStep(t *testing.T) {
 	}
 
 	loaded := loadLauncherRun(t, root, runID)
-	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "script-alpha-script-env")
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "script-alpha-script-env-"+root)
 }
 
 func TestLaunchNextRoutesFailingCommandStepBackToCode(t *testing.T) {

@@ -64,6 +64,23 @@ func FromAttempt(attempt runstore.Attempt, now time.Time) (Guidance, error) {
 	}, nil
 }
 
+func Env(attempt runstore.Attempt) map[string]string {
+	guidance, err := FromAttempt(attempt, attempt.StartedAt)
+	if err != nil {
+		return nil
+	}
+
+	return map[string]string{
+		"ORC_ATTEMPT_STARTED_AT": FormatTime(guidance.StartedAt),
+		"ORC_ATTEMPT_DEADLINE":   FormatTime(guidance.Deadline),
+		"ORC_ATTEMPT_TIMEOUT":    guidance.TimeoutRaw,
+	}
+}
+
+func FormatTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
 func Phase(remaining time.Duration) string {
 	switch {
 	case remaining <= reportNowThreshold:

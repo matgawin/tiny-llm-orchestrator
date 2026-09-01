@@ -34,6 +34,7 @@ fi
 	printf 'env:ORC_RUN_ID=%s\n' "${ORC_RUN_ID:-}"
 	printf 'env:ORC_STEP_ID=%s\n' "${ORC_STEP_ID:-}"
 	printf 'env:ORC_ATTEMPT_ID=%s\n' "${ORC_ATTEMPT_ID:-}"
+	printf 'env:ORC_PROJECT_ROOT=%s\n' "${ORC_PROJECT_ROOT:-}"
 	printf 'env:ORC_ATTEMPT_STARTED_AT=%s\n' "${ORC_ATTEMPT_STARTED_AT:-}"
 	printf 'env:ORC_ATTEMPT_DEADLINE=%s\n' "${ORC_ATTEMPT_DEADLINE:-}"
 	printf 'env:ORC_ATTEMPT_TIMEOUT=%s\n' "${ORC_ATTEMPT_TIMEOUT:-}"

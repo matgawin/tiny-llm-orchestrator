@@ -96,6 +96,7 @@ type launcherRunOptions struct {
 type commandWorkflowOptions struct {
 	Timeout        string
 	Kind           string
+	CWD            string
 	Argv           []string
 	ScriptPath     string
 	ScriptArgs     []string
@@ -459,6 +460,12 @@ func writeCommandLauncherProject(t *testing.T, root string, opts commandWorkflow
 			workflowYAML.WriteString(strconv.Quote(opts.Env[key]))
 			workflowYAML.WriteString("\n")
 		}
+	}
+
+	if opts.CWD != "" {
+		workflowYAML.WriteString("    cwd: ")
+		workflowYAML.WriteString(strconv.Quote(opts.CWD))
+		workflowYAML.WriteString("\n")
 	}
 
 	if opts.AllowedResults != "" {

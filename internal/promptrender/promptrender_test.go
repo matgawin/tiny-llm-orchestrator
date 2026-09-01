@@ -77,6 +77,7 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"Do not stream logs, file lists, diffs, frequent heartbeat messages, or routine chatter",
 		"`ORC_PROGRESS_SOCKET`",
 		"`ORC_PROGRESS_TOKEN`",
+		"`ORC_PROJECT_ROOT`",
 		"`ORC_ATTEMPT_STARTED_AT`",
 		"`ORC_ATTEMPT_DEADLINE`",
 		"`ORC_ATTEMPT_TIMEOUT`",

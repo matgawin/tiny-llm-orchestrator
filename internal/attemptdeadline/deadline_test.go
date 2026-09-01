@@ -7,6 +7,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
+const testAttemptTimeout = "30m0s"
+
 func TestPhaseThresholds(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -39,7 +41,7 @@ func TestFromAttemptComputesDeadlineGuidance(t *testing.T) {
 		AgentID:   "coder",
 		AttemptID: "attempt-001",
 		StartedAt: startedAt,
-		Timeout:   "30m0s",
+		Timeout:   testAttemptTimeout,
 	}, now)
 	if err != nil {
 		t.Fatalf("FromAttempt returned error: %v", err)
@@ -55,5 +57,26 @@ func TestFromAttemptComputesDeadlineGuidance(t *testing.T) {
 
 	if got.Phase != PhaseNarrow || got.Action != Action(PhaseNarrow) {
 		t.Fatalf("phase/action = %s/%s, want NARROW action", got.Phase, got.Action)
+	}
+}
+
+func TestEnvFormatsDeadlineValues(t *testing.T) {
+	startedAt := time.Date(2026, 9, 1, 12, 0, 0, 123, time.UTC)
+
+	got := Env(runstore.Attempt{
+		StartedAt: startedAt,
+		Timeout:   testAttemptTimeout,
+	})
+
+	want := map[string]string{
+		"ORC_ATTEMPT_STARTED_AT": "2026-09-01T12:00:00.000000123Z",
+		"ORC_ATTEMPT_DEADLINE":   "2026-09-01T12:30:00.000000123Z",
+		"ORC_ATTEMPT_TIMEOUT":    testAttemptTimeout,
+	}
+
+	for key, value := range want {
+		if got[key] != value {
+			t.Fatalf("Env()[%s] = %q, want %q", key, got[key], value)
+		}
 	}
 }

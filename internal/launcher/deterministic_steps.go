@@ -80,6 +80,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 
 	env = mergeEnv(env, progressEnv)
 	env = mergeEnv(env, attemptDeadlineEnv(attempt))
+	env = mergeEnv(env, projectRootEnv(loaded.Project.Root))
 
 	execPath, err := deterministicCommandPath(command, env, cwd)
 	if err != nil {
@@ -297,6 +298,10 @@ func deterministicExecSpec(root string, step config.Step) ([]string, string, []s
 	env := mergeEnv(os.Environ(), step.Env)
 
 	return command, cwd, env, nil
+}
+
+func projectRootEnv(root string) map[string]string {
+	return map[string]string{"ORC_PROJECT_ROOT": root}
 }
 
 func deterministicCommandPath(command, env []string, cwd string) (string, error) {

@@ -18,6 +18,7 @@ import (
 type timeLeftOptions struct {
 	RunID     string
 	AttemptID string
+	Root      string
 	JSON      bool
 }
 
@@ -62,6 +63,7 @@ func newTimeLeftCommand(stdout, stderr io.Writer) *cobra.Command {
 	flags.BoolVar(&opts.JSON, "json", false, "Print machine-readable JSON")
 	flags.StringVar(&opts.RunID, "run", "", "Run id for explicit lookup")
 	flags.StringVar(&opts.AttemptID, "attempt", "", "Attempt id for explicit lookup")
+	flags.StringVar(&opts.Root, "root", "", "Project root for run store lookup")
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if _, writeErr := fmt.Fprintf(stderr, "%s %s: %v\n\n", appName, commandTimeLeft, err); writeErr != nil {
 			return fmt.Errorf("time-left flag error: %w", writeErr)
@@ -96,7 +98,7 @@ func executeTimeLeft(ctx context.Context, opts timeLeftOptions, stdout io.Writer
 		return errors.New("orc time-left requires --run and --attempt together")
 	}
 
-	root, err := os.Getwd()
+	root, err := timeLeftRoot(opts.Root)
 	if err != nil {
 		return fmt.Errorf("orc time-left: %w", err)
 	}
@@ -148,8 +150,8 @@ func writeTimeLeftHuman(stdout io.Writer, guidance attemptdeadline.Guidance) err
 		guidance.StepID,
 		guidance.AgentID,
 		guidance.AttemptID,
-		formatAttemptTime(guidance.StartedAt),
-		formatAttemptTime(guidance.Deadline),
+		attemptdeadline.FormatTime(guidance.StartedAt),
+		attemptdeadline.FormatTime(guidance.Deadline),
 		guidance.Elapsed.String(),
 		guidance.Remaining.String(),
 		guidance.TimeoutRaw,
@@ -169,8 +171,8 @@ func writeTimeLeftJSON(stdout io.Writer, guidance attemptdeadline.Guidance) erro
 		StepID:    guidance.StepID,
 		AgentID:   guidance.AgentID,
 		AttemptID: guidance.AttemptID,
-		StartedAt: formatAttemptTime(guidance.StartedAt),
-		Deadline:  formatAttemptTime(guidance.Deadline),
+		StartedAt: attemptdeadline.FormatTime(guidance.StartedAt),
+		Deadline:  attemptdeadline.FormatTime(guidance.Deadline),
 		Elapsed:   guidance.Elapsed.String(),
 		Remaining: guidance.Remaining.String(),
 		Timeout:   guidance.TimeoutRaw,
@@ -190,6 +192,19 @@ func writeTimeLeftJSON(stdout io.Writer, guidance attemptdeadline.Guidance) erro
 	return nil
 }
 
-func formatAttemptTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
+func timeLeftRoot(flagRoot string) (string, error) {
+	if flagRoot != "" {
+		return flagRoot, nil
+	}
+
+	if envRoot := os.Getenv("ORC_PROJECT_ROOT"); envRoot != "" {
+		return envRoot, nil
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get current directory: %w", err)
+	}
+
+	return wd, nil
 }

@@ -149,10 +149,11 @@ See [attempt-time-left.md](attempt-time-left.md) for phase thresholds and hook
 behavior.
 
 The prompt treats `ORC_PROGRESS_SOCKET`, `ORC_PROGRESS_TOKEN`, `ORC_RUN_ID`,
-`ORC_STEP_ID`, `ORC_ATTEMPT_ID`, `ORC_ATTEMPT_STARTED_AT`,
-`ORC_ATTEMPT_DEADLINE`, and `ORC_ATTEMPT_TIMEOUT` as injected troubleshooting
-details, not normal manual arguments. The full live progress contract is
-defined in [live-worker-progress.md](live-worker-progress.md).
+`ORC_STEP_ID`, `ORC_ATTEMPT_ID`, `ORC_PROJECT_ROOT`,
+`ORC_ATTEMPT_STARTED_AT`, `ORC_ATTEMPT_DEADLINE`, and
+`ORC_ATTEMPT_TIMEOUT` as injected troubleshooting details, not normal manual
+arguments. The full live progress contract is defined in
+[live-worker-progress.md](live-worker-progress.md).
 
 ## Persistence
 

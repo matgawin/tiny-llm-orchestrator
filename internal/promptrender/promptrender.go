@@ -291,7 +291,7 @@ const (
 
 When useful, send short operator-visible updates with ` + "`orc progress <short update>`" + ` at crucial points such as starting analysis, choosing an approach, beginning tests, or finding a blocker. Do not stream logs, file lists, diffs, frequent heartbeat messages, or routine chatter through live progress.
 
-The launcher injects ` + "`ORC_PROGRESS_SOCKET`" + `, ` + "`ORC_PROGRESS_TOKEN`" + `, ` + "`ORC_RUN_ID`" + `, ` + "`ORC_STEP_ID`" + `, ` + "`ORC_ATTEMPT_ID`" + `, ` + "`ORC_ATTEMPT_STARTED_AT`" + `, ` + "`ORC_ATTEMPT_DEADLINE`" + `, and ` + "`ORC_ATTEMPT_TIMEOUT`" + ` for troubleshooting. You normally do not pass them manually. Live progress is optional operator feedback and is separate from the final report.
+The launcher injects ` + "`ORC_PROGRESS_SOCKET`" + `, ` + "`ORC_PROGRESS_TOKEN`" + `, ` + "`ORC_RUN_ID`" + `, ` + "`ORC_STEP_ID`" + `, ` + "`ORC_ATTEMPT_ID`" + `, ` + "`ORC_PROJECT_ROOT`" + `, ` + "`ORC_ATTEMPT_STARTED_AT`" + `, ` + "`ORC_ATTEMPT_DEADLINE`" + `, and ` + "`ORC_ATTEMPT_TIMEOUT`" + ` for troubleshooting. You normally do not pass them manually. Live progress is optional operator feedback and is separate from the final report.
 
 `
 
