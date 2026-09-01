@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"tiny-llm-orchestrator/orc/internal/progress"
 	"tiny-llm-orchestrator/orc/internal/runstore"
@@ -82,6 +83,21 @@ func (d *liveProgressDisplay) Env() map[string]string {
 		"ORC_RUN_ID":          d.runID,
 		"ORC_STEP_ID":         d.stepID,
 		"ORC_ATTEMPT_ID":      d.attemptID,
+	}
+}
+
+func attemptDeadlineEnv(attempt runstore.Attempt) map[string]string {
+	timeout, err := time.ParseDuration(attempt.Timeout)
+	if err != nil || timeout <= 0 || attempt.StartedAt.IsZero() {
+		return nil
+	}
+
+	startedAt := attempt.StartedAt.UTC()
+
+	return map[string]string{
+		"ORC_ATTEMPT_STARTED_AT": startedAt.Format(time.RFC3339Nano),
+		"ORC_ATTEMPT_DEADLINE":   startedAt.Add(timeout).UTC().Format(time.RFC3339Nano),
+		"ORC_ATTEMPT_TIMEOUT":    attempt.Timeout,
 	}
 }
 

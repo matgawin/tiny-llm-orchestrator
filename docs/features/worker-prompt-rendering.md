@@ -141,10 +141,18 @@ routine chatter through live progress. Prompts continue to present
 `orc report --status/--result` as the only final worker outcome submission
 path.
 
+Rendered prompts include an `Attempt Deadline` section. It names
+`orc time-left` as the command workers can use to inspect deadline, elapsed
+time, remaining time, timeout, phase, and action guidance during the attempt.
+The section keeps `orc report` as the only final completion or blockage path.
+See [attempt-time-left.md](attempt-time-left.md) for phase thresholds and hook
+behavior.
+
 The prompt treats `ORC_PROGRESS_SOCKET`, `ORC_PROGRESS_TOKEN`, `ORC_RUN_ID`,
-`ORC_STEP_ID`, and `ORC_ATTEMPT_ID` as injected troubleshooting details, not
-normal manual arguments. The full live progress contract is defined in
-[live-worker-progress.md](live-worker-progress.md).
+`ORC_STEP_ID`, `ORC_ATTEMPT_ID`, `ORC_ATTEMPT_STARTED_AT`,
+`ORC_ATTEMPT_DEADLINE`, and `ORC_ATTEMPT_TIMEOUT` as injected troubleshooting
+details, not normal manual arguments. The full live progress contract is
+defined in [live-worker-progress.md](live-worker-progress.md).
 
 ## Persistence
 

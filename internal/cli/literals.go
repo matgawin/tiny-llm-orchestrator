@@ -12,6 +12,7 @@ const (
 	commandReport        = "report"
 	commandRun           = "run"
 	commandSandbox       = "sandbox"
+	commandTimeLeft      = "time-left"
 	commandVersion       = "version"
 	commandUpgrade       = "upgrade"
 	commandWorker        = "worker"

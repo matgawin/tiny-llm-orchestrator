@@ -33,3 +33,15 @@ Use %s report --status <status> --result <result> for final worker outcome repor
 func initHelpLong() string {
 	return fmt.Sprintf("%s init scaffolds project-local Tiny Orc config in the current directory.", appName)
 }
+
+func timeLeftHelpLong() string {
+	return fmt.Sprintf(`%s time-left prints deadline guidance for the current worker attempt.
+
+By default it reads ORC_RUN_ID and ORC_ATTEMPT_ID from the worker environment.
+If ORC_STEP_ID is set, it must match the persisted attempt step.
+For debugging, pass --run <run-id> and --attempt <attempt-id>.
+
+Output includes deadline, elapsed time, remaining time, timeout, phase, and action.
+Use --json from hooks. NORMAL stays quiet in hooks; NARROW, WRAP_UP, and REPORT_NOW can be shown as short directives.
+Final worker outcomes still go through %s report.`, appName, appName)
+}

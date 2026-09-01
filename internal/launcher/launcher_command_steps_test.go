@@ -19,7 +19,7 @@ import (
 
 func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
-		Argv: []string{"sh", "-c", "printf stdout-$ORC_TEST; printf stderr >&2"},
+		Argv: []string{"sh", "-c", "printf 'stdout-%s-%s-%s-%s' \"$ORC_TEST\" \"$ORC_ATTEMPT_STARTED_AT\" \"$ORC_ATTEMPT_DEADLINE\" \"$ORC_ATTEMPT_TIMEOUT\"; printf stderr >&2"},
 		Env:  map[string]string{"ORC_TEST": "override"},
 	})
 
@@ -55,7 +55,7 @@ func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 		"# Worker Report\n",
 		"## Metadata\n",
 		"## Summary\n\ncommand step finished with done/passed",
-		"## Commands\n\n- sh -c printf stdout-$ORC_TEST; printf stderr >&2",
+		"## Commands\n\n- sh -c printf 'stdout-%s-%s-%s-%s'",
 		"## Tests\n\n- command step finished with done/passed",
 	} {
 		if !strings.Contains(reportContent, want) {
@@ -63,7 +63,7 @@ func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 		}
 	}
 
-	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "stdout-override")
+	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stdout", "stdout-override-2026-05-04T12:00:00Z-2026-05-04T12:00:00.2Z-200ms")
 	assertLogArtifactContains(t, root, loaded, result.Attempt.AttemptID, "stderr", "stderr")
 }
 

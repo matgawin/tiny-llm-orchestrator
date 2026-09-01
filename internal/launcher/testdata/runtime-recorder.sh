@@ -34,6 +34,9 @@ fi
 	printf 'env:ORC_RUN_ID=%s\n' "${ORC_RUN_ID:-}"
 	printf 'env:ORC_STEP_ID=%s\n' "${ORC_STEP_ID:-}"
 	printf 'env:ORC_ATTEMPT_ID=%s\n' "${ORC_ATTEMPT_ID:-}"
+	printf 'env:ORC_ATTEMPT_STARTED_AT=%s\n' "${ORC_ATTEMPT_STARTED_AT:-}"
+	printf 'env:ORC_ATTEMPT_DEADLINE=%s\n' "${ORC_ATTEMPT_DEADLINE:-}"
+	printf 'env:ORC_ATTEMPT_TIMEOUT=%s\n' "${ORC_ATTEMPT_TIMEOUT:-}"
 	printf 'env:ORC_PROGRESS_SOCKET=%s\n' "${ORC_PROGRESS_SOCKET:-}"
 	printf 'env:ORC_PROGRESS_TOKEN=%s\n' "${ORC_PROGRESS_TOKEN:-}"
 	if [ -n "$prompt_file" ]; then

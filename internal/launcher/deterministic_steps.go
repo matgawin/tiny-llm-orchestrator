@@ -79,6 +79,7 @@ func runDeterministicStep(ctx context.Context, loaded runcontext.Context, opts O
 	}
 
 	env = mergeEnv(env, progressEnv)
+	env = mergeEnv(env, attemptDeadlineEnv(attempt))
 
 	execPath, err := deterministicCommandPath(command, env, cwd)
 	if err != nil {

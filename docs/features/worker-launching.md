@@ -214,6 +214,12 @@ Command and script steps inherit the same live progress environment as agent
 workers and can call `orc progress <message>`. Progress remains live
 operator-feedback only and does not affect the generated command/script report.
 
+Agent, command, and script steps also receive `ORC_ATTEMPT_STARTED_AT`,
+`ORC_ATTEMPT_DEADLINE`, and `ORC_ATTEMPT_TIMEOUT`. These values support
+`orc time-left` and Codex PostToolUse hook nudges. See
+[attempt-time-left.md](attempt-time-left.md) for exact formats, phase
+thresholds, and hook behavior.
+
 Orc writes command/script reports itself; subprocesses do not call
 `orc report`. Exit mapping is fixed in v1:
 

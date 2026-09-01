@@ -451,6 +451,7 @@ func (r *workerRunner) prepareWorkerCommand(ctx context.Context) (runstore.Attem
 	}
 
 	r.workerEnv = mergeEnv(r.workerEnv, r.progressEnv)
+	r.workerEnv = mergeEnv(r.workerEnv, attemptDeadlineEnv(r.attempt))
 
 	cmd, releaseExec, err := newWorkerCommand(ctx, r.command, r.workerEnv, r.loaded.Project.Root)
 	if err != nil {

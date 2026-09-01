@@ -65,6 +65,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 		newReportCommand(stdout, stderr),
 		newRunCommand(stdin, stdout, stderr),
 		newSandboxCommand(stdin, stdout, stderr),
+		newTimeLeftCommand(stdout, stderr),
 		newWorkerCommand(stdout, stderr),
 		newVersionCommand(stdout),
 	)

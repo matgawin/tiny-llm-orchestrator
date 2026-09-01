@@ -26,6 +26,7 @@ Contributors documenting or changing user-visible or orchestration-facing behavi
 - Summary context rendering: [summary-context.md](summary-context.md)
 - Final summary recording: [final-summary-recording.md](final-summary-recording.md)
 - Follow-up recording: [follow-up-recording.md](follow-up-recording.md)
+- Attempt deadline guidance: [attempt-time-left.md](attempt-time-left.md)
 - Worker report command and report persistence: report contract in [worker-prompt-rendering.md](worker-prompt-rendering.md#report-contract), persistence contract in
   [../reference/run-store-events.md](../reference/run-store-events.md#v1-event-types)
 - Live worker progress: [live-worker-progress.md](live-worker-progress.md)
