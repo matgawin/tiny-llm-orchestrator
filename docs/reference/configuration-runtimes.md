@@ -141,8 +141,8 @@ Runtime command declarations are never shell strings.
 
 `model.default` is optional and is omitted from this minimum Codex-compatible
 descriptor so that Codex keeps its current no-model argv by default. Runtimes
-that need a default model may declare one under `model.default`; it participates
-in the model resolution order below.
+that need a default model can declare one under `model.default`; it
+participates in the model resolution order below.
 
 `reasoning.default` is optional, but the scaffolded Codex descriptor declares
 `default: medium` so Codex workers receive an explicit reasoning effort unless a
@@ -165,13 +165,13 @@ YAML list item is one argv entry.
 
 `prompt.delivery` accepts exactly `stdin` or `file`. For `stdin`, the rendered
 worker prompt is written to process stdin. For `file`, the existing persisted
-prompt artifact path is the prompt file and may be substituted through
+prompt artifact path is the prompt file and can be substituted through
 `{prompt_file}`. The launcher must not create a second prompt file unless a
 later design explicitly changes this contract.
 
 ## Placeholders
 
-Runtime descriptors may use only these placeholders in argv fragments:
+Runtime descriptors can use only these placeholders in argv fragments:
 
 - `{model}`
 - `{reasoning}`
@@ -183,7 +183,7 @@ Runtime descriptors may use only these placeholders in argv fragments:
 - `{dir}`
 
 `{dir}` is valid only in `directories.args`. `{reasoning}` is valid only in
-`reasoning.args`. The command/model placeholder list is exactly
+`reasoning.args`. The command and model placeholder list is exactly
 `{model}`, `{prompt_file}`, `{agent_id}`, `{step_id}`, `{attempt_id}`, and
 `{run_id}`; `{dir}` is reserved for the directory capability fragment because
 it is repeated per directory.
@@ -245,9 +245,9 @@ Runtime directory resolution is:
 
 Exact duplicate runtime directory entries are preserved and emitted repeatedly.
 The first implementation must not normalize or deduplicate them because repeated
-argv entries may be meaningful to some runtimes.
+argv entries can be meaningful to some runtimes.
 
-`runtime_dirs` entries may be clean repository-relative paths or absolute host
+`runtime_dirs` entries can be clean repository-relative paths or absolute host
 paths. Repository-relative entries resolve from the project root and must not
 contain unclean path syntax, `..` traversal, shell syntax, environment syntax,
 or tilde syntax. Absolute entries are allowed for external worktrees, but they
@@ -357,7 +357,7 @@ mounts:
 ```
 
 The simple form fields are `host`, `target`, `mode`, and optional `optional`.
-`mode` is `ro` or `rw`. `host` may be repository-relative or absolute.
+`mode` is `ro` or `rw`. `host` can be repository-relative or absolute.
 `target` must be a clean absolute sandbox path. Missing static host paths are
 errors unless `optional: true` is set, in which case the mount is skipped.
 
@@ -477,7 +477,7 @@ runtimes:
   codex: runtimes/codex.yaml
 ```
 
-Scaffolded workflows should set the default runtime once:
+Scaffolded workflows set the default runtime once:
 
 ```yaml
 defaults:
@@ -488,56 +488,10 @@ defaults:
     failed/missing_report: 1
 ```
 
-The Codex runtime descriptor intentionally declares model, reasoning,
-directory, prompt, and sandbox behavior as data:
-
-```yaml
-id: codex
-command:
-  executable: codex
-  normal_args: [--ask-for-approval, never]
-  sandbox_args: [--dangerously-bypass-approvals-and-sandbox]
-  args: [exec, --skip-git-repo-check, "-"]
-prompt:
-  delivery: stdin
-model:
-  supported: true
-  required: false
-  allowed: []
-  args: [--model, "{model}"]
-reasoning:
-  supported: true
-  required: false
-  default: medium
-  allowed: [low, medium, high, xhigh]
-  args: [--config, 'model_reasoning_effort="{reasoning}"']
-directories:
-  supported: true
-  args: [--add-dir, "{dir}"]
-sandbox:
-  supported: true
-  required: false
-  requirements:
-    env:
-      pass: [OPENAI_API_KEY]
-      set: {}
-      set_from_mount:
-        CODEX_HOME:
-          mount: config_home
-          value: target
-    mounts:
-      - id: config_home
-        source:
-          env: CODEX_HOME
-          fallback:
-            host_home: .codex
-          create: true
-        target:
-          env_same_as_source: true
-          fallback:
-            sandbox_home: .codex
-        mode: rw
-```
+The Codex runtime descriptor declares model, reasoning, directory, prompt, and
+sandbox behavior as data. Its shape follows the descriptor example above. The
+Codex-specific sandbox requirement passes `OPENAI_API_KEY` and derives
+`CODEX_HOME` from the `config_home` mount target.
 
 With no effective workflow model and no workflow reasoning override, the
 scaffolded Codex descriptor still omits model args but emits its default
@@ -626,34 +580,7 @@ The first implementation does not include:
 - model allowlist fetching from external providers
 - reasoning allowlist fetching from external providers
 
-## Downstream Implementation Checklist
-
-Implementation tasks must update or add tests for:
-
-- valid Codex runtime descriptor loading
-- valid non-Codex file-prompt runtime loading
-- missing runtime files, unsafe paths, id/key mismatch, empty argv entries, and
-  unknown placeholders
-- prompt delivery validation, including `{prompt_file}` only with file delivery
-- model pass-through and allowlist rejection
-- reasoning default, pass-through, allowlist rejection, and placeholder
-  validation
-- unsupported model, reasoning, and directory capability failures
-- explicit step runtime/model/reasoning override and workflow default fallback
-- missing effective runtime and missing required model/reasoning failures
-- `runtime_dirs` validation, preserved ordering, duplicate retention, and
-  repeated directory argv emission
-- command/script rejection of `runtime`, `model`, `reasoning`, and
-  `runtime_dirs`
-- descriptor-built Codex normal and sandbox argv compatibility
-- launcher override bypass behavior
-- runtime sandbox requirements, simple mount compatibility, extended
-  env/fallback/create mount design, env-from-mount values, static conflicts,
-  and host-dependent failures
-- end-to-end non-Codex runtime execution using real executable fixtures for
-  stdin and file prompt delivery
-
-Related docs that must stay consistent with this contract:
+## Related Contract Docs
 
 - [configuration-project.md](configuration-project.md) for `runtimes` and
   descriptor validation
@@ -666,6 +593,3 @@ Related docs that must stay consistent with this contract:
   descriptor-built worker commands
 - [../features/sandbox-run.md](../features/sandbox-run.md) for runtime sandbox
   requirements and bubblewrap behavior
-- [../architecture/service-boundaries.md](../architecture/service-boundaries.md)
-  if package ownership changes while implementing runtime loading, sandbox
-  integration, or launcher command construction

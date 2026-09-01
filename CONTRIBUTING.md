@@ -26,6 +26,7 @@ Anyone making code, test, documentation, or operational changes in this reposito
 - Use `task` for common local workflows.
 - Use beads, if available, for tracked repository work. Run `bd prime/human` when you need workflow context, `bd ready --json` before selecting new work, and claim an issue before editing it.
 - Keep changes small enough that docs, tests, and behavior stay aligned in the same change.
+- See [docs/contributing/repository-workflow.md](docs/contributing/repository-workflow.md) for the full repository workflow.
 
 ## Required Local Checks
 
@@ -47,13 +48,9 @@ task check
 
 ## Documentation Rule
 
-Update the matching permanent docs in the same change when you modify:
-
-- durable runtime behavior
-- contributor workflow or coding policy
-- architecture or dependency boundaries
-- test strategy or operator-facing workflows
-- configuration or CLI contracts
+Update the matching permanent docs in the same change when durable behavior,
+workflow, architecture, testing policy, or configuration contracts change. See
+[docs/contributing/documentation-rules.md](docs/contributing/documentation-rules.md).
 
 ## Policy Index
 

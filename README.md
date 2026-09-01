@@ -2,7 +2,10 @@
 
 ## Purpose
 
-Tiny Orc provides a project-local control plane for supervising LLM coding work as durable, inspectable workflow runs. It turns explicit task context into recorded orchestration state, launches role-specific workers only when the workflow selects them, preserves logs and reports for human review, and keeps automation conservative enough that a human or main agent can remain accountable for routing, verification, and final handoff.
+Tiny Orc is a project-local control plane for supervising LLM coding work as
+durable, inspectable workflow runs. It records task context, launches
+workflow-selected workers, preserves logs and reports, and keeps a human or
+main agent accountable for routing, verification, and final handoff.
 
 ## Related Docs
 
@@ -46,8 +49,6 @@ Primary dependencies:
 
 ## Documentation Index
 
-Entrypoints:
-
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow and required checks
 - [docs/README.md](docs/README.md): permanent docs index
 - [docs/getting-started/README.md](docs/getting-started/README.md): local setup and repo layout
@@ -59,7 +60,6 @@ Entrypoints:
 
 ## Where To Look For X
 
-- CLI behavior: `internal/cli`
 - run start, task context capture, and dirty-start VCS policy: `internal/runstart`, `internal/vcs`, and [docs/features/run-start.md](docs/features/run-start.md)
 - follow-up recording: [docs/features/follow-up-recording.md](docs/features/follow-up-recording.md)
 - run inspection behavior: [docs/features/run-inspection.md](docs/features/run-inspection.md)
@@ -74,35 +74,6 @@ Entrypoints:
 - local setup and troubleshooting: [docs/getting-started/README.md](docs/getting-started/README.md)
 - tests, local verification, and coverage expectations: [docs/testing/README.md](docs/testing/README.md)
 - contributor workflow and repo rules: [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/contributing/README.md](docs/contributing/README.md)
-
-## Code Index
-
-### Entrypoints
-
-- `cmd/orc/main.go`: process entrypoint.
-- `internal/cli`: CLI command parsing and output.
-- `internal/initconfig`: project-local `orc init` scaffold planning and writes.
-- `internal/config`: `.orc` config, workflow, agent descriptor, and runtime descriptor loading/validation.
-
-### Runtime Packages
-
-- `internal/workflow`: deterministic workflow transition engine.
-- `internal/runstart`: explicit task-context resolution and run creation for `orc run start`.
-- `internal/vcs`: read-only jj/git/no-VCS inspection and VCS summary snapshot rendering.
-- `internal/runinspect`: read-only run inspection command implementation.
-- `internal/promptrender`: internal role-specific worker prompt renderer.
-- `internal/report`: worker report validation and report-sourced follow-up recording.
-- `internal/runstore`: persistent run-state package.
-- `internal/launcher`: external worker launcher package.
-
-## Local Workflow Index
-
-Use these docs instead of treating this page as the only setup guide:
-
-- [docs/getting-started/local-development.md](docs/getting-started/local-development.md): local toolchain and commands
-- [docs/getting-started/project-layout.md](docs/getting-started/project-layout.md): where code and docs live
-- [docs/reference/configuration.md](docs/reference/configuration.md): `.orc` config files and contract-page index
-- [docs/testing/local-test-workflows.md](docs/testing/local-test-workflows.md): test commands and config fixture policy
 
 The shortest local-start sequence is:
 

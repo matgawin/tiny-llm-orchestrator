@@ -56,38 +56,9 @@ environment and see the marker variables above.
 
 Agent worker commands are built from the selected runtime descriptor. Outside
 a verified Orc sandbox, the launcher uses the runtime's `command.normal_args`;
-inside a verified Orc sandbox, it uses `command.sandbox_args`. The scaffolded
-Codex runtime descriptor declares `reasoning.default: medium`, so it produces
-this normal argv unless workflow config selects another reasoning value:
-
-```bash
-codex --ask-for-approval never exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
-```
-
-When the repository has sandbox config and Orc verifies both `ORC_SANDBOX=1`
-and a canonical `ORC_SANDBOX_ROOT` matching the current repository root, the
-same Codex runtime descriptor produces this sandbox argv:
-
-```bash
-codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
-```
-
-The outer bubblewrap process is the isolation boundary in this mode. Manually
-exported marker variables do not switch runtime mode in repositories without
-sandbox config, and invalid or mismatched markers do not select sandbox args.
-There is no built-in Codex fallback after the runtime migration; projects that
-want Codex workers must declare and select `.orc/runtimes/codex.yaml`.
-Explicit worker command overrides are used unchanged.
-
-Set `sandbox.require_for_workers: true` when a repository should refuse worker
-launches unless those markers prove the launcher is already inside the
-repository's sandbox. Runtime descriptors may also declare
-`sandbox.required: true`, which refuses launches for that selected runtime
-outside a verified Orc sandbox, or `sandbox.supported: false`, which refuses
-launches inside one. These worker-mode conflicts are checked immediately before
-process start. The project-wide guard is opt-in so existing non-sandbox
-workflows keep working. Guard failures tell the operator to restart the
-orchestrator with `orc sandbox run`.
+inside a verified Orc sandbox, it uses `command.sandbox_args`. The runtime
+descriptor contract defines Codex argv, worker-mode guards, and override
+behavior in [configuration-runtimes.md](../reference/configuration-runtimes.md).
 
 ## Bubblewrap Defaults
 
@@ -134,11 +105,9 @@ environment policy before bubblewrap starts. Static fixed-value conflicts fail
 when project config is loaded; missing host variables requested through
 pass-through are skipped the same way as `sandbox.env.pass`.
 
-Runtime descriptor requirements support descriptor-owned env-sourced mounts and
-`sandbox.requirements.env.set_from_mount.<NAME>.value: target`, so runtime env
-values can be derived from resolved mount targets while building the bubblewrap
-spec. See
-[../reference/configuration-runtimes.md](../reference/configuration-runtimes.md)
+Runtime descriptor requirements can add descriptor-owned environment values
+and mounts. See
+[configuration-runtimes.md](../reference/configuration-runtimes.md#sandbox-requirements)
 for the schema.
 
 ## PATH Mount Policy
@@ -180,7 +149,7 @@ explicit mount targets the same sandbox path as an automatic PATH mount, Orc
 fails instead of silently letting the explicit mount override the generated
 read-only mount.
 
-If `sandbox.protected_paths` is configured, automatic PATH entries that would
+If `sandbox.protected_paths` is configured, automatic PATH entries that can
 expose a protected host path are skipped instead of failing sandbox startup.
 The PATH environment string remains unchanged. Orc writes a warning to stderr
 that includes `protected_paths`, the skipped PATH entry, and the matching
@@ -219,39 +188,19 @@ Extra `sandbox.mounts` entries support `ro` and `rw` modes. Relative host paths
 resolve from the repository root. Missing mounts are errors unless
 `optional: true` is set, in which case Orc skips the missing mount.
 Runtime descriptor `sandbox.requirements.mounts` entries use the same fields
-for simple static mounts. Extended runtime mounts support `source.env`,
-`source.fallback.host_home`, `source.create`, `target.env_same_as_source`,
-`target.fallback.sandbox_home`, and optional `id` for `env.set_from_mount`
-references. Those extended runtime mounts are resolved while building the
-bubblewrap spec, before the sandbox process starts.
-Static target and duplicate declaration conflicts fail during config load;
-host-dependent missing paths, explicit creation, env source resolution,
-env-from-mount reference resolution, and symlink escape checks fail during
-sandbox launch preparation.
-
-Runtime sandbox requirements are selected from loaded workflows before
-bubblewrap starts. Static conflicts that do not require host inspection fail
-during project config load. Host-dependent failures, including missing required
-host paths, source paths that point to files, symlink resolution failures,
-protected target conflicts that depend on resolved paths, and mount collisions
-with project or automatic mounts, fail during sandbox launch preparation. That
-same preparation records runtime directory coverage from the repository mount
-plus resolved project `sandbox.mounts` and selected runtime requirements.
-Worker launch does not add mounts to an already-running sandbox; it only
-verifies that the selected runtime is compatible with the active sandbox
-markers and that required runtime directories are covered and visible through
-existing sandbox coverage before process start. Non-sandboxed worker launches
-keep the existing `runtime_dirs` argv behavior and do not add existence checks.
+for simple static mounts. Extended runtime mounts and runtime directory
+coverage are defined in
+[configuration-runtimes.md](../reference/configuration-runtimes.md#sandbox-requirements).
 
 Writable repo-relative host paths must stay inside the repository and must not
 escape through traversal or symlinks. Mount targets must be clean absolute
 sandbox paths and cannot override critical sandbox internals such as `/proc`,
 `/dev`, `/tmp`, `/home`, read-only system paths, `/nix/store`, or the repository
-mount. Parent paths that would mask those protected mounts are also rejected.
+mount. Parent paths that can mask those protected mounts are also rejected.
 
 In `synthetic` mode, explicit mounts under `/home/orc/...` are allowed for
 selected synthetic-home config paths, but `/home/orc` itself is rejected. In
-`host_path` mode, explicit mounts may target concrete absolute paths strictly
+`host_path` mode, explicit mounts can target concrete absolute paths strictly
 under the active sandbox HOME path, such as `/home/user/.bun` or
 `/home/user/.cache/tool`. This supports tools referenced through variables such
 as `CODEX_BIN` without adding tool-specific discovery. Mount targets exactly
@@ -271,7 +220,7 @@ execution while loading sandbox config.
 `sandbox.protected_paths` declares host paths that Orc-managed mounts must not
 expose inside the whole bubblewrap environment. Protection is resolved before
 any child agents or workers launch. The v1 guarantee is limited to refusing or
-skipping Orc-managed mounts that would expose protected host contents; it does
+skipping Orc-managed mounts that can expose protected host contents; it does
 not mask arbitrary paths made visible by non-Orc base system mounts.
 
 The default protected path list is empty. No implicit `.ssh`, `.gnupg`, or
@@ -296,12 +245,12 @@ configured literal host path does not exist. If a protected path exists as any
 filesystem object, Orc protects both the literal cleaned host path and the
 resolved real path after symlink evaluation. If an existing protected path
 cannot be resolved with `filepath.EvalSymlinks`, sandbox preparation fails
-rather than guessing what should be protected. Duplicate resolved protected
+rather than guessing what must be protected. Duplicate resolved protected
 paths are deduplicated so the same PATH entry is not warned about repeatedly
 for the same protected path.
 
 A mount conflicts when its resolved host source equals a protected path, is
-under a protected path, or is a parent that would expose a protected child.
+under a protected path, or is a parent that can expose a protected child.
 This parent check still applies when the protected child is currently missing.
 Explicit project `sandbox.mounts` and runtime
 `sandbox.requirements.mounts` fail during sandbox preparation when they
@@ -310,7 +259,7 @@ their existing skip behavior; if the optional source exists, protected-path
 conflicts apply normally.
 
 Runtime env-sourced mounts are checked after source resolution and before any
-source creation. If `source.create: true` would create a directory that equals,
+source creation. If `source.create: true` can create a directory that equals,
 contains, or sits under a protected path, sandbox preparation fails without
 creating the directory.
 

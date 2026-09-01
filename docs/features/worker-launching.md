@@ -7,7 +7,8 @@ start and track workflow-selected worker attempts.
 
 ## Audience
 
-Contributors changing worker process launch, active-attempt state, no-report outcomes, or launcher-facing CLI behavior.
+Contributors changing worker process launch, active-attempt state, no-report
+outcomes, or launcher-facing CLI behavior.
 
 ## Read This When
 
@@ -23,6 +24,8 @@ Contributors changing worker process launch, active-attempt state, no-report out
 - [../reference/run-store.md](../reference/run-store.md)
 - [../reference/workflow-engine.md](../reference/workflow-engine.md)
 - [../reference/configuration-workflows.md](../reference/configuration-workflows.md)
+- [../reference/configuration-runtimes.md](../reference/configuration-runtimes.md)
+- [sandbox-run.md](sandbox-run.md)
 
 ## Command Shape
 
@@ -44,7 +47,7 @@ launches a worker.
 
 `orc run advance` defaults to `--max-steps 20`. The value must be a positive
 integer, and the guard stops before launching another worker with stop reason
-`max_steps_reached`. `--once` may be combined with `--max-steps`, but it still
+`max_steps_reached`. `--once` can be combined with `--max-steps`, but it still
 limits the command to one launched worker attempt. No dry-run mode exists for
 `advance` in v1; use `orc run next <run-id>` for inspection.
 
@@ -55,7 +58,7 @@ non-empty reason after trimming. The command has no `--yes` confirmation flag
 and no `--json` output mode in v1.
 
 Use skip-step when a human has reviewed the situation and decided a selected
-skippable step should not run. For example, an operator can skip a selected
+skippable step must not run. For example, an operator can skip a selected
 review that is not worth running:
 
 ```bash
@@ -90,19 +93,12 @@ prints live progress to stderr and keeps stdout for the final JSON object only.
 ## Sandbox Inheritance
 
 Workers are sandboxed by process inheritance when the top-level orchestrator
-session was started with `orc sandbox run`. In that flow, `orc sandbox run`
-starts the configured command inside bubblewrap, and worker processes launched
-by `orc run advance <run-id>` or `orc worker launch-next <run-id>` remain
-inside the same sandbox.
+session starts with `orc sandbox run`. `orc run advance <run-id>` and
+`orc worker launch-next <run-id>` inherit the same bubblewrap environment.
 
-Repositories may opt in to an enforcement guard with
-`sandbox.require_for_workers: true`. When enabled, both `orc run advance` and
-`orc worker launch-next` refuse to launch unless `ORC_SANDBOX=1` is present and
-`ORC_SANDBOX_ROOT` matches the current repository root. This guard is useful
-for repositories whose selected runtimes should run only inside the Orc
-bubblewrap wrapper. It is disabled by default so existing non-sandbox worker
-workflows remain usable. Failure messages tell the operator to restart the
-orchestrator with `orc sandbox run`.
+Project and runtime sandbox guards are defined in
+[sandbox-run.md](sandbox-run.md#child-process) and
+[configuration-runtimes.md](../reference/configuration-runtimes.md#capabilities).
 
 ## Launch Contract
 
@@ -189,58 +185,9 @@ attempt records:
 The launcher renders the prompt through `internal/promptrender` using the same
 attempt metadata that was persisted. Agent steps then select an executable
 runtime descriptor through the workflow's effective `runtime` value. The
-launcher builds argv from the selected descriptor:
-
-1. `command.executable`
-2. `command.normal_args` outside a verified Orc sandbox, or
-   `command.sandbox_args` inside one
-3. `command.args`
-4. `model.args`, only when an effective model resolves
-5. `reasoning.args`, only when an effective reasoning value resolves
-6. `directories.args`, repeated once per effective `runtime_dirs` entry
-
-Only descriptor placeholders are substituted: `{model}`, `{reasoning}`,
-`{prompt_file}`, `{agent_id}`, `{step_id}`, `{attempt_id}`, `{run_id}`, and
-directory-only `{dir}`. `{reasoning}` is valid only in `reasoning.args`, which
-keeps reasoning separate from command, model, directory, and sandbox behavior.
-Prompt delivery follows the runtime descriptor. `prompt.delivery: stdin` writes
-the rendered prompt to process stdin; `prompt.delivery: file` passes the
-persisted prompt artifact path through `{prompt_file}`.
-
-The scaffolded Codex runtime descriptor declares `reasoning.default: medium`,
-so its normal argv includes an explicit reasoning effort unless a workflow
-default or step override selects another value:
-
-```bash
-codex --ask-for-approval never exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
-```
-
-When the repository has sandbox config and the launcher verifies
-`ORC_SANDBOX=1` plus a canonical `ORC_SANDBOX_ROOT` matching the current
-repository root, the same descriptor selects `command.sandbox_args`, preserving
-the sandbox-mode argv shape with the same reasoning default:
-
-```bash
-codex --dangerously-bypass-approvals-and-sandbox exec --skip-git-repo-check - --config 'model_reasoning_effort="medium"'
-```
-
-This sandbox-mode Codex argv relies on the inherited outer bubblewrap sandbox
-as the isolation boundary. It is not a built-in launcher fallback; after the
-runtime migration, deleting or failing to select `.orc/runtimes/codex.yaml`
-causes validation or launch selection to fail instead of silently inventing a
-Codex command. Explicit launcher command overrides are preserved unchanged and
-bypass runtime argv construction. Missing, invalid, or mismatched sandbox
-markers select normal runtime args unless `sandbox.require_for_workers: true`
-or the selected runtime's `sandbox.required: true` requires a verified sandbox,
-in which case launch is refused before process start.
-
-When sandbox mode is verified, the launcher also checks effective
-`runtime_dirs` before building the final worker process. It resolves each entry
-the same way it will substitute `{dir}`, requires the resolved path to be
-covered by the active sandbox's repository mount, project `sandbox.mounts`, or
-selected runtime sandbox requirements, and stats the path from inside the
-sandbox. Missing, non-directory, or uncovered paths fail before process start;
-the launcher never adds mounts dynamically for `runtime_dirs`.
+launcher builds argv from that descriptor. The runtime argv order,
+placeholder rules, prompt delivery rules, and Codex descriptor are defined in
+[configuration-runtimes.md](../reference/configuration-runtimes.md).
 
 The command runs from the project root and resolves `command.executable` from
 the effective worker environment. In the Nix development shell, `codex` is the
@@ -264,7 +211,7 @@ non-interactive foreground executions, not daemon, watcher, background-job, or
 general async job-runner steps.
 
 Command and script steps inherit the same live progress environment as agent
-workers and may call `orc progress <message>`. Progress remains live
+workers and can call `orc progress <message>`. Progress remains live
 operator-feedback only and does not affect the generated command/script report.
 
 Orc writes command/script reports itself; subprocesses do not call
@@ -288,7 +235,7 @@ the process runs:
 
 - The launcher records the log artifact and links it from the starting attempt
   before process start.
-- For log artifacts, `artifact.written` means the durable destination has been
+- For log artifacts, `artifact.written` means the durable destination is
   reserved; content continues to append until the worker exits or cleanup
   completes.
 - The same artifact reference remains linked from the terminal attempt, so

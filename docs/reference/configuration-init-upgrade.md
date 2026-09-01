@@ -139,8 +139,8 @@ run snapshots as a source of truth for live setup upgrades and must never plan
 or write changes under `.orc/runs/**`.
 
 Active runs do not block setup upgrades. Existing runs keep pinned config
-snapshots. After applying live setup changes, users may need
-`orc run refresh-config <run-id>`, but `orc init upgrade` must not refresh runs
+snapshots. After applying live setup changes, users can run
+`orc run refresh-config <run-id>`. `orc init upgrade` must not refresh runs
 automatically.
 
 ## Schema Migrations
@@ -175,7 +175,7 @@ migration targets it. Discovery must reject traversal outside the project-local
 
 Schema migrations plan against raw YAML or Markdown frontmatter before normal
 config validation. They must not require `config.Load` to succeed because the
-loader for the current binary may reject an older file format that a migration
+loader for the current binary can reject an older file format that a migration
 needs to repair. Invalid targeted files are path-scoped skipped actions or
 conflicts. A valid targeted file can still plan and apply when another targeted
 file is invalid.
@@ -192,87 +192,31 @@ semantically merge Markdown body prose.
 
 YAML and Markdown-frontmatter schema migrations, plus the setup `0 -> 1`
 `.orc/config.yaml` YAML edits, must use the `internal/initupgrade` AST edit
-engine. The engine parses targeted raw bytes with `github.com/goccy/go-yaml`
-before typed config validation, carries planned edits as structured path
-segments, and applies those edits after the existing file-identity check. A
-migration must not pre-render a full replacement for YAML or frontmatter
-content.
+engine. A migration must not pre-render a full YAML or frontmatter
+replacement.
 
-Structured paths are segment slices. Dot strings such as
-`defaults.loop_caps.soft` are allowed only at boundaries: JSON output, test
-display, docs, and parsing fixture input. Overlap checks compare segment
-equality and ancestry. `defaults` overlaps `defaults.loop_caps`.
-`defaults.loop` does not overlap `defaults.loop_caps`.
+The engine supports map-key existence checks, nested map traversal, map entry
+add, map entry set, map entry remove, and read-only wildcard map visits. It
+does not support list writes in v1.
 
-Supported map operations are:
+The renderer preserves comments, key order, unrelated YAML formatting, and
+Markdown agent body bytes where the parser retains that information. Changed
+nodes can use normalized indentation or scalar spelling. Migration tests must
+pin accepted normalization.
 
-- existence checks on nested map keys.
-- add, set, and remove for map entries.
-- nested map traversal for structural predicates.
-- wildcard map visits for read-only patterns such as `steps.*.model`.
+Invalid YAML, invalid Markdown frontmatter, and unsupported workflow shapes are
+path-scoped migration outcomes. Planning records a skipped action or conflict
+for the targeted path and continues evaluating unrelated targeted files.
+Apply-time parse or render errors are reported on the action path. They must
+not become global process failures when other safe actions can still apply.
 
-Wildcard paths are read-only. They are for inspecting matching map entries
-while planning a migration and must not be used as mutation syntax.
-
-List mutation is excluded until a concrete migration requires it. The engine
-may read list nodes when the YAML AST exposes them, but migrations must not
-plan list insert, update, remove, or wildcard list writes in this version.
-
-The renderer preserves comments, key order, and unrelated YAML formatting
-where `goccy/go-yaml` retains that information. Edits that add or replace a
-node use the library renderer for the changed node and can normalize
-indentation or scalar spelling around that node. Tests for each migration must
-pin any accepted whitespace normalization. Markdown agent body bytes after the
-closing frontmatter delimiter must remain byte-for-byte identical.
-
-Invalid YAML and invalid Markdown frontmatter are path-scoped migration
-outcomes. Planning should record a skipped action or conflict for the targeted
-path and continue evaluating unrelated targeted files. Apply-time parse or
-render errors must be reported on the action path and must not become a global
-process failure when other safe actions can still be applied.
-
-Migration authors should start from the surface helper that matches the file
-being changed:
-
-| Surface | Target matching | Parse mode | Supported shape | Authoring expectation |
-| --- | --- | --- | --- | --- |
-| Config | `.orc/config.yaml` | YAML AST | top-level YAML mapping | Use map helpers for raw config fields before typed config validation. |
-| Workflow | regular `.yaml` or `.yml` files under `.orc/workflows/**` | YAML AST | top-level mapping with a `steps` mapping | Use the workflow step visitor for step changes. User-created workflows are eligible even when `.orc/config.yaml` does not reference them. |
-| Runtime | regular `.yaml` or `.yml` files under `.orc/runtimes/**` | YAML AST | top-level YAML mapping | Use map helpers for top-level and nested runtime fields. |
-| Agent frontmatter | Markdown files under `.orc/agents/**` | Markdown frontmatter YAML AST | leading `---` YAML frontmatter | Edit frontmatter only. Preserve Markdown body bytes exactly. Files without frontmatter no-op unless the migration documents another rule. |
-| Scaffold manifest metadata | `.orc/scaffold.lock.yaml` only when explicitly targeted | scaffold manifest metadata YAML | manifest ownership metadata | Target only explicit metadata migrations. Do not change scaffold refresh or ownership rules through a generic surface migration. |
-
-The workflow step visitor handles the current workflow shape:
-
-```yaml
-steps:
-  code:
-    agent: coder
-```
-
-It visits each value under the top-level `steps` mapping when the step value is
-also a mapping. The visitor exposes the step id, the structured path
-`steps.<step-id>`, and an AST-backed map handle for inspecting fields and
-planning `SurgicalEdit` values. Iteration follows YAML document order as
-exposed by `github.com/goccy/go-yaml`, not lexical order.
-
-Unsupported workflow shapes are path-scoped skipped or conflict outcomes. A
-workflow with missing `steps`, scalar `steps`, list `steps`, or a non-map step
-value must not be normalized by a migration. The skipped or conflict guidance
-must tell the operator to rewrite the file to a top-level `steps` mapping with
-step ids as keys and step mappings as values. One unsupported workflow file
-must not block unrelated valid workflow files in the same plan.
-
-Config, runtime, and agent helpers expose the same structured map operations.
-They inspect nested map fields through `YAMLPath` segments and return
-AST-backed edits with `ast_add_yaml_field`, `ast_set_yaml_field`,
-`ast_remove_yaml_field`, or `ast_add_yaml_map_entry` kinds. Schema migrations
-and setup `.orc/config.yaml` migrations must not add ad hoc line-oriented YAML
-edit logic, pre-render whole-file replacements, or add list mutation syntax.
-Text-only upgrade edits remain outside this rule: `.gitignore` may use
-`append_line`, `AGENTS.md` may use `append_section`, and scaffold refresh may
-use `replace_if_baseline` when ownership proof allows replacing Orc-owned
-default content.
+Migrations must use the helper for the edited surface: config, workflow,
+runtime, agent frontmatter, or scaffold manifest metadata. Schema migrations
+and setup `.orc/config.yaml` migrations must not add line-oriented YAML edit
+logic or list mutation syntax. Text-only upgrade edits remain outside this
+rule: `.gitignore` can use `append_line`, `AGENTS.md` can use
+`append_section`, and scaffold refresh can use `replace_if_baseline` when
+ownership proof allows replacement.
 
 Structural predicates must be idempotent:
 
@@ -281,7 +225,7 @@ Structural predicates must be idempotent:
 - old and new fields: path-scoped conflict.
 - neither field: no-op unless the migration explicitly defines a default.
 
-User-created or customized files may be schema-migrated automatically only when
+User-created or customized files can be schema-migrated automatically only when
 a narrow structural predicate matches. A workflow file under
 `.orc/workflows/**` does not need to be referenced from `.orc/config.yaml` to be
 eligible. The same rule applies to agent and runtime descriptors under their
@@ -292,7 +236,7 @@ Do not follow or mutate symlinks. Directories, devices, sockets, FIFOs, and
 other non-regular files are path-scoped conflicts when an explicit migration
 targets them. They are ignored when no migration targets them.
 
-If two schema migrations edit the same path, they may compose only when the
+If two schema migrations edit the same path, they can compose only when the
 edit engine can apply non-overlapping surgical edits deterministically.
 Overlapping field edits, duplicate actions, or schema edits competing with a
 whole-file scaffold replacement are path-scoped conflicts that name the
@@ -306,7 +250,7 @@ does not target workflow files, runtime descriptors, agent descriptors,
 `.orc/scaffold.lock.yaml`, or anything under `.orc/runs/**`.
 
 The migration reads raw `.orc/config.yaml` YAML before typed project config
-validation. It can plan when the current `config.Load` path would reject another
+validation. It can plan when the current `config.Load` path rejects another
 part of the file, as long as the raw YAML exposes the targeted `defaults`
 structure safely.
 
@@ -346,7 +290,7 @@ defaults:
 
 This is a no-op. A file with neither `defaults.max_loops` nor
 `defaults.loop_caps` is also a no-op for this schema migration. The setup
-`0 -> 1` migration may still add the built-in `defaults.loop_caps` default when
+`0 -> 1` migration can still add the built-in `defaults.loop_caps` default when
 it owns that separate setup decision.
 
 Ambiguous shape:
@@ -374,7 +318,7 @@ with `defaults.loop_caps` integer values before rerunning `orc init upgrade`.
 ## Scaffold Refresh Source Of Truth
 
 Scaffold refresh handles Orc-owned default content and prose. The current
-embedded scaffold may be used for new default file content and for recognizing
+embedded scaffold can be used for new default file content and for recognizing
 known scaffold baselines, but it is not enough to infer semantic migrations or
 destructive changes.
 
@@ -387,10 +331,10 @@ history or broad textual similarity.
 Scaffold refresh must not perform file-format compatibility work for
 user-created or customized `.orc` files. If compatibility requires a structural
 YAML or frontmatter edit, implement a schema migration with a narrow predicate
-for that structure. Existing scaffold-owned YAML refreshes should use the
+for that structure. Existing scaffold-owned YAML refreshes must use the
 narrowest safe write form where feasible, but ownership proof remains required.
 Whole-file normalized rewrites of existing files are out of scope. New files
-may use scaffold formatting.
+can use scaffold formatting.
 
 Examples:
 
@@ -407,7 +351,7 @@ Examples:
 - Scaffold-owned default content refresh: `.orc/workflows/implementation.yaml`
   has a valid `.orc/scaffold.lock.yaml` entry and the live file hash matches
   that entry. When the embedded default workflow prose or content changes,
-  `orc init upgrade` may plan a scaffold refresh for the workflow and update
+  `orc init upgrade` can plan a scaffold refresh for the workflow and update
   the manifest entry in the same safe write group.
 
 ## Scaffold Ownership Manifest
@@ -454,7 +398,7 @@ proof. Customized or skipped files are not recorded as managed.
 
 For future scaffold refreshes, a valid manifest entry whose `sha256` matches
 the live file hash is the primary proof that the file is still Orc-managed. If
-the embedded scaffold changes, upgrade planning may replace that file with the
+the embedded scaffold changes, upgrade planning can replace that file with the
 current scaffold content and update its manifest entry in the same plan. If the
 live file hash differs from the manifest entry, the file is customized and is
 preserved as a `customized-scaffold-file` skipped action unless a narrow
@@ -470,7 +414,7 @@ unchanged.
 
 ## Safety Rules
 
-Local project customizations are preserved. The upgrader may apply only
+Local project customizations are preserved. The upgrader can apply only
 unambiguous migrations and additions.
 
 Safe changes include:
@@ -521,7 +465,7 @@ Skipped action behavior:
 - `customized-scaffold-file` means an embedded scaffold-managed file exists but
   differs from the current embedded scaffold, exact known replacement
   baselines, and any valid ownership manifest hash. The guidance must say local
-  customization was preserved and that the operator may manually compare the
+  customization was preserved and that the operator can manually compare the
   file with the current embedded scaffold or docs before refreshing it.
 - `dependency-skipped` means a planned write depends on another path that was
   skipped or conflicted. The skipped action records the dependent path in
@@ -529,7 +473,7 @@ Skipped action behavior:
   `depends_on`.
 - Skipped customized scaffold files are not global apply blockers. Safe
   unrelated actions such as `.orc/config.yaml` surgical edits, `.gitignore`
-  updates, and independent missing-file creates may still apply.
+  updates, and independent missing-file creates can still apply.
 - Human and JSON output must list skipped actions separately from warnings and
   conflicts. Human apply output must not claim a fully clean upgrade while
   skipped actions remain.
@@ -541,7 +485,7 @@ Missing-file behavior:
 
 - Missing required scaffold files are planned as creates when no path conflict
   exists and the corresponding `.orc/config.yaml` reference is safe.
-- A scaffold file create may proceed only when the config already points to the
+- A scaffold file create can proceed only when the config already points to the
   scaffold path, or when the config action that establishes the reference is
   also safe and will be applied. If the config reference edit is skipped or
   conflicted, the dependent scaffold create is reported as
@@ -557,7 +501,7 @@ Existing scaffold-file behavior:
   scaffold changes.
 - Exact known replacement baselines remain the automatic replacement mechanism
   for pre-manifest historical scaffolds. When a file exactly matches such a
-  baseline, apply may replace it with the current embedded scaffold content
+  baseline, apply can replace it with the current embedded scaffold content
   using the safe baseline edit path.
 - Any other existing content under the embedded scaffold-managed
   `.orc/agents/`, `.orc/workflows/`, or `.orc/runtimes/` paths is treated as
@@ -591,8 +535,8 @@ Local-edit behavior:
 - A newly created untracked target that does not exist yet is not a dirty-file
   conflict.
 - Planning must work without VCS.
-- `--apply` may proceed without a recognized VCS because `--apply` is explicit,
-  but it must warn that affected-file dirtiness could not be checked.
+- `--apply` can proceed without a recognized VCS because `--apply` is explicit.
+  It must warn that affected-file dirtiness was not checked.
 - Changed-during-apply content verification still applies per action. If one
   target changes after planning, reject that write and continue with unrelated
   safe writes. Earlier successful independent writes are not rolled back. The
@@ -697,7 +641,7 @@ not YAML migration surfaces.
 
 If a current scaffold file exists and matches the current embedded scaffold, the
 migration emits no action or skipped item for that file. If it matches an exact
-known replacement baseline, the migration may replace it with the current
+known replacement baseline, the migration can replace it with the current
 embedded scaffold content. If it is customized or unknown and there is no narrow
 explicit migration rule, preserve the file and report a skipped
 `customized-scaffold-file` manual-refresh item with path, reason, and operator
