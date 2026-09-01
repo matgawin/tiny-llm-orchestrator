@@ -232,3 +232,13 @@ a standalone instruction. Descriptors explicitly tell workers how to use
 Contract`, which are injected by the prompt renderer at worker launch time.
 They also allow workers to use available repo-local skills and bounded
 subagents when the active worker runtime exposes those capabilities.
+
+The scaffolded planner descriptor requires a scope envelope with `Required
+change`, `Out of scope`, `Acceptable files`, `Required checks`, and `Stop
+after` headings. Scaffolded coding descriptors tell workers to make one scoped
+implementation pass and report instead of running an internal
+implement-review-implement loop. Scaffolded review, test, and reproduction
+descriptors tell workers to keep blocking findings inside the current task and
+record adjacent work as follow-ups. Report-writing descriptors require
+ASD-STE100 Simplified Technical English with exact paths, commands, config
+keys, and observed behavior.

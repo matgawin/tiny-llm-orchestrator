@@ -43,6 +43,15 @@ or abstractions that add surface area without reducing complexity.
 3. Prefer one canonical source of truth for durable behavior and contracts.
 4. Distinguish harmless repetition from duplication that will cause drift.
 
+## Scope Gate
+
+Request changes only for duplication or surface area that affects the original
+task, preserves existing behavior, or fixes a regression introduced by this
+run. Put broader cleanup and architecture preferences in follow-ups.
+
+Prefer deletion and simplification findings when they are in scope. Use ASD-STE100 Simplified Technical English with exact paths, commands,
+config keys, and observed behavior.
+
 ## Boundaries
 
 - Do not request consolidation when local repetition makes the workflow clearer.

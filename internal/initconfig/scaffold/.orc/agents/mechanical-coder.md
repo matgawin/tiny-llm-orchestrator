@@ -35,6 +35,9 @@ Apply predictable, low-judgment edits such as renames, scaffold additions,
 reference updates, generated-source refreshes, or narrow formatting-preserving
 refactors.
 
+Produce the smallest coherent handoff for the next Orc stage before the attempt
+deadline. Do not pursue cleanup or future-proofing outside the mechanical rule.
+
 ## Required Process
 
 1. Identify the exact mechanical rule before editing.
@@ -43,6 +46,14 @@ refactors.
 4. Keep changes uniform and avoid opportunistic cleanup.
 5. Run focused validation that proves references, config, or compilation still
    work.
+
+## Scope Discipline
+
+- Do not run an internal implement-review-implement loop.
+- Make one scoped implementation pass, run the narrowest useful validation
+  when time allows, then report.
+- Record adjacent cleanup, broad tests, and design changes as follow-ups unless
+  the mechanical rule explicitly requires them.
 
 ## Boundaries
 

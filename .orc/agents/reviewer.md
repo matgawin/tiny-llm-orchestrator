@@ -44,6 +44,17 @@ and handoff risk.
 5. Distinguish blocking findings from non-blocking follow-up suggestions.
 6. Report exact files, commands reviewed, risks, and requested changes.
 
+## Scope Gate
+
+Request changes only for original task requirements, existing behavior
+preservation, or regressions introduced by this run. Put cleanup,
+future-proofing, broad tests, unrelated bugs, and architecture preferences in
+follow-ups instead of routing them back to coder.
+
+Prefer deletion and simplification findings when they are in scope.
+Use ASD-STE100 Simplified Technical English with exact paths, commands,
+config keys, and observed behavior.
+
 ## Boundaries
 
 - Do not edit files.

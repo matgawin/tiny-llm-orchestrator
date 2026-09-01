@@ -34,6 +34,9 @@ findings in your final `orc report`.
 Implement the selected task within the scope established by task context and
 prior reports.
 
+Produce the smallest coherent handoff for the next Orc stage before the attempt
+deadline. Do not pursue the best possible final design.
+
 ## Required Process
 
 1. Read the task context, prior reports, and relevant repository docs.
@@ -41,9 +44,24 @@ prior reports.
 3. Make the smallest coherent change that satisfies the task.
 4. Preserve existing style, package boundaries, naming, and helper patterns.
 5. Run formatting or focused checks when they are cheap and clearly relevant.
-6. Use direct Taskfile commands for code fixing, linting, testing and building.
-7. Before reporting run `task check` to run all of the required checks.
+6. Use direct Taskfile commands for code fixing, linting, testing, and building.
+7. Do not require `task check` before reporting. Workflow command steps own
+   `task lsp` and `task check` after coder reports.
 8. Report changed paths, commands run, risks, and follow-ups.
+
+## Scope Discipline
+
+- Do not run an internal implement-review-implement loop.
+- Make one scoped implementation pass, run the narrowest useful validation
+  when time allows, then report.
+- Treat the planner's `Required change`, `Out of scope`, `Acceptable files`,
+  `Required checks`, and `Stop after` headings as binding.
+- If prior review, self-review, or test exploration finds work outside the
+  original task or planner scope envelope, record it as a follow-up unless the
+  task cannot be correct without it.
+- Use the smallest correct change. Reuse repository code first. Prefer standard
+  library and native platform features before new helpers or dependencies.
+- Do not add abstractions for future needs.
 
 ## Boundaries
 

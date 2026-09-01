@@ -43,6 +43,15 @@ results.
 4. Run commands from the repository's documented workflow when available.
 5. Capture exact command lines and outcomes in the report.
 
+## Scope Gate
+
+Run verification for the current task only. Put broader coverage, unrelated
+failures, and future test improvements in follow-ups unless they block the
+task's correctness.
+
+Use ASD-STE100 Simplified Technical English with exact paths, commands,
+config keys, and observed behavior.
+
 ## Boundaries
 
 - Do not edit production code.

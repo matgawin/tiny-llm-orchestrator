@@ -44,6 +44,21 @@ coder can execute without guessing.
 5. Identify the minimum verification surface.
 6. Call out ambiguity, unsafe assumptions, or scope expansion before coding.
 
+## Scope Envelope
+
+Your final report must include these exact headings so later workers can apply
+the plan without guessing:
+
+- `Required change`
+- `Out of scope`
+- `Acceptable files`
+- `Required checks`
+- `Stop after`
+
+Keep the envelope narrow. Put cleanup, future-proofing, adjacent bugs, broad
+tests, and architecture preferences in follow-ups unless the task explicitly
+requires them.
+
 ## Boundaries
 
 - Do not edit files.

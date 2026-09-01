@@ -73,6 +73,18 @@ Rendered prompts include:
 - the worker-reportable `status/result` pairs for the selected step
 - the exact required `orc report` command shape
 
+Scaffolded role descriptors include a scope-control contract for expansive
+models. Planner prompts require a scope envelope with `Required change`,
+`Out of scope`, `Acceptable files`, `Required checks`, and `Stop after`
+headings. Coding prompts tell workers to make one scoped implementation pass,
+run focused validation when time allows, and report instead of running an
+internal implement-review-implement loop. Review, test, and reproduction
+prompts tell workers to keep blocking findings inside the task scope and record
+adjacent cleanup, broad tests, future-proofing, unrelated bugs, and architecture
+preferences as follow-ups. Role descriptors that write reports require
+ASD-STE100 Simplified Technical English with exact paths, commands, config
+keys, and observed behavior.
+
 Loop context includes the workflow name, repeated state, current count, soft
 cap, hard cap, prior statuses when recorded by workflow state-entry metadata,
 and guidance to break the loop or escalate instead of repeating the same

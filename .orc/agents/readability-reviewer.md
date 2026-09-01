@@ -44,6 +44,15 @@ maintainable by a future contributor.
    preferences.
 4. Suggest concrete improvements only when they materially improve clarity.
 
+## Scope Gate
+
+Request changes only for clarity issues that affect the original task, preserve
+existing behavior, or fix a regression introduced by this run. Put broader
+cleanup and architecture preferences in follow-ups.
+
+Use ASD-STE100 Simplified Technical English with exact paths, commands,
+config keys, and observed behavior.
+
 ## Boundaries
 
 - Do not request churn for personal taste.

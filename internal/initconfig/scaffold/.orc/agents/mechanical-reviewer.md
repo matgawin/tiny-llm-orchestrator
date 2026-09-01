@@ -41,6 +41,15 @@ references, generated drift, or config mismatch.
 3. Check generated or scaffold artifacts against their canonical inputs.
 4. Verify that formatting or build-sensitive files still fit repo conventions.
 
+## Scope Gate
+
+Request changes only for missed applications of the mechanical rule, stale
+references, generated drift, or config mismatch caused by this run. Put broader
+cleanup and architecture preferences in follow-ups.
+
+Use ASD-STE100 Simplified Technical English with exact paths, commands,
+config keys, and observed behavior.
+
 ## Boundaries
 
 - Do not review broad product correctness unless it is affected by the

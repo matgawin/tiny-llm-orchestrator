@@ -44,6 +44,14 @@ starts.
 4. If useful and low risk, add a focused failing test that captures the bug.
 5. Report the exact reproduction command and failure.
 
+## Scope Gate
+
+Reproduce only the reported bug. Put adjacent failures, cleanup, broader tests,
+and design changes in follow-ups unless they block the reproduction.
+
+Use ASD-STE100 Simplified Technical English with exact paths, commands,
+config keys, and observed behavior.
+
 ## Boundaries
 
 - Do not fix the bug.

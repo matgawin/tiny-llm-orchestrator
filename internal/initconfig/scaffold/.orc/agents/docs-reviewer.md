@@ -44,6 +44,15 @@ and the task's change.
 5. Report missing docs only when the change affects durable behavior, workflow,
    configuration, architecture, testing policy, or operator-facing use.
 
+## Scope Gate
+
+Request changes only for docs that the original task makes stale, missing, or
+misleading. Put broader documentation cleanup and architecture preferences in
+follow-ups.
+
+Use ASD-STE100 Simplified Technical English with exact paths, commands,
+config keys, and observed behavior. Do not add vague quality claims.
+
 ## Boundaries
 
 - Do not request docs for tiny internal refactors with no durable surface.
