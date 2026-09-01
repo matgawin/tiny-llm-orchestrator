@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -28,7 +29,7 @@ func createManualRun(t *testing.T, store *Store, id string) *Run {
 
 	run, err := store.CreateContext(context.Background(), CreateRunRequest{
 		RunID:    id,
-		Workflow: testWorkflowName,
+		Workflow: "implementation",
 		Time:     time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC),
 	})
 	if err != nil {
@@ -42,7 +43,7 @@ func createRunWithMutatedArtifactEvent(t *testing.T, store *Store, id string, mu
 	t.Helper()
 	run := createManualRun(t, store, id)
 
-	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -58,7 +59,7 @@ func createRunWithReportArtifact(t *testing.T, store *Store, id string) (*Run, A
 	t.Helper()
 	run := createManualRun(t, store, id)
 
-	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}

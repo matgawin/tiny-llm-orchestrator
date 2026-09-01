@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package config
 
 import (
@@ -15,18 +16,18 @@ func TestLoadAcceptsCommandAndScriptSteps(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	check := project.Workflows[testWorkflowImplementation].Steps["check"]
+	check := project.Workflows["implementation"].Steps["check"]
 	if check.EffectiveKind() != StepKindCommand || !slices.Equal(check.Command.Argv, []string{"task", "check"}) {
 		t.Fatalf("check step = %+v, want command argv", check)
 	}
 
-	verify := project.Workflows[testWorkflowImplementation].Steps["verify"]
+	verify := project.Workflows["implementation"].Steps["verify"]
 	if verify.EffectiveKind() != StepKindScript || verify.Script.Path != "scripts/verify.sh" {
 		t.Fatalf("verify step = %+v, want script path", verify)
 	}
 
-	if len(project.Workflows[testWorkflowImplementation].ReferencedAgents) != 0 {
-		t.Fatalf("referenced agents = %+v, want none for deterministic-only workflow", project.Workflows[testWorkflowImplementation].ReferencedAgents)
+	if len(project.Workflows["implementation"].ReferencedAgents) != 0 {
+		t.Fatalf("referenced agents = %+v, want none for deterministic-only workflow", project.Workflows["implementation"].ReferencedAgents)
 	}
 }
 
@@ -36,7 +37,7 @@ func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 			step := workflow.Steps["plan"]
 			step.Skippable = true
 			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
-			step.On[SystemSkipPair] = testTerminalReadyForHuman
+			step.On[SystemSkipPair] = "ready_for_human"
 			workflow.Steps["plan"] = step
 
 			return workflow
@@ -57,8 +58,8 @@ func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 		t.Fatalf("plan allowed %s results = %v, want %s", SystemSkipStatus, step.AllowedResults[SystemSkipStatus], SystemSkipResult)
 	}
 
-	if got := step.On[SystemSkipPair]; got != testTerminalReadyForHuman {
-		t.Fatalf("plan %s transition = %q, want %s", SystemSkipPair, got, testTerminalReadyForHuman)
+	if got := step.On[SystemSkipPair]; got != "ready_for_human" {
+		t.Fatalf("plan %s transition = %q, want %s", SystemSkipPair, got, "ready_for_human")
 	}
 }
 
@@ -66,21 +67,21 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 	t.Run("step override wins over workflow defaults", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
 			config: configWithRuntimes(map[string]string{
-				testRuntimeCodex:  testRuntimeCodexPath,
-				testRuntimeFileAI: testRuntimeFileAIPath,
+				"codex":  "runtimes/codex.yaml",
+				"fileai": "runtimes/fileai.yaml",
 			}),
 			runtimes: map[string]string{
-				testRuntimeCodex:  validCodexRuntimeDescriptor(),
-				testRuntimeFileAI: validFilePromptRuntimeDescriptor(),
+				"codex":  validCodexRuntimeDescriptor(),
+				"fileai": validFilePromptRuntimeDescriptor(),
 			},
 			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
-				workflow.Defaults.Runtime = testRuntimeCodex
-				workflow.Defaults.Reasoning = testReasoningMed
+				workflow.Defaults.Runtime = "codex"
+				workflow.Defaults.Reasoning = "medium"
 				workflow.Defaults.RuntimeDirs = []string{"shared"}
 				step := workflow.Steps["plan"]
-				step.Runtime = testRuntimeFileAI
+				step.Runtime = "fileai"
 				step.Model = "model-b"
-				step.Reasoning = testReasoningHigh
+				step.Reasoning = "high"
 				step.RuntimeDirs = []string{"/tmp/external-worktree"}
 				workflow.Steps["plan"] = step
 
@@ -93,18 +94,18 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 			t.Fatalf("Load returned error: %v", err)
 		}
 
-		workflow := project.Workflows[testWorkflowImplementation]
+		workflow := project.Workflows["implementation"]
 
 		step := workflow.Steps["plan"]
-		if got := workflow.EffectiveRuntime(step); got != testRuntimeFileAI {
+		if got := workflow.EffectiveRuntime(step); got != "fileai" {
 			t.Fatalf("effective runtime = %q, want fileai", got)
 		}
 
-		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeFileAI]); got != "model-b" {
+		if got := workflow.EffectiveModel(step, project.Runtimes["fileai"]); got != "model-b" {
 			t.Fatalf("effective model = %q, want model-b", got)
 		}
 
-		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeFileAI]); got != testReasoningHigh {
+		if got := workflow.EffectiveReasoning(step, project.Runtimes["fileai"]); got != "high" {
 			t.Fatalf("effective reasoning = %q, want high", got)
 		}
 
@@ -112,7 +113,7 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 			t.Fatalf("effective runtime dirs = %v, want %v", got, want)
 		}
 
-		if got := step.EffectiveAgentID(); got != testAgentPlanner {
+		if got := step.EffectiveAgentID(); got != "planner" {
 			t.Fatalf("effective agent id = %q, want planner", got)
 		}
 	})
@@ -120,9 +121,9 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 	t.Run("workflow defaults supply agent-only step", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
 			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
-				workflow.Defaults.Runtime = testRuntimeCodex
-				workflow.Defaults.Model = testModelGPT5
-				workflow.Defaults.Reasoning = testReasoningHigh
+				workflow.Defaults.Runtime = "codex"
+				workflow.Defaults.Model = "gpt-5"
+				workflow.Defaults.Reasoning = "high"
 				workflow.Defaults.RuntimeDirs = []string{"src"}
 
 				return workflow
@@ -134,18 +135,18 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 			t.Fatalf("Load returned error: %v", err)
 		}
 
-		workflow := project.Workflows[testWorkflowImplementation]
+		workflow := project.Workflows["implementation"]
 
 		step := workflow.Steps["plan"]
-		if got := workflow.EffectiveRuntime(step); got != testRuntimeCodex {
+		if got := workflow.EffectiveRuntime(step); got != "codex" {
 			t.Fatalf("effective runtime = %q, want codex", got)
 		}
 
-		if got := workflow.EffectiveModel(step, project.Runtimes[testRuntimeCodex]); got != testModelGPT5 {
+		if got := workflow.EffectiveModel(step, project.Runtimes["codex"]); got != "gpt-5" {
 			t.Fatalf("effective model = %q, want gpt-5", got)
 		}
 
-		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeCodex]); got != testReasoningHigh {
+		if got := workflow.EffectiveReasoning(step, project.Runtimes["codex"]); got != "high" {
 			t.Fatalf("effective reasoning = %q, want high", got)
 		}
 	})
@@ -153,7 +154,7 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 	t.Run("runtime default supplies reasoning when workflow omits it", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
 			workflow: workflowYAML(t, func(workflow Workflow) Workflow {
-				workflow.Defaults.Runtime = testRuntimeCodex
+				workflow.Defaults.Runtime = "codex"
 				return workflow
 			}),
 		})
@@ -163,10 +164,10 @@ func TestLoadAcceptsAgentRuntimeSelection(t *testing.T) {
 			t.Fatalf("Load returned error: %v", err)
 		}
 
-		workflow := project.Workflows[testWorkflowImplementation]
+		workflow := project.Workflows["implementation"]
 
 		step := workflow.Steps["plan"]
-		if got := workflow.EffectiveReasoning(step, project.Runtimes[testRuntimeCodex]); got != testReasoningMed {
+		if got := workflow.EffectiveReasoning(step, project.Runtimes["codex"]); got != "medium" {
 			t.Fatalf("effective reasoning = %q, want medium", got)
 		}
 	})
@@ -177,7 +178,7 @@ func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 		generatedWorkflowCase(t, "skippable missing allowed result", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
 			step.Skippable = true
-			step.On[SystemSkipPair] = testTerminalReadyForHuman
+			step.On[SystemSkipPair] = "ready_for_human"
 			workflow.Steps["plan"] = step
 
 			return workflow
@@ -193,14 +194,14 @@ func TestLoadRejectsInvalidSkippableStepContract(t *testing.T) {
 		generatedWorkflowCase(t, "non skippable allowed result", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
 			step.AllowedResults[SystemSkipStatus] = append(step.AllowedResults[SystemSkipStatus], SystemSkipResult)
-			step.On[SystemSkipPair] = testTerminalReadyForHuman
+			step.On[SystemSkipPair] = "ready_for_human"
 			workflow.Steps["plan"] = step
 
 			return workflow
 		}, `step "plan" declares reserved system outcome done/skipped but is not skippable`),
 		generatedWorkflowCase(t, "non skippable transition", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
-			step.On[SystemSkipPair] = testTerminalReadyForHuman
+			step.On[SystemSkipPair] = "ready_for_human"
 			workflow.Steps["plan"] = step
 
 			return workflow
@@ -226,25 +227,25 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			return workflow
 		}, `step "plan" references missing runtime "missing"`),
 		generatedWorkflowCase(t, "missing required model", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeRequiredModel
+			workflow.Defaults.Runtime = "requiredmodel"
 			return workflow
 		}, `step "plan" runtime "requiredmodel" requires a model`),
 		generatedWorkflowCase(t, "step model unsupported", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeNoModel
+			workflow.Defaults.Runtime = "nomodel"
 			step := workflow.Steps["plan"]
-			step.Model = testModelGPT5
+			step.Model = "gpt-5"
 			workflow.Steps["plan"] = step
 
 			return workflow
 		}, `step "plan" model requires runtime "nomodel" model.supported=true`),
 		generatedWorkflowCase(t, "default model unsupported", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeNoModel
-			workflow.Defaults.Model = testModelGPT5
+			workflow.Defaults.Runtime = "nomodel"
+			workflow.Defaults.Model = "gpt-5"
 
 			return workflow
 		}, `step "plan" defaults.model requires runtime "nomodel" model.supported=true`),
 		generatedWorkflowCase(t, "allowlist rejects step model", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeFileAI
+			workflow.Defaults.Runtime = "fileai"
 			step := workflow.Steps["plan"]
 			step.Model = "model-z"
 			workflow.Steps["plan"] = step
@@ -252,13 +253,13 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			return workflow
 		}, `step "plan" model "model-z" is not allowed by runtime "fileai" model.allowed`),
 		generatedWorkflowCase(t, "allowlist rejects default model", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeFileAI
+			workflow.Defaults.Runtime = "fileai"
 			workflow.Defaults.Model = "model-z"
 
 			return workflow
 		}, `step "plan" defaults.model "model-z" is not allowed by runtime "fileai" model.allowed`),
 		generatedWorkflowCase(t, "runtime dirs unsupported", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeNoDirs
+			workflow.Defaults.Runtime = "nodirs"
 			step := workflow.Steps["plan"]
 			step.RuntimeDirs = []string{"extra"}
 			workflow.Steps["plan"] = step
@@ -266,25 +267,25 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			return workflow
 		}, `step "plan" runtime_dirs require runtime "nodirs" directories.supported=true`),
 		generatedWorkflowCase(t, "missing required reasoning", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeRequiredReasoning
+			workflow.Defaults.Runtime = "requiredreasoning"
 			return workflow
 		}, `step "plan" runtime "requiredreasoning" requires reasoning`),
 		generatedWorkflowCase(t, "step reasoning unsupported", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeNoReasoning
+			workflow.Defaults.Runtime = "noreasoning"
 			step := workflow.Steps["plan"]
-			step.Reasoning = testReasoningMed
+			step.Reasoning = "medium"
 			workflow.Steps["plan"] = step
 
 			return workflow
 		}, `step "plan" reasoning requires runtime "noreasoning" reasoning.supported=true`),
 		generatedWorkflowCase(t, "default reasoning unsupported", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeNoReasoning
-			workflow.Defaults.Reasoning = testReasoningMed
+			workflow.Defaults.Runtime = "noreasoning"
+			workflow.Defaults.Reasoning = "medium"
 
 			return workflow
 		}, `step "plan" defaults.reasoning requires runtime "noreasoning" reasoning.supported=true`),
 		generatedWorkflowCase(t, "allowlist rejects step reasoning", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeFileAI
+			workflow.Defaults.Runtime = "fileai"
 			step := workflow.Steps["plan"]
 			step.Reasoning = "extreme"
 			workflow.Steps["plan"] = step
@@ -292,7 +293,7 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 			return workflow
 		}, `step "plan" reasoning "extreme" is not allowed by runtime "fileai" reasoning.allowed`),
 		generatedWorkflowCase(t, "allowlist rejects default reasoning", func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeFileAI
+			workflow.Defaults.Runtime = "fileai"
 			workflow.Defaults.Reasoning = "extreme"
 
 			return workflow
@@ -322,23 +323,23 @@ func TestLoadRejectsInvalidAgentRuntimeSelection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeMinimalProject(t, projectFixture{
 				config: configWithRuntimes(map[string]string{
-					testRuntimeCodex:             testRuntimeCodexPath,
-					testRuntimeFileAI:            testRuntimeFileAIPath,
-					testRuntimeNoModel:           "runtimes/nomodel.yaml",
-					testRuntimeNoReasoning:       "runtimes/noreasoning.yaml",
-					testRuntimeNoDirs:            "runtimes/nodirs.yaml",
-					testRuntimeRequiredModel:     "runtimes/requiredmodel.yaml",
-					testRuntimeRequiredReasoning: "runtimes/requiredreasoning.yaml",
+					"codex":             "runtimes/codex.yaml",
+					"fileai":            "runtimes/fileai.yaml",
+					"nomodel":           "runtimes/nomodel.yaml",
+					"noreasoning":       "runtimes/noreasoning.yaml",
+					"nodirs":            "runtimes/nodirs.yaml",
+					"requiredmodel":     "runtimes/requiredmodel.yaml",
+					"requiredreasoning": "runtimes/requiredreasoning.yaml",
 				}),
 				workflow: tt.workflow,
 				runtimes: map[string]string{
-					testRuntimeCodex:             validCodexRuntimeDescriptor(),
-					testRuntimeFileAI:            validFilePromptRuntimeDescriptor(),
-					testRuntimeNoModel:           validNoModelRuntimeDescriptor(testRuntimeNoModel),
-					testRuntimeNoReasoning:       validNoReasoningRuntimeDescriptor(testRuntimeNoReasoning),
-					testRuntimeNoDirs:            validNoDirsRuntimeDescriptor(testRuntimeNoDirs),
-					testRuntimeRequiredModel:     validRequiredModelRuntimeDescriptor(testRuntimeRequiredModel),
-					testRuntimeRequiredReasoning: validRequiredReasoningRuntimeDescriptor(testRuntimeRequiredReasoning),
+					"codex":             validCodexRuntimeDescriptor(),
+					"fileai":            validFilePromptRuntimeDescriptor(),
+					"nomodel":           validNoModelRuntimeDescriptor("nomodel"),
+					"noreasoning":       validNoReasoningRuntimeDescriptor("noreasoning"),
+					"nodirs":            validNoDirsRuntimeDescriptor("nodirs"),
+					"requiredmodel":     validRequiredModelRuntimeDescriptor("requiredmodel"),
+					"requiredreasoning": validRequiredReasoningRuntimeDescriptor("requiredreasoning"),
 				},
 			})
 			assertLoadErrorContains(t, root, tt.contains...)
@@ -484,7 +485,7 @@ func TestLoadRejectsGeneratedWorkflowConfig(t *testing.T) {
 		}, `targets unknown step or terminal state "ship_it"`),
 		generatedWorkflowCase(t, "invalid transition pair includes allowed values", func(workflow Workflow) Workflow {
 			delete(workflow.Steps["plan"].On, "done/ready")
-			workflow.Steps["plan"].On["done/unknown"] = testTerminalReadyForHuman
+			workflow.Steps["plan"].On["done/unknown"] = "ready_for_human"
 
 			return workflow
 		}, `transition "done/unknown" is not declared`, `allowed pairs: done/ready`),
@@ -523,7 +524,7 @@ func TestLoadRejectsGeneratedWorkflowConfig(t *testing.T) {
 		generatedWorkflowCase(t, "invalid status includes allowed values", func(workflow Workflow) Workflow {
 			step := workflow.Steps["plan"]
 			step.AllowedResults = map[string][]string{"waiting": {"ready"}}
-			step.On = map[string]string{"waiting/ready": testTerminalReadyForHuman}
+			step.On = map[string]string{"waiting/ready": "ready_for_human"}
 			workflow.Steps["plan"] = step
 
 			return workflow
@@ -566,8 +567,8 @@ func TestLoadRejectsRawWorkflowConfig(t *testing.T) {
 			name:     "duplicate step name",
 			workflow: duplicateStepWorkflow(t),
 			agents: map[string]string{
-				testAgentPlanner: validAgentDescriptor(testAgentPlanner),
-				testAgentCoder:   validAgentDescriptor(testAgentCoder),
+				"planner": validAgentDescriptor("planner"),
+				"coder":   validAgentDescriptor("coder"),
 			},
 			contains: []string{"duplicate"},
 		},

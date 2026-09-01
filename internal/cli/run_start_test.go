@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -12,7 +13,7 @@ func TestExecuteRunStartInlineTaskCreatesRun(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
 
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 	if got := string(readCLIFile(t, cliTaskArtifactPath(root, result.runID, "context.md"))); got != "# Task\n" {
 		t.Fatalf("task context = %q, want inline task with newline", got)
 	}
@@ -47,7 +48,7 @@ func TestExecuteRunStartTaskFileCreatesRun(t *testing.T) {
 func TestExecuteRunStartHelpShowsFallbackOnlyUnderBead(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{commandRun, cliCommandStart, helpFlag}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, "start", helpFlag}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
@@ -64,7 +65,7 @@ func TestExecuteRunStartHelpShowsFallbackOnlyUnderBead(t *testing.T) {
 func TestExecuteRunStartRejectsUnknownFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{commandRun, cliCommandStart, cliFlagBogus}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandRun, "start", "--bogus"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown flag")
 	}
 
@@ -73,7 +74,7 @@ func TestExecuteRunStartRejectsUnknownFlag(t *testing.T) {
 	}
 
 	output := stderr.String()
-	for _, want := range []string{`unknown flag: --bogus`, cliUsage, "run start"} {
+	for _, want := range []string{`unknown flag: --bogus`, "Usage:", "run start"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, output)
 		}
@@ -107,7 +108,7 @@ func TestExecuteRunStartRejectsMissingTaskSource(t *testing.T) {
 	writeCLIProject(t, root, "optional", true)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandRun, cliCommandStart, cliFlagWorkflow, cliWorkflowImplementation}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandRun, "start", "--workflow", "implementation"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want missing source failure")
 	}
 

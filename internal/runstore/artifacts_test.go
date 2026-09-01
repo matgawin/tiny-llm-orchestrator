@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -17,11 +18,11 @@ func TestWriteArtifactPersistsSupportedArtifactsAndLoadsRefs(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "run-artifacts")
 	artifacts := []Artifact{
-		{Kind: KindTaskContext, Name: testTaskSlug, Content: []byte("# Task\n")},
-		{Kind: KindTaskSnapshot, Name: testTaskSlug, Content: []byte(`{"source":"beads"}`)},
-		{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("# Report\n")},
-		{Kind: KindPrompt, Name: testWorkflowStateCode, Content: []byte("Prompt\n")},
-		{Kind: KindLog, Name: testWorkflowStateReview, Content: []byte("log line\n")},
+		{Kind: KindTaskContext, Name: "task", Content: []byte("# Task\n")},
+		{Kind: KindTaskSnapshot, Name: "task", Content: []byte(`{"source":"beads"}`)},
+		{Kind: KindReport, Name: "plan", Content: []byte("# Report\n")},
+		{Kind: KindPrompt, Name: "code", Content: []byte("Prompt\n")},
+		{Kind: KindLog, Name: "review", Content: []byte("log line\n")},
 		{Kind: KindSnapshot, Name: "vcs", Content: []byte(`{"changed":[]}`)},
 		{Kind: KindSummary, Name: "orchestrator", Content: []byte("Summary\n")},
 		{Kind: KindFollowup, Name: "followup", Content: []byte("- [ ] Follow up\n")},
@@ -74,7 +75,7 @@ func TestWriteArtifactIfStateRequiresMatchingState(t *testing.T) {
 		Content: []byte("Summary\n"),
 	}
 
-	_, err := store.WriteArtifactIfStateContext(context.Background(), run.ID, readyForHumanState, summary)
+	_, err := store.WriteArtifactIfStateContext(context.Background(), run.ID, "ready_for_human", summary)
 	requireErrorContains(t, err, "state is", stateRunning)
 
 	var stateErr *StateMismatchError
@@ -82,7 +83,7 @@ func TestWriteArtifactIfStateRequiresMatchingState(t *testing.T) {
 		t.Fatalf("error = %T %[1]v, want StateMismatchError", err)
 	}
 
-	if stateErr.RunID != run.ID || stateErr.Got != stateRunning || stateErr.Want != readyForHumanState {
+	if stateErr.RunID != run.ID || stateErr.Got != stateRunning || stateErr.Want != "ready_for_human" {
 		t.Fatalf("state mismatch = %+v, want run/state precondition details", stateErr)
 	}
 
@@ -95,11 +96,11 @@ func TestWriteArtifactIfStateRequiresMatchingState(t *testing.T) {
 		t.Fatalf("artifacts = %+v, want none after rejected state-guarded write", loaded.Status.Artifacts)
 	}
 
-	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: "ready_for_human"}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
-	ref, err := store.WriteArtifactIfStateContext(context.Background(), run.ID, readyForHumanState, summary)
+	ref, err := store.WriteArtifactIfStateContext(context.Background(), run.ID, "ready_for_human", summary)
 	if err != nil {
 		t.Fatalf("WriteArtifactIfState returned error: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestReadArtifactReadsRecordedArtifact(t *testing.T) {
 
 	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindPrompt,
-		Name:    testWorkflowStatePlan,
+		Name:    "plan",
 		Content: []byte("Prompt\n"),
 	})
 	if err != nil {
@@ -164,18 +165,18 @@ func TestOpenArtifactAppendWritesRecordedArtifact(t *testing.T) {
 func createRunWithActiveLog(t *testing.T, store *Store, runID string) (*Run, ArtifactRef) {
 	t.Helper()
 	run := createManualRun(t, store, runID)
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindLog,
-		Name:    testPlanAttemptID,
+		Name:    "plan-attempt-001",
 		Content: []byte("first\n"),
 	})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{AttemptID: testAttemptID, LogRef: ref}); err != nil {
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{AttemptID: "attempt-001", LogRef: ref}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
@@ -209,7 +210,7 @@ func TestOpenArtifactAppendRejectsNonLogArtifact(t *testing.T) {
 
 	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindPrompt,
-		Name:    testWorkflowStatePlan,
+		Name:    "plan",
 		Content: []byte("Prompt\n"),
 	})
 	if err != nil {
@@ -229,7 +230,7 @@ func TestOpenArtifactAppendRejectsTerminalAttemptLog(t *testing.T) {
 
 	run, ref := createRunWithActiveLog(t, store, "append-terminal-log")
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -285,7 +286,7 @@ func TestReadArtifactRejectsUnrecordedRefs(t *testing.T) {
 	_, err := store.ReadArtifactContext(context.Background(), run.ID, ArtifactRef{
 		Kind:          KindReport,
 		Path:          "reports/000002-plan.md",
-		Name:          testWorkflowStatePlan,
+		Name:          "plan",
 		EventSequence: 2,
 	})
 	requireErrorContains(t, err, "is not recorded")
@@ -297,8 +298,8 @@ func TestReadArtifactRejectsMalformedRefs(t *testing.T) {
 
 	_, err := store.ReadArtifactContext(context.Background(), run.ID, ArtifactRef{
 		Kind:          KindReport,
-		Path:          testPromptPlanPath,
-		Name:          testWorkflowStatePlan,
+		Path:          "prompts/000002-plan.md",
+		Name:          "plan",
 		EventSequence: 2,
 	})
 	requireErrorContains(t, err, "does not match kind")
@@ -384,7 +385,7 @@ func TestWriteArtifactRejectsPreexistingUnreferencedArtifactFile(t *testing.T) {
 		t.Fatalf("write preexisting artifact: %v", err)
 	}
 
-	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("new artifact\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("new artifact\n")})
 	requireErrorContains(t, err, "already exists")
 
 	if got := readFile(t, path); !bytes.Equal(got, original) {
@@ -402,7 +403,7 @@ func TestWriteArtifactReturnsCommittedRefWhenStatusMaterializationFails(t *testi
 	run := createManualRun(t, store, "artifact-status-failure")
 	denyStatusMaterializationOrSkip(t, run.Path)
 
-	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	requireStatusMaterializationError(t, err, run.Path)
 
 	if ref.Path != "reports/000002-plan.md" || ref.EventSequence != 2 {
@@ -425,7 +426,7 @@ func TestWriteArtifactRejectsPreexistingArtifactFIFO(t *testing.T) {
 	path := filepath.Join(run.Path, "reports", "000002-plan.md")
 	makeFIFO(t, path)
 
-	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	requireErrorContains(t, err, "regular file")
 }
 
@@ -450,14 +451,14 @@ func TestWriteAPIsRejectRunDirectorySymlink(t *testing.T) {
 		{
 			name: "UpdateStatus",
 			call: func() error {
-				_, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
+				_, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: "ready_for_human"})
 				return err
 			},
 		},
 		{
 			name: "WriteArtifact",
 			call: func() error {
-				_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+				_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 				return err
 			},
 		},
@@ -478,7 +479,7 @@ func TestWriteArtifactRejectsMissingInitialParentDirectory(t *testing.T) {
 		t.Fatalf("remove reports dir: %v", err)
 	}
 
-	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	requireErrorContains(t, err, "layout", "reports")
 }
 
@@ -488,7 +489,7 @@ func TestWriteArtifactRejectsSymlinkedArtifactParent(t *testing.T) {
 	reportsDir := filepath.Join(run.Path, "reports")
 	outsideDir := outsideDirSymlink(t, run.Path, reportsDir, "outside-reports")
 
-	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	requireErrorContains(t, err, "symlink")
 
 	if _, statErr := os.Stat(filepath.Join(outsideDir, "000002-plan.md")); !os.IsNotExist(statErr) {
@@ -502,7 +503,7 @@ func TestWriteArtifactRollsBackCommittedArtifactWhenEventAppendFails(t *testing.
 	eventsPath := runEventsPath(run)
 	denyFileAppendOrSkip(t, eventsPath)
 
-	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	if err == nil {
 		t.Fatal("WriteArtifact returned nil error, want append failure")
 	}

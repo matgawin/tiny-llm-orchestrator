@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package config
 
 import (
@@ -16,15 +17,15 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		testWorkflowImplementation,
-		testWorkflowBugfix,
-		testWorkflowMechanicalChange,
-		testWorkflowTestOnly,
-		testWorkflowReviewFix,
-		testWorkflowReviewMechanical,
-		testWorkflowReviewReadability,
-		testWorkflowReviewRedundancy,
-		testWorkflowReviewDocs,
+		"implementation",
+		"bugfix",
+		"mechanical-change",
+		"test-only",
+		"review-fix",
+		"review-mechanical",
+		"review-readability",
+		"review-redundancy",
+		"review-docs",
 	} {
 		if _, ok := project.Workflows[name]; !ok {
 			t.Fatalf("workflow %q was not loaded", name)
@@ -32,8 +33,8 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		testAgentPlanner,
-		testAgentCoder,
+		"planner",
+		"coder",
 		"mechanical-coder",
 		"bug-reproducer",
 		"tester",
@@ -49,12 +50,12 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 		}
 	}
 
-	workflow := project.Workflows[testWorkflowImplementation]
-	if workflow.Name != testWorkflowImplementation {
+	workflow := project.Workflows["implementation"]
+	if workflow.Name != "implementation" {
 		t.Fatalf("workflow name = %q, want implementation", workflow.Name)
 	}
 
-	if workflow.Start != testStepPlan {
+	if workflow.Start != "plan" {
 		t.Fatalf("workflow start = %q, want plan", workflow.Start)
 	}
 
@@ -82,11 +83,11 @@ func TestLoadValidImplementationWorkflow(t *testing.T) {
 		t.Fatalf("loop caps = %+v, want %+v", got, want)
 	}
 
-	if got := project.Agents[testAgentPlanner].Role; got != testAgentPlanner {
+	if got := project.Agents["planner"].Role; got != "planner" {
 		t.Fatalf("planner role = %q, want planner", got)
 	}
 
-	if got := workflow.ReferencedAgents[testAgentPlanner].Path; got != "agents/planner.md" {
+	if got := workflow.ReferencedAgents["planner"].Path; got != "agents/planner.md" {
 		t.Fatalf("planner workflow agent path = %q, want agents/planner.md", got)
 	}
 }
@@ -97,11 +98,11 @@ func TestLoadCurrentRepositoryConfigUsesExplicitCodexRuntime(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := project.Config.Runtimes[testRuntimeCodex]; got != testRuntimeCodexPath {
+	if got := project.Config.Runtimes["codex"]; got != "runtimes/codex.yaml" {
 		t.Fatalf("config runtimes.codex = %q, want runtimes/codex.yaml", got)
 	}
 
-	codex, ok := project.Runtimes[testRuntimeCodex]
+	codex, ok := project.Runtimes["codex"]
 	if !ok {
 		t.Fatal("runtime codex was not loaded")
 	}
@@ -112,7 +113,7 @@ func TestLoadCurrentRepositoryConfigUsesExplicitCodexRuntime(t *testing.T) {
 	}
 
 	for name, workflow := range project.Workflows {
-		if got := workflow.Defaults.Runtime; got != testRuntimeCodex {
+		if got := workflow.Defaults.Runtime; got != "codex" {
 			t.Fatalf("workflow %s defaults.runtime = %q, want codex", name, got)
 		}
 	}
@@ -128,7 +129,7 @@ func TestLoadSetupVersion(t *testing.T) {
 		t.Fatalf("setup_version = %d, want %d", got, CurrentSetupVersion)
 	}
 
-	legacyRoot := writeMinimalProject(t, projectFixture{config: configForAgents(map[string]string{testAgentPlanner: validAgentDescriptor(testAgentPlanner)})})
+	legacyRoot := writeMinimalProject(t, projectFixture{config: configForAgents(map[string]string{"planner": validAgentDescriptor("planner")})})
 
 	legacyProject, err := Load(legacyRoot)
 	if err != nil {
@@ -193,28 +194,28 @@ func TestLoadDefaultScaffoldSkippablePolicy(t *testing.T) {
 		step     string
 		target   string
 	}{
-		{workflow: testWorkflowImplementation, step: testStepCode, target: testStepRedundancyReview},
-		{workflow: testWorkflowImplementation, step: testStepReview, target: testStepRedundancyReview},
-		{workflow: testWorkflowImplementation, step: testStepRedundancyReview, target: testStepReadabilityReview},
-		{workflow: testWorkflowImplementation, step: "code_fixer", target: testStepReadabilityReview},
-		{workflow: testWorkflowImplementation, step: testStepReadabilityReview, target: testTerminalReadyForHuman},
-		{workflow: testWorkflowImplementation, step: "code_cleaner", target: testTerminalReadyForHuman},
-		{workflow: testWorkflowBugfix, step: testStepCode, target: testTerminalReadyForHuman},
-		{workflow: testWorkflowBugfix, step: testStepReview, target: testTerminalReadyForHuman},
-		{workflow: testWorkflowMechanicalChange, step: "mechanical-code", target: testTerminalReadyForHuman},
-		{workflow: testWorkflowMechanicalChange, step: "mechanical-review", target: testTerminalReadyForHuman},
-		{workflow: testWorkflowTestOnly, step: "test-code", target: testTerminalReadyForHuman},
-		{workflow: testWorkflowTestOnly, step: testStepReview, target: testTerminalReadyForHuman},
-		{workflow: testWorkflowReviewFix, step: testStepReview, target: testStepRedundancyReview},
-		{workflow: testWorkflowReviewFix, step: testStepCode, target: testStepRedundancyReview},
-		{workflow: testWorkflowReviewFix, step: testStepRedundancyReview, target: testStepReadabilityReview},
-		{workflow: testWorkflowReviewFix, step: "code_fixer", target: testStepReadabilityReview},
-		{workflow: testWorkflowReviewFix, step: testStepReadabilityReview, target: testTerminalReadyForHuman},
-		{workflow: testWorkflowReviewFix, step: "code_cleaner", target: testTerminalReadyForHuman},
-		{workflow: testWorkflowReviewMechanical, step: "mechanical-review", target: testTerminalReadyForHuman},
-		{workflow: testWorkflowReviewReadability, step: testStepReadabilityReview, target: testTerminalReadyForHuman},
-		{workflow: testWorkflowReviewRedundancy, step: testStepRedundancyReview, target: testTerminalReadyForHuman},
-		{workflow: testWorkflowReviewDocs, step: "docs-review", target: testTerminalReadyForHuman},
+		{workflow: "implementation", step: "code", target: "redundancy-review"},
+		{workflow: "implementation", step: "review", target: "redundancy-review"},
+		{workflow: "implementation", step: "redundancy-review", target: "readability-review"},
+		{workflow: "implementation", step: "code_fixer", target: "readability-review"},
+		{workflow: "implementation", step: "readability-review", target: "ready_for_human"},
+		{workflow: "implementation", step: "code_cleaner", target: "ready_for_human"},
+		{workflow: "bugfix", step: "code", target: "ready_for_human"},
+		{workflow: "bugfix", step: "review", target: "ready_for_human"},
+		{workflow: "mechanical-change", step: "mechanical-code", target: "ready_for_human"},
+		{workflow: "mechanical-change", step: "mechanical-review", target: "ready_for_human"},
+		{workflow: "test-only", step: "test-code", target: "ready_for_human"},
+		{workflow: "test-only", step: "review", target: "ready_for_human"},
+		{workflow: "review-fix", step: "review", target: "redundancy-review"},
+		{workflow: "review-fix", step: "code", target: "redundancy-review"},
+		{workflow: "review-fix", step: "redundancy-review", target: "readability-review"},
+		{workflow: "review-fix", step: "code_fixer", target: "readability-review"},
+		{workflow: "review-fix", step: "readability-review", target: "ready_for_human"},
+		{workflow: "review-fix", step: "code_cleaner", target: "ready_for_human"},
+		{workflow: "review-mechanical", step: "mechanical-review", target: "ready_for_human"},
+		{workflow: "review-readability", step: "readability-review", target: "ready_for_human"},
+		{workflow: "review-redundancy", step: "redundancy-review", target: "ready_for_human"},
+		{workflow: "review-docs", step: "docs-review", target: "ready_for_human"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.workflow+"/"+tt.step, func(t *testing.T) {
@@ -223,15 +224,15 @@ func TestLoadDefaultScaffoldSkippablePolicy(t *testing.T) {
 	}
 
 	nonSkippable := map[string][]string{
-		testWorkflowImplementation:    {testStepPlan, testStepLSP, testStepTest, "lsp-redundancy", "test-redundancy", "lsp-readability", "test-readability"},
-		testWorkflowBugfix:            {"reproduce", testStepPlan, testStepLSP, testStepTest},
-		testWorkflowMechanicalChange:  {testStepPlan, testStepLSP, testStepTest},
-		testWorkflowTestOnly:          {testStepPlan, "test-design", testStepLSP, "test-run"},
-		testWorkflowReviewFix:         {testStepLSP, testStepTest, "lsp-redundancy", "test-redundancy", "lsp-readability", "test-readability"},
-		testWorkflowReviewMechanical:  {},
-		testWorkflowReviewReadability: {},
-		testWorkflowReviewRedundancy:  {},
-		testWorkflowReviewDocs:        {},
+		"implementation":     {"plan", "lsp", "test", "lsp-redundancy", "test-redundancy", "lsp-readability", "test-readability"},
+		"bugfix":             {"reproduce", "plan", "lsp", "test"},
+		"mechanical-change":  {"plan", "lsp", "test"},
+		"test-only":          {"plan", "test-design", "lsp", "test-run"},
+		"review-fix":         {"lsp", "test", "lsp-redundancy", "test-redundancy", "lsp-readability", "test-readability"},
+		"review-mechanical":  {},
+		"review-readability": {},
+		"review-redundancy":  {},
+		"review-docs":        {},
 	}
 	for workflowName, stepNames := range nonSkippable {
 		workflow := project.Workflows[workflowName]
@@ -255,7 +256,7 @@ func TestLoadWorkflowPreservesStepDeclarationOrder(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got, want := project.Workflows[testWorkflowImplementation].StepOrder, []string{testStepPlan, testStepCode}; !slices.Equal(got, want) {
+	if got, want := project.Workflows["implementation"].StepOrder, []string{"plan", "code"}; !slices.Equal(got, want) {
 		t.Fatalf("workflow step order = %v, want %v", got, want)
 	}
 }
@@ -268,7 +269,7 @@ func TestLoadWorkflowLoopCaps(t *testing.T) {
 	}{
 		{
 			name:   "legacy config uses built-in defaults",
-			config: configForAgents(map[string]string{testAgentPlanner: validAgentDescriptor(testAgentPlanner)}),
+			config: configForAgents(map[string]string{"planner": validAgentDescriptor("planner")}),
 			want:   EffectiveLoopCaps{Enabled: true, Soft: 2, Hard: 4},
 		},
 		{

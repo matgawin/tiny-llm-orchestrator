@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package sandbox
 
 import (
@@ -24,14 +25,14 @@ func TestBuildSpecCreatesHomeDirsBeforeRepoBind(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS:  goosLinux,
 		LookPath:     foundBwrap,
 		PathExists:   onlyHostPaths(codexHome),
 		Stat:         allPathsAreDirs,
 		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=/home/tester", "CODEX_HOME=" + codexHome}
+			return []string{"PATH=/usr/bin", "HOME=/home/tester", "CODEX_HOME=" + codexHome}
 		},
 	})
 	if err != nil {
@@ -65,7 +66,7 @@ func TestBuildSpecNetworkFalseAddsUnshareNet(t *testing.T) {
 		},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
@@ -88,7 +89,7 @@ func TestBuildSpecSkipsMissingOptionalBeadsDir(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
@@ -114,7 +115,7 @@ func TestBuildSpecCreatesDefaultCodexHomeUnderSyntheticHome(t *testing.T) {
 
 	var created string
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
@@ -150,7 +151,7 @@ func TestBuildSpecExplicitSyntheticHomePreservesDefaultCodexHomeTarget(t *testin
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS:  goosLinux,
 		LookPath:     foundBwrap,
 		PathExists:   onlyHostPaths(filepath.Join(root, ".codex")),
@@ -181,7 +182,7 @@ func TestBuildSpecHostPathHomeUsesHostHomeEnvAndSamePathDefaultCodexHome(t *test
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS:  goosLinux,
 		LookPath:     foundBwrap,
 		PathExists:   onlyHostPaths(codexHome),
@@ -220,14 +221,14 @@ func TestBuildSpecHostPathHomeFallsBackToUserHomeDir(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS:  goosLinux,
 		LookPath:     foundBwrap,
 		PathExists:   onlyHostPaths(codexHome),
 		Stat:         allPathsAreDirs,
 		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv}
+			return []string{"PATH=/usr/bin"}
 		},
 		UserHomeDir: func() (string, error) {
 			return home, nil
@@ -249,12 +250,12 @@ func TestBuildSpecHostPathHomeRejectsNonAbsoluteResolvedHome(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=relative-home"}
+			return []string{"PATH=/usr/bin", "HOME=relative-home"}
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), `host HOME "relative-home" must resolve to an absolute path`) {
@@ -281,14 +282,14 @@ func TestBuildSpecExplicitCodexHomeUsesSamePathInBothHomeModes(t *testing.T) {
 				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 			})
 
-			spec, err := BuildSpec(project, Options{
+			spec, err := buildSpecForTest(project, sandboxTestOptions{
 				RuntimeGOOS:  goosLinux,
 				LookPath:     foundBwrap,
 				PathExists:   onlyHostPaths(codexHome),
 				Stat:         allPathsAreDirs,
 				EvalSymlinks: identityEvalSymlinks,
 				Environ: func() []string {
-					return []string{testPathUsrBinEnv, "HOME=/home/tester", "CODEX_HOME=" + codexHome}
+					return []string{"PATH=/usr/bin", "HOME=/home/tester", "CODEX_HOME=" + codexHome}
 				},
 			})
 			if err != nil {
@@ -315,14 +316,14 @@ func TestBuildSpecRelativeCodexHomeFallsBackToHostHome(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS:  goosLinux,
 		LookPath:     foundBwrap,
 		PathExists:   onlyHostPaths(codexHome),
 		Stat:         allPathsAreDirs,
 		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + home, "CODEX_HOME=.codex"}
+			return []string{"PATH=/usr/bin", "HOME=" + home, "CODEX_HOME=.codex"}
 		},
 	})
 	if err != nil {
@@ -353,14 +354,14 @@ func TestBuildSpecManagedHomeAndCodexHomeOverrideSandboxEnvSet(t *testing.T) {
 		},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS:  goosLinux,
 		LookPath:     foundBwrap,
 		PathExists:   onlyHostPaths(codexHome),
 		Stat:         allPathsAreDirs,
 		EvalSymlinks: identityEvalSymlinks,
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + home, "CODEX_HOME=" + codexHome}
+			return []string{"PATH=/usr/bin", "HOME=" + home, "CODEX_HOME=" + codexHome}
 		},
 	})
 	if err != nil {
@@ -381,23 +382,23 @@ func TestBuildSpecNonCodexRuntimeDoesNotAddCodexMountOrEnv(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 	project.Workflows = map[string]config.Workflow{
-		testWorkflowImplementation: {
-			Defaults: config.Defaults{Runtime: testRuntimeRecorder},
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "recorder"},
 			Steps: map[string]config.Step{
-				testStepCode: {Agent: testAgentCoder},
+				"code": {Agent: "coder"},
 			},
 		},
 	}
 	project.Runtimes = map[string]config.Runtime{
-		testRuntimeRecorder: {ID: testRuntimeRecorder, Sandbox: config.RuntimeSandbox{Supported: true}},
+		"recorder": {ID: "recorder", Sandbox: config.RuntimeSandbox{Supported: true}},
 	}
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(codexHome),
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + root, "CODEX_HOME=" + codexHome}
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CODEX_HOME=" + codexHome}
 		},
 	})
 	if err != nil {
@@ -413,7 +414,7 @@ func TestBuildSpecNonCodexRuntimeDoesNotAddCodexMountOrEnv(t *testing.T) {
 
 func TestBuildSpecHostPathHomeAllowsExplicitSubpathMount(t *testing.T) {
 	root := t.TempDir()
-	home := testHomePath
+	home := "/home/user"
 	hostBun := filepath.Join(root, "bun")
 	project := sandboxProject(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
@@ -425,7 +426,7 @@ func TestBuildSpecHostPathHomeAllowsExplicitSubpathMount(t *testing.T) {
 		},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(hostBun),
@@ -446,13 +447,13 @@ func TestBuildSpecHostPathHomeRejectsHomeTargetAndAncestors(t *testing.T) {
 		target string
 		want   string
 	}{
-		{name: "exact home", target: testHomePath, want: "must not override active sandbox HOME"},
+		{name: "exact home", target: "/home/user", want: "must not override active sandbox HOME"},
 		{name: "ancestor", target: hostHomeDir, want: "must not override ancestor of active sandbox HOME"},
 		{name: "sibling home", target: "/home/other/.cache", want: "must not override critical sandbox path /home"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			home := testHomePath
+			home := "/home/user"
 			hostMount := filepath.Join(root, "mount")
 			project := sandboxProject(root, config.SandboxConfig{
 				Command:    config.SandboxCommand{Argv: []string{"sh"}},
@@ -464,7 +465,7 @@ func TestBuildSpecHostPathHomeRejectsHomeTargetAndAncestors(t *testing.T) {
 				},
 			})
 
-			_, err := BuildSpec(project, Options{
+			_, err := buildSpecForTest(project, sandboxTestOptions{
 				RuntimeGOOS: goosLinux,
 				LookPath:    foundBwrap,
 				PathExists:  onlyHostPaths(hostMount),
@@ -484,27 +485,27 @@ func TestBuildSpecDefaultPathModeDoesNotAddAutomaticPathMounts(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
-		Stat:        fakePathStat(map[string]bool{testPathOptToolBin: true}),
+		Stat:        fakePathStat(map[string]bool{"/opt/tool/bin": true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testPathOptToolBin: testPathOptToolBin,
+			"/opt/tool/bin": "/opt/tool/bin",
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathOptToolEnv, testEnvHomeUser}
+			return []string{"PATH=/opt/tool/bin", "HOME=/home/user"}
 		},
 	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
 
-	if containsSequence(spec.Args, "--ro-bind", testPathOptToolBin, testPathOptToolBin) {
+	if containsSequence(spec.Args, "--ro-bind", "/opt/tool/bin", "/opt/tool/bin") {
 		t.Fatalf("bwrap args = %#v, want no automatic PATH mount in default none mode", spec.Args)
 	}
 
-	assertEnvContains(t, spec.Env, testPathOptToolEnv)
+	assertEnvContains(t, spec.Env, "PATH=/opt/tool/bin")
 }
 
 func TestBuildSpecPathHostEntriesMountsEffectivePathEntries(t *testing.T) {
@@ -515,47 +516,47 @@ func TestBuildSpecPathHostEntriesMountsEffectivePathEntries(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 	pathValue := strings.Join([]string{
-		testPathOptToolBin,
+		"/opt/tool/bin",
 		"",
 		"relative/bin",
 		"/missing/bin",
-		testProfileBin,
-		testNotDirPath,
-		testBadSymlinkPath,
-		testSamePath,
-		testSamePath,
-		testAltPath,
+		"/profile/bin",
+		"/not-dir",
+		"/bad-symlink",
+		"/same",
+		"/same",
+		"/alt",
 		hostUsrBinDir,
 	}, string(os.PathListSeparator))
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
-			testPathOptToolBin:       true,
-			testProfileBin:           true,
+			"/opt/tool/bin":          true,
+			"/profile/bin":           true,
 			"/nix/store/profile-bin": true,
-			testNotDirPath:           false,
-			testBadSymlinkPath:       true,
-			testSamePath:             true,
-			testAltPath:              true,
-			testResolvedSame:         true,
+			"/not-dir":               false,
+			"/bad-symlink":           true,
+			"/same":                  true,
+			"/alt":                   true,
+			"/resolved/same":         true,
 			hostUsrDir:               true,
 			hostUsrBinDir:            true,
 		}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testPathOptToolBin: testPathOptToolBin,
-			testProfileBin:     "/nix/store/profile-bin",
-			testNotDirPath:     testNotDirPath,
-			testSamePath:       testResolvedSame,
-			testAltPath:        testResolvedSame,
-			hostUsrBinDir:      hostUsrBinDir,
+			"/opt/tool/bin": "/opt/tool/bin",
+			"/profile/bin":  "/nix/store/profile-bin",
+			"/not-dir":      "/not-dir",
+			"/same":         "/resolved/same",
+			"/alt":          "/resolved/same",
+			hostUsrBinDir:   hostUsrBinDir,
 		}, map[string]error{
-			testBadSymlinkPath: os.ErrNotExist,
+			"/bad-symlink": os.ErrNotExist,
 		}),
 		Environ: func() []string {
-			return []string{"PATH=" + pathValue, testEnvHomeUser}
+			return []string{"PATH=" + pathValue, "HOME=/home/user"}
 		},
 	})
 	if err != nil {
@@ -563,16 +564,16 @@ func TestBuildSpecPathHostEntriesMountsEffectivePathEntries(t *testing.T) {
 	}
 
 	assertEnvContains(t, spec.Env, "PATH="+pathValue)
-	assertPathMount(t, spec.Args, testPathOptToolBin, testPathOptToolBin)
-	assertPathMount(t, spec.Args, "/nix/store/profile-bin", testProfileBin)
-	assertPathMount(t, spec.Args, testResolvedSame, testSamePath)
-	assertPathMount(t, spec.Args, testResolvedSame, testAltPath)
+	assertPathMount(t, spec.Args, "/opt/tool/bin", "/opt/tool/bin")
+	assertPathMount(t, spec.Args, "/nix/store/profile-bin", "/profile/bin")
+	assertPathMount(t, spec.Args, "/resolved/same", "/same")
+	assertPathMount(t, spec.Args, "/resolved/same", "/alt")
 	assertNoPathMount(t, spec.Args, hostUsrBinDir, hostUsrBinDir)
-	assertSequenceCount(t, spec.Args, []string{"--ro-bind", testResolvedSame, testSamePath}, 1)
+	assertSequenceCount(t, spec.Args, []string{"--ro-bind", "/resolved/same", "/same"}, 1)
 	assertNoPathMount(t, spec.Args, "relative/bin", "relative/bin")
 	assertNoPathMount(t, spec.Args, "/missing/bin", "/missing/bin")
-	assertNoPathMount(t, spec.Args, testNotDirPath, testNotDirPath)
-	assertNoPathMount(t, spec.Args, testBadSymlinkPath, testBadSymlinkPath)
+	assertNoPathMount(t, spec.Args, "/not-dir", "/not-dir")
+	assertNoPathMount(t, spec.Args, "/bad-symlink", "/bad-symlink")
 }
 
 func TestBuildSpecPathHostEntriesWorksInHostPathHomeMode(t *testing.T) {
@@ -584,27 +585,27 @@ func TestBuildSpecPathHostEntriesWorksInHostPathHomeMode(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
-			testHomeBunBin: true,
+			"/home/user/.bun/bin": true,
 		}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testHomeBunBin: testHomeBunBin,
+			"/home/user/.bun/bin": "/home/user/.bun/bin",
 		}, nil),
 		Environ: func() []string {
-			return []string{"PATH=/home/user/.bun/bin", testEnvHomeUser}
+			return []string{"PATH=/home/user/.bun/bin", "HOME=/home/user"}
 		},
 	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
 
-	assertPathMount(t, spec.Args, testHomeBunBin, testHomeBunBin)
+	assertPathMount(t, spec.Args, "/home/user/.bun/bin", "/home/user/.bun/bin")
 
-	if containsSequence(spec.Args, "--bind", testHomePath, testHomePath) {
+	if containsSequence(spec.Args, "--bind", "/home/user", "/home/user") {
 		t.Fatalf("bwrap args = %#v, must not bind whole host HOME for PATH mount", spec.Args)
 	}
 }
@@ -620,20 +621,20 @@ func TestBuildSpecPathHostEntriesUsesSandboxEnvSetPath(t *testing.T) {
 		}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
-			testHostBin:   true,
-			testCustomBin: true,
+			"/host/bin":   true,
+			"/custom/bin": true,
 		}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testHostBin:   testHostBin,
-			testCustomBin: testCustomBin,
+			"/host/bin":   "/host/bin",
+			"/custom/bin": "/custom/bin",
 		}, nil),
 		Environ: func() []string {
-			return []string{"PATH=/host/bin", testEnvHomeUser}
+			return []string{"PATH=/host/bin", "HOME=/home/user"}
 		},
 	})
 	if err != nil {
@@ -641,8 +642,8 @@ func TestBuildSpecPathHostEntriesUsesSandboxEnvSetPath(t *testing.T) {
 	}
 
 	assertEnvContains(t, spec.Env, "PATH=/custom/bin::relative")
-	assertPathMount(t, spec.Args, testCustomBin, testCustomBin)
-	assertNoPathMount(t, spec.Args, testHostBin, testHostBin)
+	assertPathMount(t, spec.Args, "/custom/bin", "/custom/bin")
+	assertNoPathMount(t, spec.Args, "/host/bin", "/host/bin")
 }
 
 func TestBuildSpecPathHostEntriesRejectsUnsafeTargets(t *testing.T) {
@@ -652,12 +653,12 @@ func TestBuildSpecPathHostEntriesRejectsUnsafeTargets(t *testing.T) {
 		want string
 	}{
 		{name: "active sandbox home", path: "/home/orc", want: "must not mount active sandbox HOME"},
-		{name: "resolved host home", path: testHomePath, want: "must not mount resolved host HOME"},
+		{name: "resolved host home", path: "/home/user", want: "must not mount resolved host HOME"},
 		{name: "home ancestor", path: hostHomeDir, want: "must not mount ancestor of active sandbox HOME"},
-		{name: "repository target", path: "/repo/project", want: testRepoMountError},
-		{name: "repository ancestor", path: "/repo", want: testRepoMountError},
+		{name: "repository target", path: "/repo/project", want: "must not override the repository mount"},
+		{name: "repository ancestor", path: "/repo", want: "must not override the repository mount"},
 		{name: "beads target", path: "/repo/.beads", want: "must not override the Beads mount"},
-		{name: "protected tmp target", path: "/tmp/tools/bin", want: testProtectedTmpError},
+		{name: "protected tmp target", path: "/tmp/tools/bin", want: "must not override protected sandbox path /tmp"},
 		{name: "broad nix target", path: "/nix", want: "must not override protected sandbox path /nix/store"},
 	}
 	for _, tt := range tests {
@@ -669,7 +670,7 @@ func TestBuildSpecPathHostEntriesRejectsUnsafeTargets(t *testing.T) {
 				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 			})
 
-			_, err := BuildSpec(project, Options{
+			_, err := buildSpecForTest(project, sandboxTestOptions{
 				RuntimeGOOS: goosLinux,
 				LookPath:    foundBwrap,
 				PathExists:  noHostPaths,
@@ -678,7 +679,7 @@ func TestBuildSpecPathHostEntriesRejectsUnsafeTargets(t *testing.T) {
 					tt.path: tt.path,
 				}, nil),
 				Environ: func() []string {
-					return []string{"PATH=" + tt.path, testEnvHomeUser}
+					return []string{"PATH=" + tt.path, "HOME=/home/user"}
 				},
 			})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -696,33 +697,33 @@ func TestBuildSpecPathHostEntriesSkipsPathsAlreadyUnderSystemMounts(t *testing.T
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
 		Stat: fakePathStat(map[string]bool{
-			"/etc":          true,
-			testNixUserBin:  true,
-			hostUsrDir:      true,
-			hostUsrBinDir:   true,
-			testExternalBin: true,
+			"/etc":                            true,
+			"/etc/profiles/per-user/matt/bin": true,
+			hostUsrDir:                        true,
+			hostUsrBinDir:                     true,
+			"/external/bin":                   true,
 		}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testNixUserBin:  testNixUserBin,
-			hostUsrBinDir:   hostUsrBinDir,
-			testExternalBin: testExternalBin,
+			"/etc/profiles/per-user/matt/bin": "/etc/profiles/per-user/matt/bin",
+			hostUsrBinDir:                     hostUsrBinDir,
+			"/external/bin":                   "/external/bin",
 		}, nil),
 		Environ: func() []string {
-			return []string{"PATH=/etc/profiles/per-user/matt/bin:/usr/bin:/external/bin", testEnvHomeUser}
+			return []string{"PATH=/etc/profiles/per-user/matt/bin:/usr/bin:/external/bin", "HOME=/home/user"}
 		},
 	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
 
-	assertNoPathMount(t, spec.Args, testNixUserBin, testNixUserBin)
+	assertNoPathMount(t, spec.Args, "/etc/profiles/per-user/matt/bin", "/etc/profiles/per-user/matt/bin")
 	assertNoPathMount(t, spec.Args, hostUsrBinDir, hostUsrBinDir)
-	assertPathMount(t, spec.Args, testExternalBin, testExternalBin)
+	assertPathMount(t, spec.Args, "/external/bin", "/external/bin")
 }
 
 func TestBuildSpecPathHostEntriesSkipsPathsAlreadyUnderMountedTrees(t *testing.T) {
@@ -733,31 +734,31 @@ func TestBuildSpecPathHostEntriesSkipsPathsAlreadyUnderMountedTrees(t *testing.T
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths("/repo/.beads"),
 		Stat: fakePathStat(map[string]bool{
-			testDirenvBin:   true,
-			testBeadsBin:    true,
-			testExternalBin: true,
+			"/repo/project/.direnv/bin": true,
+			"/repo/.beads/bin":          true,
+			"/external/bin":             true,
 		}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testDirenvBin:   testDirenvBin,
-			testBeadsBin:    testBeadsBin,
-			testExternalBin: testExternalBin,
+			"/repo/project/.direnv/bin": "/repo/project/.direnv/bin",
+			"/repo/.beads/bin":          "/repo/.beads/bin",
+			"/external/bin":             "/external/bin",
 		}, nil),
 		Environ: func() []string {
-			return []string{"PATH=/repo/project/.direnv/bin:/repo/.beads/bin:/external/bin", testEnvHomeUser}
+			return []string{"PATH=/repo/project/.direnv/bin:/repo/.beads/bin:/external/bin", "HOME=/home/user"}
 		},
 	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
 
-	assertNoPathMount(t, spec.Args, testDirenvBin, testDirenvBin)
-	assertNoPathMount(t, spec.Args, testBeadsBin, testBeadsBin)
-	assertPathMount(t, spec.Args, testExternalBin, testExternalBin)
+	assertNoPathMount(t, spec.Args, "/repo/project/.direnv/bin", "/repo/project/.direnv/bin")
+	assertNoPathMount(t, spec.Args, "/repo/.beads/bin", "/repo/.beads/bin")
+	assertPathMount(t, spec.Args, "/external/bin", "/external/bin")
 }
 
 func TestBuildSpecPathHostEntriesRejectsExplicitMountConflict(t *testing.T) {
@@ -767,20 +768,20 @@ func TestBuildSpecPathHostEntriesRejectsExplicitMountConflict(t *testing.T) {
 		Path:       config.SandboxPathConfig{Mode: config.SandboxPathModeHostEntries},
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		Mounts: []config.SandboxMount{
-			{Host: "/elsewhere/bin", Target: testPathOptToolBin, Mode: "ro"},
+			{Host: "/elsewhere/bin", Target: "/opt/tool/bin", Mode: "ro"},
 		},
 	})
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths("/elsewhere/bin"),
-		Stat:        fakePathStat(map[string]bool{testPathOptToolBin: true}),
+		Stat:        fakePathStat(map[string]bool{"/opt/tool/bin": true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testPathOptToolBin: testPathOptToolBin,
+			"/opt/tool/bin": "/opt/tool/bin",
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathOptToolEnv, testEnvHomeUser}
+			return []string{"PATH=/opt/tool/bin", "HOME=/home/user"}
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "conflicts with explicit sandbox mount target") {
@@ -799,23 +800,23 @@ func TestBuildSpecPathHostEntriesEmitsAutomaticMountsBeforeExplicitMounts(t *tes
 		},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths("/elsewhere/bin"),
-		Stat:        fakePathStat(map[string]bool{testPathOptToolBin: true}),
+		Stat:        fakePathStat(map[string]bool{"/opt/tool/bin": true}),
 		EvalSymlinks: fakeEvalSymlinks(map[string]string{
-			testPathOptToolBin: testPathOptToolBin,
+			"/opt/tool/bin": "/opt/tool/bin",
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathOptToolEnv, testEnvHomeUser}
+			return []string{"PATH=/opt/tool/bin", "HOME=/home/user"}
 		},
 	})
 	if err != nil {
 		t.Fatalf("BuildSpec returned error: %v", err)
 	}
 
-	pathMount := indexSequence(spec.Args, "--ro-bind", testPathOptToolBin, testPathOptToolBin)
+	pathMount := indexSequence(spec.Args, "--ro-bind", "/opt/tool/bin", "/opt/tool/bin")
 
 	explicitMount := indexSequence(spec.Args, "--ro-bind", "/elsewhere/bin", "/tools/bin")
 	if pathMount < 0 || explicitMount < 0 || pathMount > explicitMount {
@@ -834,7 +835,7 @@ func TestBuildSpecSkipsMissingOptionalExtraMount(t *testing.T) {
 		},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
@@ -857,11 +858,11 @@ func TestBuildSpecProtectedHostHomeRequiresResolvedHostHome(t *testing.T) {
 		Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv}
+			return []string{"PATH=/usr/bin"}
 		},
 		UserHomeDir: func() (string, error) {
 			return "relative-home", nil
@@ -891,7 +892,7 @@ func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
 			},
 		})
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ:     testEnv(filepath.Join(root, "home")),
@@ -914,7 +915,7 @@ func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
 			},
 		})
 
-		spec, err := BuildSpec(project, Options{
+		spec, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ:     testEnv(filepath.Join(root, "home")),
@@ -947,7 +948,7 @@ func TestBuildSpecProtectedPathsExplicitMounts(t *testing.T) {
 			},
 		})
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ:     testEnv(home),
@@ -962,7 +963,7 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 	t.Run("simple runtime mount conflict fails", func(t *testing.T) {
 		root := t.TempDir()
 
-		cache := filepath.Join(root, ".orc", "cache", testRuntimeCustom)
+		cache := filepath.Join(root, ".orc", "cache", "custom")
 		if err := os.MkdirAll(cache, 0o755); err != nil {
 			t.Fatalf("create cache: %v", err)
 		}
@@ -974,11 +975,11 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		}, config.RuntimeSandboxRequirements{
 			Mounts: []config.RuntimeSandboxMount{
-				{Host: testCustomCache, Target: config.RuntimeSandboxMountTarget{Path: "/workspace/cache"}, Mode: "ro"},
+				{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: "/workspace/cache"}, Mode: "ro"},
 			},
 		})
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ:     testEnv(filepath.Join(root, "home")),
@@ -990,7 +991,7 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 
 	t.Run("optional missing runtime mount is skipped", func(t *testing.T) {
 		root := t.TempDir()
-		cache := filepath.Join(root, ".orc", "cache", testRuntimeCustom)
+		cache := filepath.Join(root, ".orc", "cache", "custom")
 		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:            ".",
@@ -998,11 +999,11 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		}, config.RuntimeSandboxRequirements{
 			Mounts: []config.RuntimeSandboxMount{
-				{Host: testCustomCache, Target: config.RuntimeSandboxMountTarget{Path: "/workspace/cache"}, Mode: "ro", Optional: config.RequiredBool{Value: true, Set: true}},
+				{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: "/workspace/cache"}, Mode: "ro", Optional: config.RequiredBool{Value: true, Set: true}},
 			},
 		})
 
-		spec, err := BuildSpec(project, Options{
+		spec, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ:     testEnv(filepath.Join(root, "home")),
@@ -1029,13 +1030,13 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 			CWD:            ".",
 			ProtectedPaths: []config.SandboxProtectedPath{protectedAbsolute(source)},
 			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
-		}, runtimeRequirementsWithEnvMount(testCustomHomeEnv))
+		}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ: func() []string {
-				return []string{testPathUsrBinEnv, "HOME=" + root, "CUSTOM_HOME=" + source}
+				return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
 			},
 		})
 		if err == nil || !strings.Contains(err.Error(), `runtime "custom" sandbox.requirements.mounts[0].source`) || !strings.Contains(err.Error(), source) {
@@ -1046,18 +1047,18 @@ func TestBuildSpecProtectedPathsRuntimeMounts(t *testing.T) {
 	t.Run("create true checks protected path before creating source", func(t *testing.T) {
 		root := t.TempDir()
 		home := filepath.Join(root, "home")
-		source := filepath.Join(home, testDotCustom)
+		source := filepath.Join(home, ".custom")
 		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 			Command:        config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:            ".",
-			ProtectedPaths: []config.SandboxProtectedPath{protectedHostHome(testDotCustom)},
+			ProtectedPaths: []config.SandboxProtectedPath{protectedHostHome(".custom")},
 			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		}, fallbackRuntimeRequirements(true))
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
-			Environ:     func() []string { return []string{testPathUsrBinEnv, "HOME=" + home} },
+			Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
 		})
 		if err == nil || !strings.Contains(err.Error(), source) || !strings.Contains(err.Error(), "conflicts with sandbox.protected_paths") {
 			t.Fatalf("BuildSpec error = %v, want create protected source conflict", err)
@@ -1103,10 +1104,10 @@ func TestBuildSpecProtectedPathsPathHostEntriesSkipsWithWarning(t *testing.T) {
 		Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
-		Stderr:      stderr,
+		Options:     Options{Stderr: stderr},
 		Environ: func() []string {
 			return []string{"PATH=" + pathValue, "HOME=" + filepath.Join(root, "home")}
 		},
@@ -1144,7 +1145,7 @@ func TestBuildSpecProtectedPathsMissingPathWithoutMountSucceeds(t *testing.T) {
 		Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 
-	if _, err := BuildSpec(project, Options{
+	if _, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		Environ:     testEnv(filepath.Join(root, "home")),
@@ -1181,7 +1182,7 @@ func TestBuildSpecProtectedPathsSymlinkBehavior(t *testing.T) {
 			},
 		})
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ:     testEnv(filepath.Join(root, "home")),
@@ -1210,7 +1211,7 @@ func TestBuildSpecProtectedPathsSymlinkBehavior(t *testing.T) {
 			Bubblewrap:     config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		})
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
 			Environ:     testEnv(filepath.Join(root, "home")),
@@ -1223,39 +1224,39 @@ func TestBuildSpecProtectedPathsSymlinkBehavior(t *testing.T) {
 
 func TestBuildSpecIncludesSelectedRuntimeSandboxRequirements(t *testing.T) {
 	root := t.TempDir()
-	runtimeCache := filepath.Join(root, ".orc", "cache", testRuntimeCustom)
+	runtimeCache := filepath.Join(root, ".orc", "cache", "custom")
 	project := sandboxProject(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 	project.Workflows = map[string]config.Workflow{
-		testWorkflowImplementation: {
-			Defaults: config.Defaults{Runtime: testRuntimeCustom},
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "custom"},
 			Steps: map[string]config.Step{
-				testStepCode: {Agent: testAgentCoder},
+				"code": {Agent: "coder"},
 			},
 		},
 	}
 	project.Runtimes = map[string]config.Runtime{
-		testRuntimeCustom: {
-			ID: testRuntimeCustom,
+		"custom": {
+			ID: "custom",
 			Sandbox: config.RuntimeSandbox{
 				Supported: true,
 				Requirements: config.RuntimeSandboxRequirements{
 					Env: config.RuntimeSandboxEnvConfig{
 						Pass: []string{"CUSTOM_TOKEN"},
-						Set:  map[string]string{"ORC_RUNTIME": testRuntimeCustom},
+						Set:  map[string]string{"ORC_RUNTIME": "custom"},
 					},
 					Mounts: []config.RuntimeSandboxMount{
-						{Host: testCustomCache, Target: config.RuntimeSandboxMountTarget{Path: "/workspace/.orc/cache/custom"}, Mode: "rw"},
+						{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: "/workspace/.orc/cache/custom"}, Mode: "rw"},
 					},
 				},
 			},
 		},
 	}
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(runtimeCache),
@@ -1264,7 +1265,7 @@ func TestBuildSpecIncludesSelectedRuntimeSandboxRequirements(t *testing.T) {
 			runtimeCache: runtimeCache,
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + root, "CUSTOM_TOKEN=secret"}
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_TOKEN=secret"}
 		},
 	})
 	if err != nil {
@@ -1287,16 +1288,16 @@ func TestBuildSpecRejectsMissingRequiredRuntimeSandboxMount(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 	project.Workflows = map[string]config.Workflow{
-		testWorkflowImplementation: {
-			Defaults: config.Defaults{Runtime: testRuntimeCustom},
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "custom"},
 			Steps: map[string]config.Step{
-				testStepCode: {Agent: testAgentCoder},
+				"code": {Agent: "coder"},
 			},
 		},
 	}
 	project.Runtimes = map[string]config.Runtime{
-		testRuntimeCustom: {
-			ID: testRuntimeCustom,
+		"custom": {
+			ID: "custom",
 			Sandbox: config.RuntimeSandbox{
 				Supported: true,
 				Requirements: config.RuntimeSandboxRequirements{
@@ -1308,7 +1309,7 @@ func TestBuildSpecRejectsMissingRequiredRuntimeSandboxMount(t *testing.T) {
 		},
 	}
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  noHostPaths,
@@ -1328,17 +1329,17 @@ func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
 		{
 			name:   "repository target",
 			target: func(root string) string { return root },
-			want:   testRepoMountError,
+			want:   "must not override the repository mount",
 		},
 		{
 			name:   "repository child target",
 			target: func(root string) string { return filepath.Join(root, ".orc", "cache") },
-			want:   testRepoMountError,
+			want:   "must not override the repository mount",
 		},
 		{
 			name:   "repository ancestor target",
 			target: filepath.Dir,
-			want:   testRepoMountError,
+			want:   "must not override the repository mount",
 		},
 		{
 			name:   "beads target",
@@ -1348,7 +1349,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
 		{
 			name:   "protected tmp target",
 			target: func(string) string { return "/tmp/cache" },
-			want:   testProtectedTmpError,
+			want:   "must not override protected sandbox path /tmp",
 		},
 		{
 			name:   "protected system ancestor target",
@@ -1359,35 +1360,35 @@ func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			runtimeCache := filepath.Join(root, ".orc", "cache", testRuntimeCustom)
+			runtimeCache := filepath.Join(root, ".orc", "cache", "custom")
 			project := sandboxProject(root, config.SandboxConfig{
 				Command:    config.SandboxCommand{Argv: []string{"sh"}},
 				CWD:        ".",
 				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 			})
 			project.Workflows = map[string]config.Workflow{
-				testWorkflowImplementation: {
-					Defaults: config.Defaults{Runtime: testRuntimeCustom},
+				"implementation": {
+					Defaults: config.Defaults{Runtime: "custom"},
 					Steps: map[string]config.Step{
-						testStepCode: {Agent: testAgentCoder},
+						"code": {Agent: "coder"},
 					},
 				},
 			}
 			project.Runtimes = map[string]config.Runtime{
-				testRuntimeCustom: {
-					ID: testRuntimeCustom,
+				"custom": {
+					ID: "custom",
 					Sandbox: config.RuntimeSandbox{
 						Supported: true,
 						Requirements: config.RuntimeSandboxRequirements{
 							Mounts: []config.RuntimeSandboxMount{
-								{Host: testCustomCache, Target: config.RuntimeSandboxMountTarget{Path: tt.target(root)}, Mode: "ro"},
+								{Host: ".orc/cache/custom", Target: config.RuntimeSandboxMountTarget{Path: tt.target(root)}, Mode: "ro"},
 							},
 						},
 					},
 				},
 			}
 
-			_, err := BuildSpec(project, Options{
+			_, err := buildSpecForTest(project, sandboxTestOptions{
 				RuntimeGOOS: goosLinux,
 				LookPath:    foundBwrap,
 				PathExists:  onlyHostPaths(runtimeCache),
@@ -1402,7 +1403,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountProtectedTargets(t *testing.T) {
 
 func TestBuildSpecResolvesEnvSourcedRuntimeSandboxMount(t *testing.T) {
 	root := t.TempDir()
-	source := testCustomHomePath
+	source := "/opt/custom-home"
 	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
@@ -1410,28 +1411,28 @@ func TestBuildSpecResolvesEnvSourcedRuntimeSandboxMount(t *testing.T) {
 	}, config.RuntimeSandboxRequirements{
 		Env: config.RuntimeSandboxEnvConfig{
 			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
-				testCustomHomeEnv: {Mount: testMountConfigHome, Value: testMountTargetValue},
+				"CUSTOM_HOME": {Mount: "config_home", Value: "target"},
 			},
 		},
 		Mounts: []config.RuntimeSandboxMount{
 			{
-				ID: testMountConfigHome,
+				ID: "config_home",
 				Source: config.RuntimeSandboxMountSource{
-					Env: testCustomHomeEnv,
+					Env: "CUSTOM_HOME",
 					Fallback: config.RuntimeSandboxMountSourceFallback{
-						HostHome: testDotCustom,
+						HostHome: ".custom",
 					},
 				},
 				Target: config.RuntimeSandboxMountTarget{
 					EnvSameAsSource: true,
-					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: testDotCustom},
+					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: ".custom"},
 				},
 				Mode: "rw",
 			},
 		},
 	})
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(source),
@@ -1440,7 +1441,7 @@ func TestBuildSpecResolvesEnvSourcedRuntimeSandboxMount(t *testing.T) {
 			source: source,
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + root, "CUSTOM_HOME=" + source}
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
 		},
 	})
 	if err != nil {
@@ -1463,9 +1464,9 @@ func TestBuildSpecAllowsEnvSourcedSamePathRuntimeSandboxMountUnderHome(t *testin
 		CWD:        ".",
 		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeSynthetic},
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
-	}, runtimeRequirementsWithEnvMount(testCustomHomeEnv))
+	}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(source),
@@ -1474,7 +1475,7 @@ func TestBuildSpecAllowsEnvSourcedSamePathRuntimeSandboxMountUnderHome(t *testin
 			source: source,
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + root, "CUSTOM_HOME=" + source}
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
 		},
 	})
 	if err != nil {
@@ -1490,15 +1491,15 @@ func TestBuildSpecAllowsEnvSourcedSamePathRuntimeSandboxMountUnderHome(t *testin
 
 func TestBuildSpecRejectsEnvSourcedSamePathRuntimeSandboxMountOverRepository(t *testing.T) {
 	root := "/home/user/project"
-	source := testHomePath
+	source := "/home/user"
 	project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Home:       config.SandboxHomeConfig{Mode: config.SandboxHomeModeSynthetic},
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
-	}, runtimeRequirementsWithEnvMount(testCustomHomeEnv))
+	}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(source),
@@ -1507,10 +1508,10 @@ func TestBuildSpecRejectsEnvSourcedSamePathRuntimeSandboxMountOverRepository(t *
 			source: source,
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=/tmp/host-home", "CUSTOM_HOME=" + source}
+			return []string{"PATH=/usr/bin", "HOME=/tmp/host-home", "CUSTOM_HOME=" + source}
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), testRepoMountError) {
+	if err == nil || !strings.Contains(err.Error(), "must not override the repository mount") {
 		t.Fatalf("BuildSpec error = %v, want repository mount conflict", err)
 	}
 }
@@ -1518,31 +1519,31 @@ func TestBuildSpecRejectsEnvSourcedSamePathRuntimeSandboxMountOverRepository(t *
 func TestBuildSpecEnvFromMountUsesRuntimeScopedMountID(t *testing.T) {
 	root := t.TempDir()
 	recorderSource := "/opt/recorder-home"
-	customSource := testCustomHomePath
+	customSource := "/opt/custom-home"
 	project := sandboxProject(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 	project.Workflows = map[string]config.Workflow{
-		testWorkflowImplementation: {
-			Defaults: config.Defaults{Runtime: testRuntimeRecorder},
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "recorder"},
 			Steps: map[string]config.Step{
-				testStepCode: {Agent: testAgentCoder},
-				"review":     {Agent: "reviewer", Runtime: testRuntimeCustom},
+				"code":   {Agent: "coder"},
+				"review": {Agent: "reviewer", Runtime: "custom"},
 			},
 		},
 	}
 	project.Runtimes = map[string]config.Runtime{
-		testRuntimeCustom: {
-			ID: testRuntimeCustom,
+		"custom": {
+			ID: "custom",
 			Sandbox: config.RuntimeSandbox{
 				Supported:    true,
-				Requirements: runtimeRequirementsWithEnvMount(testCustomHomeEnv),
+				Requirements: runtimeRequirementsWithEnvMount("CUSTOM_HOME"),
 			},
 		},
-		testRuntimeRecorder: {
-			ID: testRuntimeRecorder,
+		"recorder": {
+			ID: "recorder",
 			Sandbox: config.RuntimeSandbox{
 				Supported:    true,
 				Requirements: runtimeRequirementsWithEnvMount("RECORDER_HOME"),
@@ -1550,7 +1551,7 @@ func TestBuildSpecEnvFromMountUsesRuntimeScopedMountID(t *testing.T) {
 		},
 	}
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(customSource, recorderSource),
@@ -1564,7 +1565,7 @@ func TestBuildSpecEnvFromMountUsesRuntimeScopedMountID(t *testing.T) {
 		}, nil),
 		Environ: func() []string {
 			return []string{
-				testPathUsrBinEnv,
+				"PATH=/usr/bin",
 				"HOME=" + root,
 				"CUSTOM_HOME=" + customSource,
 				"RECORDER_HOME=" + recorderSource,
@@ -1582,39 +1583,39 @@ func TestBuildSpecEnvFromMountUsesRuntimeScopedMountID(t *testing.T) {
 func TestBuildSpecRejectsConflictingEnvFromMountNamesAcrossRuntimes(t *testing.T) {
 	root := t.TempDir()
 	recorderSource := "/opt/recorder-home"
-	customSource := testCustomHomePath
+	customSource := "/opt/custom-home"
 	project := sandboxProject(root, config.SandboxConfig{
 		Command:    config.SandboxCommand{Argv: []string{"sh"}},
 		CWD:        ".",
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	})
 	project.Workflows = map[string]config.Workflow{
-		testWorkflowImplementation: {
-			Defaults: config.Defaults{Runtime: testRuntimeRecorder},
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "recorder"},
 			Steps: map[string]config.Step{
-				testStepCode: {Agent: testAgentCoder},
-				"review":     {Agent: "reviewer", Runtime: testRuntimeCustom},
+				"code":   {Agent: "coder"},
+				"review": {Agent: "reviewer", Runtime: "custom"},
 			},
 		},
 	}
 	project.Runtimes = map[string]config.Runtime{
-		testRuntimeCustom: {
-			ID: testRuntimeCustom,
+		"custom": {
+			ID: "custom",
 			Sandbox: config.RuntimeSandbox{
 				Supported:    true,
-				Requirements: runtimeRequirementsWithEnvMountSource(testCustomHomeEnv, "CUSTOM_SOURCE", testDotCustom),
+				Requirements: runtimeRequirementsWithEnvMountSource("CUSTOM_HOME", "CUSTOM_SOURCE", ".custom"),
 			},
 		},
-		testRuntimeRecorder: {
-			ID: testRuntimeRecorder,
+		"recorder": {
+			ID: "recorder",
 			Sandbox: config.RuntimeSandbox{
 				Supported:    true,
-				Requirements: runtimeRequirementsWithEnvMountSource(testCustomHomeEnv, "RECORDER_SOURCE", ".recorder"),
+				Requirements: runtimeRequirementsWithEnvMountSource("CUSTOM_HOME", "RECORDER_SOURCE", ".recorder"),
 			},
 		},
 	}
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(customSource, recorderSource),
@@ -1628,7 +1629,7 @@ func TestBuildSpecRejectsConflictingEnvFromMountNamesAcrossRuntimes(t *testing.T
 		}, nil),
 		Environ: func() []string {
 			return []string{
-				testPathUsrBinEnv,
+				"PATH=/usr/bin",
 				"HOME=" + root,
 				"CUSTOM_SOURCE=" + customSource,
 				"RECORDER_SOURCE=" + recorderSource,
@@ -1650,9 +1651,9 @@ func TestBuildSpecEnvFromMountResolvesDeduplicatedRuntimeMount(t *testing.T) {
 		Mounts: []config.SandboxMount{
 			{Host: source, Target: source, Mode: "rw"},
 		},
-	}, runtimeRequirementsWithEnvMount(testCustomHomeEnv))
+	}, runtimeRequirementsWithEnvMount("CUSTOM_HOME"))
 
-	spec, err := BuildSpec(project, Options{
+	spec, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(source),
@@ -1661,7 +1662,7 @@ func TestBuildSpecEnvFromMountResolvesDeduplicatedRuntimeMount(t *testing.T) {
 			source: source,
 		}, nil),
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + root, "CUSTOM_HOME=" + source}
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
 		},
 	})
 	if err != nil {
@@ -1684,7 +1685,7 @@ func TestBuildSpecRuntimeSandboxMountFallbackSources(t *testing.T) {
 			root := t.TempDir()
 			home := filepath.Join(root, "home")
 
-			source := filepath.Join(home, testDotCustom)
+			source := filepath.Join(home, ".custom")
 			if err := os.MkdirAll(source, 0o755); err != nil {
 				t.Fatalf("create fallback source: %v", err)
 			}
@@ -1695,12 +1696,12 @@ func TestBuildSpecRuntimeSandboxMountFallbackSources(t *testing.T) {
 				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 			}, fallbackRuntimeRequirements(false))
 
-			env := []string{testPathUsrBinEnv, "HOME=" + home}
+			env := []string{"PATH=/usr/bin", "HOME=" + home}
 			if tt.name != "unset" {
 				env = append(env, "CUSTOM_HOME="+tt.envValue)
 			}
 
-			spec, err := BuildSpec(project, Options{
+			spec, err := buildSpecForTest(project, sandboxTestOptions{
 				RuntimeGOOS: goosLinux,
 				LookPath:    foundBwrap,
 				Environ:     func() []string { return env },
@@ -1722,17 +1723,17 @@ func TestBuildSpecRuntimeSandboxMountCreateAndMissingBehavior(t *testing.T) {
 	t.Run("create true creates missing source", func(t *testing.T) {
 		root := t.TempDir()
 		home := filepath.Join(root, "home")
-		source := filepath.Join(home, testDotCustom)
+		source := filepath.Join(home, ".custom")
 		project := sandboxProjectWithRuntime(root, config.SandboxConfig{
 			Command:    config.SandboxCommand{Argv: []string{"sh"}},
 			CWD:        ".",
 			Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		}, fallbackRuntimeRequirements(true))
 
-		spec, err := BuildSpec(project, Options{
+		spec, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
-			Environ:     func() []string { return []string{testPathUsrBinEnv, "HOME=" + home} },
+			Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
 		})
 		if err != nil {
 			t.Fatalf("BuildSpec returned error: %v", err)
@@ -1756,10 +1757,10 @@ func TestBuildSpecRuntimeSandboxMountCreateAndMissingBehavior(t *testing.T) {
 			Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 		}, fallbackRuntimeRequirements(false))
 
-		_, err := BuildSpec(project, Options{
+		_, err := buildSpecForTest(project, sandboxTestOptions{
 			RuntimeGOOS: goosLinux,
 			LookPath:    foundBwrap,
-			Environ:     func() []string { return []string{testPathUsrBinEnv, "HOME=" + home} },
+			Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
 		})
 		if err == nil || !strings.Contains(err.Error(), `source resolved path`) || !strings.Contains(err.Error(), `does not exist`) {
 			t.Fatalf("BuildSpec error = %v, want missing source error", err)
@@ -1781,11 +1782,11 @@ func TestBuildSpecRejectsRuntimeSandboxMountSourceFile(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 	}, fallbackRuntimeRequirements(false))
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		Environ: func() []string {
-			return []string{testPathUsrBinEnv, "HOME=" + root, "CUSTOM_HOME=" + source}
+			return []string{"PATH=/usr/bin", "HOME=" + root, "CUSTOM_HOME=" + source}
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), `must be a directory`) {
@@ -1800,13 +1801,13 @@ func TestBuildSpecRuntimeSandboxMountFallbackTargetsByHomeMode(t *testing.T) {
 		wantHome func(string) string
 	}{
 		{name: "synthetic", mode: config.SandboxHomeModeSynthetic, wantHome: func(string) string { return "/home/orc/.custom" }},
-		{name: "host path", mode: config.SandboxHomeModeHostPath, wantHome: func(home string) string { return filepath.Join(home, testDotCustom) }},
+		{name: "host path", mode: config.SandboxHomeModeHostPath, wantHome: func(home string) string { return filepath.Join(home, ".custom") }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			home := filepath.Join(root, "home")
 
-			source := filepath.Join(home, testDotCustom)
+			source := filepath.Join(home, ".custom")
 			if err := os.MkdirAll(source, 0o755); err != nil {
 				t.Fatalf("create fallback source: %v", err)
 			}
@@ -1818,10 +1819,10 @@ func TestBuildSpecRuntimeSandboxMountFallbackTargetsByHomeMode(t *testing.T) {
 				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 			}, fallbackRuntimeRequirements(false))
 
-			spec, err := BuildSpec(project, Options{
+			spec, err := buildSpecForTest(project, sandboxTestOptions{
 				RuntimeGOOS: goosLinux,
 				LookPath:    foundBwrap,
-				Environ:     func() []string { return []string{testPathUsrBinEnv, "HOME=" + home} },
+				Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
 			})
 			if err != nil {
 				t.Fatalf("BuildSpec returned error: %v", err)
@@ -1868,7 +1869,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountActiveConflicts(t *testing.T) {
 				CWD:        ".",
 				Bubblewrap: config.BubblewrapConfig{Enabled: true, Network: config.RequiredBool{Value: true, Set: true}},
 			},
-			want: testProtectedTmpError,
+			want: "must not override protected sandbox path /tmp",
 		},
 	}
 	for _, tt := range tests {
@@ -1876,7 +1877,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountActiveConflicts(t *testing.T) {
 			root := t.TempDir()
 			home := filepath.Join(root, "home")
 
-			source := filepath.Join(home, testDotCustom)
+			source := filepath.Join(home, ".custom")
 			if err := os.MkdirAll(source, 0o755); err != nil {
 				t.Fatalf("create fallback source: %v", err)
 			}
@@ -1893,10 +1894,10 @@ func TestBuildSpecRejectsRuntimeSandboxMountActiveConflicts(t *testing.T) {
 
 			project := sandboxProjectWithRuntime(root, tt.sandbox, requirements)
 
-			_, err := BuildSpec(project, Options{
+			_, err := buildSpecForTest(project, sandboxTestOptions{
 				RuntimeGOOS: goosLinux,
 				LookPath:    foundBwrap,
-				Environ:     func() []string { return []string{testPathUsrBinEnv, "HOME=" + home} },
+				Environ:     func() []string { return []string{"PATH=/usr/bin", "HOME=" + home} },
 			})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("BuildSpec error = %v, want %q", err, tt.want)
@@ -1925,7 +1926,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountAutomaticPathConflict(t *testing.T) 
 		},
 	})
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath:    foundBwrap,
 		PathExists:  onlyHostPaths(source),
@@ -1943,7 +1944,7 @@ func TestBuildSpecRejectsRuntimeSandboxMountAutomaticPathConflict(t *testing.T) 
 }
 
 func TestBuildSpecRejectsMissingSandboxConfig(t *testing.T) {
-	_, err := BuildSpec(&config.Project{Root: t.TempDir()}, Options{RuntimeGOOS: goosLinux, LookPath: foundBwrap})
+	_, err := buildSpecForTest(&config.Project{Root: t.TempDir()}, sandboxTestOptions{RuntimeGOOS: goosLinux, LookPath: foundBwrap})
 	if err == nil || !strings.Contains(err.Error(), "sandbox config is required") {
 		t.Fatalf("BuildSpec error = %v, want missing sandbox config error", err)
 	}
@@ -1957,7 +1958,7 @@ func TestBuildSpecRejectsUnsupportedPlatformBeforeBwrapLookup(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true},
 	})
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: "darwin",
 		LookPath: func(string) (string, error) {
 			called = true
@@ -1980,7 +1981,7 @@ func TestBuildSpecRejectsMissingBwrap(t *testing.T) {
 		Bubblewrap: config.BubblewrapConfig{Enabled: true},
 	})
 
-	_, err := BuildSpec(project, Options{
+	_, err := buildSpecForTest(project, sandboxTestOptions{
 		RuntimeGOOS: goosLinux,
 		LookPath: func(string) (string, error) {
 			return "", exec.ErrNotFound
@@ -1993,7 +1994,7 @@ func TestBuildSpecRejectsMissingBwrap(t *testing.T) {
 
 func TestRunSpecReturnsChildExitStatus(t *testing.T) {
 	err := runSpec(context.Background(), BwrapSpec{
-		Path: testBinSh,
+		Path: "/bin/sh",
 		Args: []string{"-c", "exit 7"},
 		CWD:  t.TempDir(),
 		Env:  os.Environ(),
@@ -2011,7 +2012,7 @@ func TestRunSpecReturnsChildExitStatus(t *testing.T) {
 
 func TestRunSpecReturnsSignalExitStatus(t *testing.T) {
 	err := runSpec(context.Background(), BwrapSpec{
-		Path: testBinSh,
+		Path: "/bin/sh",
 		Args: []string{"-c", "kill -TERM $$"},
 		CWD:  t.TempDir(),
 		Env:  os.Environ(),
@@ -2034,7 +2035,7 @@ func TestRunSpecCancelsInteractiveProcess(t *testing.T) {
 
 	go func() {
 		done <- runSpec(ctx, BwrapSpec{
-			Path: testBinSh,
+			Path: "/bin/sh",
 			Args: []string{"-c", "while :; do sleep 1; done"},
 			CWD:  root,
 			Env:  os.Environ(),
@@ -2066,16 +2067,16 @@ func sandboxProject(root string, sandboxConfig config.SandboxConfig) *config.Pro
 func sandboxProjectWithCodexRuntime(root string, sandboxConfig config.SandboxConfig) *config.Project {
 	project := sandboxProject(root, sandboxConfig)
 	project.Workflows = map[string]config.Workflow{
-		testWorkflowImplementation: {
-			Defaults: config.Defaults{Runtime: testRuntimeCodex},
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "codex"},
 			Steps: map[string]config.Step{
-				testStepCode: {Agent: testAgentCoder},
+				"code": {Agent: "coder"},
 			},
 		},
 	}
 	project.Runtimes = map[string]config.Runtime{
-		testRuntimeCodex: {
-			ID: testRuntimeCodex,
+		"codex": {
+			ID: "codex",
 			Sandbox: config.RuntimeSandbox{
 				Supported:    true,
 				Requirements: codexRuntimeRequirements(),
@@ -2089,16 +2090,16 @@ func sandboxProjectWithCodexRuntime(root string, sandboxConfig config.SandboxCon
 func sandboxProjectWithRuntime(root string, sandboxConfig config.SandboxConfig, requirements config.RuntimeSandboxRequirements) *config.Project {
 	project := sandboxProject(root, sandboxConfig)
 	project.Workflows = map[string]config.Workflow{
-		testWorkflowImplementation: {
-			Defaults: config.Defaults{Runtime: testRuntimeCustom},
+		"implementation": {
+			Defaults: config.Defaults{Runtime: "custom"},
 			Steps: map[string]config.Step{
-				testStepCode: {Agent: testAgentCoder},
+				"code": {Agent: "coder"},
 			},
 		},
 	}
 	project.Runtimes = map[string]config.Runtime{
-		testRuntimeCustom: {
-			ID: testRuntimeCustom,
+		"custom": {
+			ID: "custom",
 			Sandbox: config.RuntimeSandbox{
 				Supported:    true,
 				Requirements: requirements,
@@ -2113,12 +2114,12 @@ func codexRuntimeRequirements() config.RuntimeSandboxRequirements {
 	return config.RuntimeSandboxRequirements{
 		Env: config.RuntimeSandboxEnvConfig{
 			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
-				"CODEX_HOME": {Mount: testMountConfigHome, Value: testMountTargetValue},
+				"CODEX_HOME": {Mount: "config_home", Value: "target"},
 			},
 		},
 		Mounts: []config.RuntimeSandboxMount{
 			{
-				ID: testMountConfigHome,
+				ID: "config_home",
 				Source: config.RuntimeSandboxMountSource{
 					Env:    "CODEX_HOME",
 					Create: true,
@@ -2137,19 +2138,19 @@ func codexRuntimeRequirements() config.RuntimeSandboxRequirements {
 }
 
 func runtimeRequirementsWithEnvMount(envName string) config.RuntimeSandboxRequirements {
-	return runtimeRequirementsWithEnvMountSource(envName, envName, testDotCustom)
+	return runtimeRequirementsWithEnvMountSource(envName, envName, ".custom")
 }
 
 func runtimeRequirementsWithEnvMountSource(envName, sourceEnv, fallback string) config.RuntimeSandboxRequirements {
 	return config.RuntimeSandboxRequirements{
 		Env: config.RuntimeSandboxEnvConfig{
 			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
-				envName: {Mount: testMountConfigHome, Value: testMountTargetValue},
+				envName: {Mount: "config_home", Value: "target"},
 			},
 		},
 		Mounts: []config.RuntimeSandboxMount{
 			{
-				ID: testMountConfigHome,
+				ID: "config_home",
 				Source: config.RuntimeSandboxMountSource{
 					Env: sourceEnv,
 					Fallback: config.RuntimeSandboxMountSourceFallback{
@@ -2170,22 +2171,22 @@ func fallbackRuntimeRequirements(create bool) config.RuntimeSandboxRequirements 
 	return config.RuntimeSandboxRequirements{
 		Env: config.RuntimeSandboxEnvConfig{
 			SetFromMount: map[string]config.RuntimeEnvFromMountRef{
-				testCustomHomeEnv: {Mount: testMountConfigHome, Value: testMountTargetValue},
+				"CUSTOM_HOME": {Mount: "config_home", Value: "target"},
 			},
 		},
 		Mounts: []config.RuntimeSandboxMount{
 			{
-				ID: testMountConfigHome,
+				ID: "config_home",
 				Source: config.RuntimeSandboxMountSource{
-					Env:    testCustomHomeEnv,
+					Env:    "CUSTOM_HOME",
 					Create: create,
 					Fallback: config.RuntimeSandboxMountSourceFallback{
-						HostHome: testDotCustom,
+						HostHome: ".custom",
 					},
 				},
 				Target: config.RuntimeSandboxMountTarget{
 					EnvSameAsSource: true,
-					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: testDotCustom},
+					Fallback:        config.RuntimeSandboxMountTargetFallback{SandboxHome: ".custom"},
 				},
 				Mode: "rw",
 			},
@@ -2201,8 +2202,63 @@ func protectedAbsolute(path string) config.SandboxProtectedPath {
 	return config.SandboxProtectedPath{Absolute: path, AbsoluteSet: true}
 }
 
+type sandboxTestOptions struct {
+	Options
+	RuntimeGOOS  string
+	LookPath     func(string) (string, error)
+	PathExists   func(string) bool
+	LstatExists  func(string) bool
+	Stat         func(string) (os.FileInfo, error)
+	EvalSymlinks func(string) (string, error)
+	Environ      func() []string
+	UserHomeDir  func() (string, error)
+	MkdirAll     func(string, os.FileMode) error
+}
+
+func buildSpecForTest(project *config.Project, opts sandboxTestOptions) (BwrapSpec, error) {
+	ops := defaultHostOps()
+
+	if opts.RuntimeGOOS != "" {
+		ops.goos = opts.RuntimeGOOS
+	}
+
+	if opts.LookPath != nil {
+		ops.lookPath = opts.LookPath
+	}
+
+	if opts.PathExists != nil {
+		ops.pathExists = opts.PathExists
+	}
+
+	if opts.LstatExists != nil {
+		ops.lstatExists = opts.LstatExists
+	}
+
+	if opts.Stat != nil {
+		ops.stat = opts.Stat
+	}
+
+	if opts.EvalSymlinks != nil {
+		ops.evalSymlinks = opts.EvalSymlinks
+	}
+
+	if opts.Environ != nil {
+		ops.environ = opts.Environ
+	}
+
+	if opts.UserHomeDir != nil {
+		ops.userHomeDir = opts.UserHomeDir
+	}
+
+	if opts.MkdirAll != nil {
+		ops.mkdirAll = opts.MkdirAll
+	}
+
+	return buildSpec(project, opts.Options, ops)
+}
+
 func foundBwrap(string) (string, error) {
-	return testBwrapPath, nil
+	return "/usr/bin/bwrap", nil
 }
 
 func noHostPaths(string) bool {
@@ -2262,7 +2318,7 @@ func fakeEvalSymlinks(resolved map[string]string, failures map[string]error) fun
 
 func testEnv(home string) func() []string {
 	return func() []string {
-		return []string{testPathUsrBinEnv, "HOME=" + home}
+		return []string{"PATH=/usr/bin", "HOME=" + home}
 	}
 }
 

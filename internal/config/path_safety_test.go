@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package config
 
 import (
@@ -28,7 +29,7 @@ sandbox:
 		t.Fatal("sandbox config was nil")
 	}
 
-	if got, want := project.Config.Sandbox.Command.Argv, []string{testRuntimeCodex}; !slices.Equal(got, want) {
+	if got, want := project.Config.Sandbox.Command.Argv, []string{"codex"}; !slices.Equal(got, want) {
 		t.Fatalf("sandbox command argv = %v, want %v", got, want)
 	}
 

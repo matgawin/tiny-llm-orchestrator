@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package vcs
 
 import (
@@ -23,7 +24,7 @@ case "$1" in
   *) exit 2;;
 esac
 `,
-		testVCSGit: `#!/bin/sh
+		"git": `#!/bin/sh
 printf 'git should not be used\n' >&2
 exit 9
 `,
@@ -51,7 +52,7 @@ exit 9
 		t.Fatalf("summary = %q, want clean jj status output", snapshot.Summary)
 	}
 
-	if got := snapshot.Commands[len(snapshot.Commands)-1]; strings.Join(got, " ") != wantJJStatusCommand {
+	if got := snapshot.Commands[len(snapshot.Commands)-1]; strings.Join(got, " ") != "jj status" {
 		t.Fatalf("last command = %v, want jj status", got)
 	}
 }
@@ -81,7 +82,7 @@ func TestInspectPreRunFallsBackToGit(t *testing.T) {
 printf 'Error: No jj repo found\n' >&2
 exit 1
 `,
-		testVCSGit: `#!/bin/sh
+		"git": `#!/bin/sh
 case "$*" in
   "rev-parse --show-toplevel") printf '%s\n' "$PWD";;
   "status --porcelain=v1 -z --untracked-files=all") printf ' M internal/runstart/runstart.go\0?? docs/features/run-start.md\0R  new.md\0old.md\0?? docs/space path.md\0';;
@@ -139,7 +140,7 @@ func TestInspectPreRunRejectsBrokenGitProbeAfterJJUnavailable(t *testing.T) {
 printf 'No jj repo found\n' >&2
 exit 1
 `,
-		testVCSGit: `#!/bin/sh
+		"git": `#!/bin/sh
 printf 'permission denied reading git metadata\n' >&2
 exit 1
 `,
@@ -163,7 +164,7 @@ func TestInspectPreRunNoVCS(t *testing.T) {
 printf 'No jj repo found\n' >&2
 exit 1
 `,
-		testVCSGit: `#!/bin/sh
+		"git": `#!/bin/sh
 printf 'fatal: not a git repository\n' >&2
 exit 1
 `,
@@ -256,8 +257,8 @@ func assertJJDirtySnapshot(t *testing.T, snapshot Snapshot) {
 	}
 
 	if len(snapshot.Commands) != 2 ||
-		strings.Join(snapshot.Commands[0], " ") != wantJJRootCommand ||
-		strings.Join(snapshot.Commands[1], " ") != wantJJStatusCommand {
+		strings.Join(snapshot.Commands[0], " ") != "jj root" ||
+		strings.Join(snapshot.Commands[1], " ") != "jj status" {
 		t.Fatalf("commands = %+v, want jj root and jj status", snapshot.Commands)
 	}
 

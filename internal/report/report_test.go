@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package report
 
 import (
@@ -27,7 +28,7 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    "skip-report-run",
-		Workflow: reportWorkflowName,
+		Workflow: "implementation",
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -41,10 +42,10 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 		Root: root,
 		Report: runstore.Report{
 			RunID:     run.ID,
-			StepID:    reportStepPlan,
-			AgentID:   reportAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: "attempt-001",
-			Status:    reportStatusDone,
+			Status:    "done",
 			Result:    "skipped",
 			Summary:   "Skipping this step.",
 		},
@@ -58,7 +59,7 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 		t.Fatalf("error = %v, want reserved skip outcome rejection", err)
 	}
 
-	if result.Attempt.State != runstore.AttemptStateInvalidReport || result.Attempt.Status != reportStatusFailed || result.Attempt.Result != runstore.AttemptResultInvalidReport {
+	if result.Attempt.State != runstore.AttemptStateInvalidReport || result.Attempt.Status != "failed" || result.Attempt.Result != runstore.AttemptResultInvalidReport {
 		t.Fatalf("attempt = %+v, want failed/invalid_report", result.Attempt)
 	}
 
@@ -68,7 +69,7 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	}
 
 	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
-	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != reportStatusFailed || attempt.Result != runstore.AttemptResultInvalidReport {
+	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != "failed" || attempt.Result != runstore.AttemptResultInvalidReport {
 		t.Fatalf("persisted attempt = %+v, want failed/invalid_report", attempt)
 	}
 }
@@ -84,7 +85,7 @@ func TestSubmitValidatesReportAgainstPinnedWorkflowAfterLiveMutation(t *testing.
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    "pinned-report-run",
-		Workflow: reportWorkflowName,
+		Workflow: "implementation",
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -118,11 +119,11 @@ steps:
 		Root: root,
 		Report: runstore.Report{
 			RunID:     run.ID,
-			StepID:    reportStepPlan,
-			AgentID:   reportAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: "attempt-1",
-			Status:    reportStatusDone,
-			Result:    reportResultReady,
+			Status:    "done",
+			Result:    "ready",
 			Summary:   "Pinned workflow accepted this.",
 		},
 		Time: time.Date(2026, 5, 4, 12, 1, 0, 0, time.UTC),
@@ -144,7 +145,7 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    "race-report-run",
-		Workflow: reportWorkflowName,
+		Workflow: "implementation",
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -153,11 +154,11 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 
 	report := runstore.Report{
 		RunID:     run.ID,
-		StepID:    reportStepPlan,
-		AgentID:   reportAgentPlanner,
+		StepID:    "plan",
+		AgentID:   "planner",
 		AttemptID: "stale-attempt",
-		Status:    reportStatusDone,
-		Result:    reportResultReady,
+		Status:    "done",
+		Result:    "ready",
 		Summary:   "Stale report.",
 	}
 	err = &runstore.ReportTargetError{
@@ -175,7 +176,7 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 		t.Fatalf("result error = %v, want original target error", result.Err)
 	}
 
-	if result.Event.Type != reportIgnoredEvent {
+	if result.Event.Type != "report.ignored" {
 		t.Fatalf("event type = %q, want report.ignored", result.Event.Type)
 	}
 
@@ -184,7 +185,7 @@ func TestRecordTargetRaceAsIgnoredRecordsIgnoredEvent(t *testing.T) {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
 
-	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+	if got := loaded.Events[len(loaded.Events)-1].Type; got != "report.ignored" {
 		t.Fatalf("last event type = %q, want report.ignored", got)
 	}
 }
@@ -203,7 +204,7 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    "race-submit-run",
-		Workflow: reportWorkflowName,
+		Workflow: "implementation",
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -215,11 +216,11 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 
 	report := runstore.Report{
 		RunID:     run.ID,
-		StepID:    reportStepPlan,
-		AgentID:   reportAgentPlanner,
+		StepID:    "plan",
+		AgentID:   "planner",
 		AttemptID: "attempt-001",
-		Status:    reportStatusDone,
-		Result:    reportResultReady,
+		Status:    "done",
+		Result:    "ready",
 		Summary:   "Plan is ready.",
 	}
 
@@ -258,7 +259,7 @@ func TestSubmitRecordsIgnoredEventWhenTargetChangesBeforeStoreWrite(t *testing.T
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
 
-	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+	if got := loaded.Events[len(loaded.Events)-1].Type; got != "report.ignored" {
 		t.Fatalf("last event type = %q, want report.ignored", got)
 	}
 }
@@ -271,7 +272,7 @@ func writeReportConfigSnapshot(t *testing.T, root string, store *runstore.Store,
 		t.Fatalf("Load config returned error: %v", err)
 	}
 
-	snapshot, err := configsnapshot.BuildInitial(project, reportWorkflowName, time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
@@ -327,8 +328,8 @@ func startActiveAttempt(t *testing.T, store *runstore.Store, runID, attemptID st
 	t.Helper()
 
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-		StepID:          reportStepPlan,
-		AgentID:         reportAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       attemptID,
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,

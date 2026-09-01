@@ -20,21 +20,30 @@ var conventionalSubjectPattern = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9-]*)(\(
 
 const shortSHALength = 7
 
+const (
+	breakingSectionIndex = iota
+	featureSectionIndex
+	fixSectionIndex
+	performanceSectionIndex
+	documentationSectionIndex
+	ciSectionIndex
+	maintenanceSectionIndex
+)
+
 type section struct {
 	title   string
-	types   map[string]struct{}
 	entries []string
 }
 
 func Markdown(commits []Commit, opts Options) string {
 	sections := []section{
 		{title: "Breaking Changes"},
-		{title: "Features", types: typeSet("feat")},
-		{title: "Fixes", types: typeSet("fix")},
-		{title: "Performance", types: typeSet("perf")},
-		{title: "Documentation", types: typeSet("docs")},
-		{title: "CI", types: typeSet("ci")},
-		{title: "Maintenance", types: typeSet("refactor", "chore", "build", "test")},
+		{title: "Features"},
+		{title: "Fixes"},
+		{title: "Performance"},
+		{title: "Documentation"},
+		{title: "CI"},
+		{title: "Maintenance"},
 		{title: "Other Changes"},
 	}
 
@@ -69,18 +78,29 @@ func Markdown(commits []Commit, opts Options) string {
 func sectionIndex(commit Commit, sections []section) int {
 	commitType, subjectBreaking, conventional := parseSubject(commit.Subject)
 	if subjectBreaking || hasBreakingFooter(commit.Body) {
-		return 0
+		return breakingSectionIndex
 	}
 
-	if conventional {
-		for i := 1; i < len(sections)-1; i++ {
-			if _, ok := sections[i].types[commitType]; ok {
-				return i
-			}
-		}
+	if !conventional {
+		return len(sections) - 1
 	}
 
-	return len(sections) - 1
+	switch commitType {
+	case "feat":
+		return featureSectionIndex
+	case "fix":
+		return fixSectionIndex
+	case "perf":
+		return performanceSectionIndex
+	case "docs":
+		return documentationSectionIndex
+	case "ci":
+		return ciSectionIndex
+	case "refactor", "chore", "build", "test":
+		return maintenanceSectionIndex
+	default:
+		return len(sections) - 1
+	}
 }
 
 func parseSubject(subject string) (string, bool, bool) {
@@ -113,13 +133,4 @@ func entry(commit Commit, repositoryURL string) string {
 	}
 
 	return fmt.Sprintf("%s ([%s](%s/commit/%s))", commit.Subject, shortSHA, strings.TrimRight(repositoryURL, "/"), commit.SHA)
-}
-
-func typeSet(types ...string) map[string]struct{} {
-	set := make(map[string]struct{}, len(types))
-	for _, commitType := range types {
-		set[commitType] = struct{}{}
-	}
-
-	return set
 }

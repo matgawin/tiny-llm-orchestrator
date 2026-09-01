@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -32,8 +33,8 @@ func seedLauncherAttempt(t *testing.T, store *runstore.Store, runID, attemptID s
 	t.Helper()
 
 	attempt, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-		StepID:          launcherPlanStep,
-		AgentID:         launcherAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       attemptID,
 		Timeout:         timeout,
 		ReportExitGrace: 30 * time.Millisecond,
@@ -115,7 +116,7 @@ func createCommandLauncherRun(t *testing.T, opts commandWorkflowOptions) (string
 	}
 
 	if opts.Kind == config.StepKindCommand && len(opts.Argv) == 0 {
-		opts.Argv = []string{"sh", "-c", launcherCommandTrue}
+		opts.Argv = []string{"sh", "-c", "true"}
 	}
 
 	root := t.TempDir()
@@ -124,7 +125,7 @@ func createCommandLauncherRun(t *testing.T, opts commandWorkflowOptions) (string
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "launcher-run",
-		Workflow:     launcherWorkflowImplementation,
+		Workflow:     "implementation",
 		InitialState: "check",
 		Time:         fixedLauncherTime(),
 	})
@@ -145,8 +146,8 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "launcher-run",
-		Workflow:     launcherWorkflowImplementation,
-		InitialState: launcherPlanStep,
+		Workflow:     "implementation",
+		InitialState: "plan",
 		Time:         fixedLauncherTime(),
 	})
 	if err != nil {
@@ -158,7 +159,7 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	if opts.TaskContext {
 		if _, err := store.WriteArtifactContext(context.Background(), run.ID, runstore.Artifact{
 			Kind:    runstore.KindTaskContext,
-			Name:    launcherTaskArtifactName,
+			Name:    "task",
 			Content: []byte("# Task\n\nLaunch a worker.\n"),
 			Time:    fixedLauncherTime(),
 		}); err != nil {
@@ -177,8 +178,8 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "loop-cap-run",
-		Workflow:     launcherWorkflowImplementation,
-		InitialState: launcherPlanStep,
+		Workflow:     "implementation",
+		InitialState: "plan",
 		Time:         fixedLauncherTime(),
 	})
 	if err != nil {
@@ -189,7 +190,7 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 
 	if _, err := store.WriteArtifactContext(context.Background(), run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
-		Name:    launcherTaskArtifactName,
+		Name:    "task",
 		Content: []byte("# Task\n\nBreak the workflow loop.\n"),
 		Time:    fixedLauncherTime(),
 	}); err != nil {
@@ -207,7 +208,7 @@ func writeLauncherConfigSnapshot(t *testing.T, root string, store *runstore.Stor
 		t.Fatalf("Load config returned error: %v", err)
 	}
 
-	snapshot, err := configsnapshot.BuildInitial(project, launcherWorkflowImplementation, fixedLauncherTime())
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", fixedLauncherTime())
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
@@ -288,8 +289,8 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 	t.Helper()
 
 	req := runstore.StartAttemptRequest{
-		StepID:           launcherPlanStep,
-		AgentID:          launcherAgentPlanner,
+		StepID:           "plan",
+		AgentID:          "planner",
 		AttemptID:        attemptID,
 		Timeout:          200 * time.Millisecond,
 		ReportExitGrace:  30 * time.Millisecond,
@@ -298,10 +299,10 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 	}
 	if consumeAttemptID != "" {
 		req.WorkflowStateEntry = runstore.WorkflowStateEntryRequest{
-			State:         launcherPlanStep,
-			PreviousState: launcherPlanStep,
-			TriggerStatus: launcherStatusDone,
-			TriggerResult: launcherResultReady,
+			State:         "plan",
+			PreviousState: "plan",
+			TriggerStatus: "done",
+			TriggerResult: "ready",
 		}
 	}
 
@@ -311,7 +312,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 
 	promptRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
-		Name:    launcherPlanStep,
+		Name:    "plan",
 		Content: []byte("prompt\n"),
 		Time:    fixedLauncherTime().Add(250 * time.Millisecond),
 	})
@@ -329,7 +330,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 
 	logRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
-		Name:    launcherPlanStep,
+		Name:    "plan",
 		Content: []byte("log\n"),
 		Time:    fixedLauncherTime().Add(350 * time.Millisecond),
 	})
@@ -358,11 +359,11 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    launcherPlanStep,
-			AgentID:   launcherAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: attemptID,
-			Status:    launcherStatusDone,
-			Result:    launcherResultReady,
+			Status:    "done",
+			Result:    "ready",
 			Summary:   "Ready to continue.",
 		},
 		Time: fixedLauncherTime().Add(time.Second),
@@ -502,7 +503,7 @@ func appendLauncherSandboxConfig(t *testing.T, root string, requireForWorkers bo
 
 	require := "false"
 	if requireForWorkers {
-		require = launcherCommandTrue
+		require = "true"
 	}
 
 	writeLauncherFile(t, configPath, content+`sandbox:
@@ -601,8 +602,8 @@ func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runc
 	}
 
 	attempt, _, err := loaded.Store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-		StepID:          launcherPlanStep,
-		AgentID:         launcherAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       attemptID,
 		Timeout:         loaded.Workflow.Defaults.Timeout.Duration,
 		ReportExitGrace: loaded.Workflow.Defaults.ReportExitGrace.Duration,
@@ -658,7 +659,7 @@ func runProcessWithScheduledReadyReport(t *testing.T, scenario scheduledReadyRep
 		t.Fatalf("runProcess returned error: %v", err)
 	}
 
-	if result.State != runstore.AttemptStateReported || result.Status != launcherStatusDone || result.Result != launcherResultReady {
+	if result.State != runstore.AttemptStateReported || result.Status != "done" || result.Result != "ready" {
 		t.Fatalf("attempt = %+v, want valid report authoritative", result)
 	}
 
@@ -717,8 +718,8 @@ func recordReadyLauncherReport(store *runstore.Store, run *runstore.Run, attempt
 			StepID:    run.Status.ActiveAttempt.StepID,
 			AgentID:   run.Status.ActiveAttempt.AgentID,
 			AttemptID: attemptID,
-			Status:    launcherStatusDone,
-			Result:    launcherResultReady,
+			Status:    "done",
+			Result:    "ready",
 			Summary:   "Reported while process is running.",
 		},
 		Time: fixedLauncherTime().Add(time.Second),

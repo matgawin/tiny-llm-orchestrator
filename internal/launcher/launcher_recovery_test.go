@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -18,8 +19,8 @@ func TestLaunchNextRefusesFreshPIDLessStartingAttempt(t *testing.T) {
 
 	store := openLauncherStore(t, root)
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-		StepID:          launcherPlanStep,
-		AgentID:         launcherAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       "starting-attempt",
 		Timeout:         200 * time.Millisecond,
 		ReportExitGrace: 30 * time.Millisecond,
@@ -28,7 +29,7 @@ func TestLaunchNextRefusesFreshPIDLessStartingAttempt(t *testing.T) {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
+	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
 	if err == nil || !strings.Contains(err.Error(), "already has starting attempt") {
 		t.Fatalf("LaunchNext error = %v, want starting attempt refusal", err)
 	}
@@ -49,7 +50,7 @@ func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
+		Command: []string{"sh", "-c", "cat"},
 		Stdout:  &stdout,
 	})
 	if err != nil {
@@ -92,7 +93,7 @@ func TestLaunchNextRecoveryPreservesExistingLogRef(t *testing.T) {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestLaunchNextRefusesLiveActiveAttempt(t *testing.T) {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
-	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
+	_, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
 	if err == nil || !strings.Contains(err.Error(), "already has active attempt") {
 		t.Fatalf("LaunchNext error = %v, want active attempt refusal", err)
 	}
@@ -138,7 +139,7 @@ func TestLaunchNextRecoversWhenPIDIdentityDoesNotMatch(t *testing.T) {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestLaunchNextRecoversExpiredLiveAttemptAsTimeout(t *testing.T) {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestLaunchNextRecoversUnverifiableActiveAttempt(t *testing.T) {
 	store := openLauncherStore(t, root)
 	seedLauncherAttempt(t, store, runID, "orphaned-attempt", 200*time.Millisecond, fixedLauncherTime())
 
-	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{launcherShell, launcherShellFlag, launcherCommandCat}})
+	result, err := LaunchNext(context.Background(), Options{Root: root, RunID: runID, Command: []string{"sh", "-c", "cat"}})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}

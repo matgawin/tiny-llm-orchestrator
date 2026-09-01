@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -9,10 +10,10 @@ import (
 func TestExecuteRunContinueAllowsWorkflowLoopHardCapOnce(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	blockCLIWorkflowLoopHardCap(t, root, result.runID, cliStepPlan, 1, 2)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	blockCLIWorkflowLoopHardCap(t, root, result.runID, "plan", 1, 2)
 
-	output := executeCLICommand(t, []string{commandRun, cliCommandContinue, result.runID, cliFlagAllowLoopCap})
+	output := executeCLICommand(t, []string{commandRun, "continue", result.runID, "--allow-loop-cap"})
 	assertCLIOutputContainsAll(t, output, []string{
 		"continued run " + result.runID,
 		"allowed one entry into plan at count 2",
@@ -24,7 +25,7 @@ func TestExecuteRunContinueAllowsWorkflowLoopHardCapOnce(t *testing.T) {
 	}
 
 	override := loaded.Status.WorkflowLoop.PendingHardCapOverride
-	if override == nil || override.TargetState != cliStepPlan || override.CountBeforeOverride != 1 || override.CountAfterOverride != 2 || override.HumanAction != "allow_loop_cap" {
+	if override == nil || override.TargetState != "plan" || override.CountBeforeOverride != 1 || override.CountAfterOverride != 2 || override.HumanAction != "allow_loop_cap" {
 		t.Fatalf("pending override = %+v, want plan count 2 allow_loop_cap", override)
 	}
 }
@@ -32,11 +33,11 @@ func TestExecuteRunContinueAllowsWorkflowLoopHardCapOnce(t *testing.T) {
 func TestExecuteRunContinueFailsWithoutActiveWorkflowLoopHardCap(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 	before := loadCLIRun(t, root, result.runID)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandRun, cliCommandContinue, result.runID, cliFlagAllowLoopCap}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandRun, "continue", result.runID, "--allow-loop-cap"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want no-active-block failure")
 	}
 
@@ -56,12 +57,12 @@ func TestExecuteRunContinueFailsWithoutActiveWorkflowLoopHardCap(t *testing.T) {
 
 func TestExecuteRunContinueResolveBlockRetriesBlockedStep(t *testing.T) {
 	run := startCLIImplementationReportRun(t)
-	launchCLIWorkerReport(t, run.runID, ready(cliSummaryReady))
+	launchCLIWorkerReport(t, run.runID, ready("Plan is ready."))
 	launchCLIWorkerReport(t, run.runID, ready("Code is ready for tests."))
 	launchCLIWorkerReport(t, run.runID, blocked("Tests require network approval."))
 	terminalizeCLIWorkflow(t, run.root, run.runID, "blocked_for_human", 3, "Tests require network approval.")
 
-	output := executeCLICommand(t, []string{commandRun, cliCommandContinue, run.runID, cliFlagResolveBlock, "--reason= fixed network config "})
+	output := executeCLICommand(t, []string{commandRun, "continue", run.runID, "--resolve-block", "--reason= fixed network config "})
 	assertCLIOutputContainsAll(t, output, []string{
 		"continued run " + run.runID,
 		"after human-resolved block",
@@ -97,7 +98,7 @@ func TestExecuteRunContinueResolveBlockFlagValidation(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
 
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -105,27 +106,27 @@ func TestExecuteRunContinueResolveBlockFlagValidation(t *testing.T) {
 	}{
 		{
 			name: "mutually exclusive modes",
-			args: []string{commandRun, cliCommandContinue, result.runID, cliFlagAllowLoopCap, cliFlagResolveBlock, cliFlagReason, "fixed"},
+			args: []string{commandRun, "continue", result.runID, "--allow-loop-cap", "--resolve-block", "--reason", "fixed"},
 			want: []string{"mutually exclusive"},
 		},
 		{
 			name: "missing reason",
-			args: []string{commandRun, cliCommandContinue, result.runID, cliFlagResolveBlock},
+			args: []string{commandRun, "continue", result.runID, "--resolve-block"},
 			want: []string{"--reason is required"},
 		},
 		{
 			name: "whitespace reason",
-			args: []string{commandRun, cliCommandContinue, result.runID, cliFlagResolveBlock, cliFlagReason, " \t "},
+			args: []string{commandRun, "continue", result.runID, "--resolve-block", "--reason", " \t "},
 			want: []string{"non-empty after trimming"},
 		},
 		{
 			name: "repeated reason",
-			args: []string{commandRun, cliCommandContinue, result.runID, cliFlagResolveBlock, cliFlagReason, "one", "--reason=two"},
+			args: []string{commandRun, "continue", result.runID, "--resolve-block", "--reason", "one", "--reason=two"},
 			want: []string{"repeated --reason"},
 		},
 		{
 			name: "reason without resolve block",
-			args: []string{commandRun, cliCommandContinue, result.runID, cliFlagReason, "fixed"},
+			args: []string{commandRun, "continue", result.runID, "--reason", "fixed"},
 			want: []string{"--reason is only valid with --resolve-block"},
 		},
 	} {
@@ -153,7 +154,7 @@ func TestExecuteRunContinueResolveBlockFlagValidation(t *testing.T) {
 
 func TestExecuteRunContinueHelpDocumentsContinuationModes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandRun, cliCommandContinue, helpFlag}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, "continue", helpFlag}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
@@ -164,7 +165,7 @@ func TestExecuteRunContinueHelpDocumentsContinuationModes(t *testing.T) {
 	assertCLIOutputContainsAll(t, stdout.String(), []string{
 		"orc run continue <run-id> --allow-loop-cap",
 		"orc run continue <run-id> --resolve-block --reason <text>",
-		cliFlagResolveBlock,
+		"--resolve-block",
 		"--reason <text>",
 	})
 }

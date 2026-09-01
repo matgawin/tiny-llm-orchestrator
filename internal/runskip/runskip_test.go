@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runskip
 
 import (
@@ -17,10 +18,10 @@ import (
 )
 
 func TestSkipPersistsAuditedTransition(t *testing.T) {
-	root := writeSkipProject(t, true, runskipStepReview, "")
+	root := writeSkipProject(t, true, "review", "")
 	store := openSkipStore(t, root)
 
-	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "skip-ok", Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "skip-ok", Workflow: "implementation", InitialState: "plan"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -32,7 +33,7 @@ func TestSkipPersistsAuditedTransition(t *testing.T) {
 	result, err := Skip(context.Background(), Options{
 		Root:   root,
 		RunID:  run.ID,
-		StepID: runskipStepPlan,
+		StepID: "plan",
 		Reason: "  not worth another review  ",
 		Source: "unit-test",
 		Time:   at,
@@ -58,12 +59,12 @@ func TestSkipPersistsAuditedTransition(t *testing.T) {
 	}
 
 	skipped := result.Status.SkippedSteps[0]
-	if skipped.StepID != runskipStepPlan || skipped.Status != config.SystemSkipStatus || skipped.Result != config.SystemSkipResult || skipped.Reason != "not worth another review" || skipped.Source != "unit-test" {
+	if skipped.StepID != "plan" || skipped.Status != config.SystemSkipStatus || skipped.Result != config.SystemSkipResult || skipped.Reason != "not worth another review" || skipped.Source != "unit-test" {
 		t.Fatalf("skipped = %+v, want trimmed audited skip", skipped)
 	}
 
 	entry := result.Status.WorkflowLoop.Entries[len(result.Status.WorkflowLoop.Entries)-1]
-	if entry.State != runskipStepReview || entry.PreviousState != runskipStepPlan || entry.TriggerStatus != config.SystemSkipStatus || entry.TriggerResult != config.SystemSkipResult {
+	if entry.State != "review" || entry.PreviousState != "plan" || entry.TriggerStatus != config.SystemSkipStatus || entry.TriggerResult != config.SystemSkipResult {
 		t.Fatalf("workflow entry = %+v, want %s transition to review", entry, config.SystemSkipPair)
 	}
 }
@@ -72,13 +73,13 @@ func TestSkipConsumesPriorOutcomeWhenSelectedStepCameFromRouting(t *testing.T) {
 	root := writeSkipRoutingProject(t)
 	store := openSkipStore(t, root)
 
-	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "skip-routed-step", Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "skip-routed-step", Workflow: "implementation", InitialState: "plan"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	writeSkipConfigSnapshot(t, root, store, run.ID)
-	recordReportedAttempt(t, store, run.ID, "plan-attempt", runskipStepPlan, runskipAgentPlanner, "done", "ready")
+	recordReportedAttempt(t, store, run.ID, "plan-attempt", "plan", "planner", "done", "ready")
 
 	before, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
@@ -92,7 +93,7 @@ func TestSkipConsumesPriorOutcomeWhenSelectedStepCameFromRouting(t *testing.T) {
 	result, err := Skip(context.Background(), Options{
 		Root:   root,
 		RunID:  run.ID,
-		StepID: runskipStepReview,
+		StepID: "review",
 		Reason: "not worth another pass",
 	})
 	if err != nil {
@@ -143,8 +144,8 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 				t.Helper()
 
 				if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-					StepID:          runskipStepPlan,
-					AgentID:         runskipAgentPlanner,
+					StepID:          "plan",
+					AgentID:         "planner",
 					AttemptID:       "attempt-active",
 					Timeout:         time.Minute,
 					ReportExitGrace: time.Second,
@@ -173,10 +174,10 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := writeSkipProject(t, true, runskipStepReview, "failed/error: 1")
+			root := writeSkipProject(t, true, "review", "failed/error: 1")
 			store := openSkipStore(t, root)
 
-			run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+			run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: "implementation", InitialState: "plan"})
 			if err != nil {
 				t.Fatalf("Create returned error: %v", err)
 			}
@@ -189,7 +190,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 				t.Fatalf("Load before returned error: %v", err)
 			}
 
-			_, err = Skip(context.Background(), Options{Root: root, RunID: run.ID, StepID: runskipStepPlan, Reason: "nope"})
+			_, err = Skip(context.Background(), Options{Root: root, RunID: run.ID, StepID: "plan", Reason: "nope"})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Skip error = %v, want containing %q", err, tt.want)
 			}
@@ -210,9 +211,9 @@ func setupRetryDecisionForSkipRejection(t *testing.T, store *runstore.Store, run
 	t.Helper()
 
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-		StepID:          runskipStepPlan,
-		AgentID:         runskipAgentPlanner,
-		AttemptID:       runskipAttemptRetry,
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       "attempt-retry",
 		Timeout:         time.Minute,
 		ReportExitGrace: time.Second,
 	}); err != nil {
@@ -220,17 +221,17 @@ func setupRetryDecisionForSkipRejection(t *testing.T, store *runstore.Store, run
 	}
 
 	promptRef := writeSkipTestArtifact(t, store, runID, runstore.KindPrompt, "prompt\n")
-	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{AttemptID: runskipAttemptRetry, PromptRef: promptRef}); err != nil {
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{AttemptID: "attempt-retry", PromptRef: promptRef}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
 	logRef := writeSkipTestArtifact(t, store, runID, runstore.KindLog, "log\n")
-	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{AttemptID: runskipAttemptRetry, LogRef: logRef}); err != nil {
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{AttemptID: "attempt-retry", LogRef: logRef}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
 	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
-		AttemptID:        runskipAttemptRetry,
+		AttemptID:        "attempt-retry",
 		PID:              123,
 		ProcessStartTime: "123456789",
 	}); err != nil {
@@ -243,7 +244,7 @@ func setupRetryDecisionForSkipRejection(t *testing.T, store *runstore.Store, run
 func writeSkipTestArtifact(t *testing.T, store *runstore.Store, runID string, kind runstore.ArtifactKind, content string) runstore.ArtifactRef {
 	t.Helper()
 
-	ref, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{Kind: kind, Name: runskipStepPlan, Content: []byte(content)})
+	ref, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{Kind: kind, Name: "plan", Content: []byte(content)})
 	if err != nil {
 		t.Fatalf("WriteArtifact %s returned error: %v", kind, err)
 	}
@@ -257,9 +258,9 @@ func recordRetryReport(t *testing.T, store *runstore.Store, runID string) {
 	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    runskipStepPlan,
-			AgentID:   runskipAgentPlanner,
-			AttemptID: runskipAttemptRetry,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-retry",
 			Status:    "failed",
 			Result:    "error",
 			Summary:   "retry",
@@ -278,16 +279,16 @@ func TestSkipRejectsWrongStepNonSkippableAndBlankReason(t *testing.T) {
 		reason    string
 		want      string
 	}{
-		{name: "wrong step", skippable: true, stepID: runskipStepReview, reason: "skip", want: `selected step is "plan"`},
-		{name: "non skippable", skippable: false, stepID: runskipStepPlan, reason: "skip", want: "not skippable"},
-		{name: "blank reason", skippable: true, stepID: runskipStepPlan, reason: " \n\t ", want: "skip reason is required"},
+		{name: "wrong step", skippable: true, stepID: "review", reason: "skip", want: `selected step is "plan"`},
+		{name: "non skippable", skippable: false, stepID: "plan", reason: "skip", want: "not skippable"},
+		{name: "blank reason", skippable: true, stepID: "plan", reason: " \n\t ", want: "skip reason is required"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := writeSkipProject(t, tt.skippable, runskipStepReview, "")
+			root := writeSkipProject(t, tt.skippable, "review", "")
 			store := openSkipStore(t, root)
 
-			run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+			run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: "implementation", InitialState: "plan"})
 			if err != nil {
 				t.Fatalf("Create returned error: %v", err)
 			}
@@ -319,7 +320,7 @@ func writeSkipConfigSnapshot(t *testing.T, root string, store *runstore.Store, r
 		t.Fatalf("Load config returned error: %v", err)
 	}
 
-	snapshot, err := configsnapshot.BuildInitial(project, runskipWorkflowImplementation, time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
+	snapshot, err := configsnapshot.BuildInitial(project, "implementation", time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}

@@ -54,15 +54,32 @@ type Options struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+}
 
-	RuntimeGOOS  string
-	LookPath     func(string) (string, error)
-	PathExists   func(string) bool
-	Stat         func(string) (os.FileInfo, error)
-	EvalSymlinks func(string) (string, error)
-	Environ      func() []string
-	UserHomeDir  func() (string, error)
-	MkdirAll     func(string, os.FileMode) error
+type hostOps struct {
+	goos         string
+	lookPath     func(string) (string, error)
+	pathExists   func(string) bool
+	lstatExists  func(string) bool
+	stat         func(string) (os.FileInfo, error)
+	evalSymlinks func(string) (string, error)
+	environ      func() []string
+	userHomeDir  func() (string, error)
+	mkdirAll     func(string, os.FileMode) error
+}
+
+func defaultHostOps() hostOps {
+	return hostOps{
+		goos:         runtime.GOOS,
+		lookPath:     exec.LookPath,
+		pathExists:   hostPathExists,
+		lstatExists:  literalHostPathExists,
+		stat:         os.Stat,
+		evalSymlinks: filepath.EvalSymlinks,
+		environ:      os.Environ,
+		userHomeDir:  os.UserHomeDir,
+		mkdirAll:     os.MkdirAll,
+	}
 }
 
 // BwrapSpec is the resolved bubblewrap process invocation.
@@ -98,6 +115,10 @@ func Run(ctx context.Context, opts Options) error {
 
 // BuildSpec returns the bwrap invocation for a validated project config.
 func BuildSpec(project *config.Project, opts Options) (BwrapSpec, error) {
+	return buildSpec(project, opts, defaultHostOps())
+}
+
+func buildSpec(project *config.Project, opts Options, ops hostOps) (BwrapSpec, error) {
 	if project == nil {
 		return BwrapSpec{}, errors.New("project config is required")
 	}
@@ -107,48 +128,59 @@ func BuildSpec(project *config.Project, opts Options) (BwrapSpec, error) {
 		return BwrapSpec{}, errors.New("sandbox config is required; declare sandbox.command.argv in .orc/config.yaml")
 	}
 
-	goos := opts.RuntimeGOOS
-	if goos == "" {
-		goos = runtime.GOOS
+	if ops.goos == "" {
+		ops.goos = runtime.GOOS
 	}
 
-	if goos != goosLinux {
-		return BwrapSpec{}, fmt.Errorf("orc sandbox run requires Linux and the system bwrap binary; unsupported platform %s", goos)
+	if ops.goos != goosLinux {
+		return BwrapSpec{}, fmt.Errorf("orc sandbox run requires Linux and the system bwrap binary; unsupported platform %s", ops.goos)
 	}
 
-	lookPath := opts.LookPath
-	if lookPath == nil {
-		lookPath = exec.LookPath
+	if ops.lookPath == nil {
+		ops.lookPath = exec.LookPath
 	}
 
-	bwrapPath, err := lookPath("bwrap")
+	bwrapPath, err := ops.lookPath("bwrap")
 	if err != nil {
 		return BwrapSpec{}, errors.New("bwrap binary not found; install bubblewrap and ensure bwrap is on PATH")
 	}
 
 	cwd := filepath.Join(project.Root, sandboxConfig.CWD)
 
-	pathExists := opts.PathExists
-	if pathExists == nil {
-		pathExists = hostPathExists
+	if ops.pathExists == nil {
+		ops.pathExists = hostPathExists
 	}
 
-	stat := opts.Stat
-	if stat == nil {
-		stat = os.Stat
+	if ops.lstatExists == nil {
+		ops.lstatExists = literalHostPathExists
 	}
 
-	evalSymlinks := opts.EvalSymlinks
-	if evalSymlinks == nil {
-		evalSymlinks = filepath.EvalSymlinks
+	if ops.stat == nil {
+		ops.stat = os.Stat
 	}
 
-	policy, err := resolvePolicy(project, sandboxConfig, opts, pathExists, stat, evalSymlinks)
+	if ops.evalSymlinks == nil {
+		ops.evalSymlinks = filepath.EvalSymlinks
+	}
+
+	if ops.environ == nil {
+		ops.environ = os.Environ
+	}
+
+	if ops.userHomeDir == nil {
+		ops.userHomeDir = os.UserHomeDir
+	}
+
+	if ops.mkdirAll == nil {
+		ops.mkdirAll = os.MkdirAll
+	}
+
+	policy, err := resolvePolicy(project, sandboxConfig, opts, ops)
 	if err != nil {
 		return BwrapSpec{}, err
 	}
 
-	argv := buildBwrapArgs(project.Root, cwd, sandboxConfig, policy, pathExists)
+	argv := buildBwrapArgs(project.Root, cwd, sandboxConfig, policy, ops.pathExists)
 	env := policy.envList()
 
 	return BwrapSpec{
@@ -259,24 +291,24 @@ var minimalExecutableHostPaths = []string{
 	"/nix/store",
 }
 
-func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig, opts Options, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (sandboxPolicy, error) {
+func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig, opts Options, ops hostOps) (sandboxPolicy, error) {
 	root := project.Root
-	hostEnv := hostEnvMap(opts)
+	hostEnv := hostEnvMap(ops)
 
-	home, err := resolveSandboxHome(sandboxConfig.Home.Mode, hostEnv, opts)
+	home, err := resolveSandboxHome(sandboxConfig.Home.Mode, hostEnv, ops)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
 
 	hostHome := ""
 	if sandboxConfig.Path.Mode == config.SandboxPathModeHostEntries {
-		hostHome, err = resolveHostHome(hostEnv, opts)
+		hostHome, err = resolveHostHome(hostEnv, ops)
 		if err != nil {
 			return sandboxPolicy{}, fmt.Errorf("resolve host HOME for sandbox path policy: %w", err)
 		}
 	}
 
-	protectedPaths, err := resolveProtectedHostPaths(sandboxConfig.ProtectedPaths, hostHome, hostEnv, opts, evalSymlinks)
+	protectedPaths, err := resolveProtectedHostPaths(sandboxConfig.ProtectedPaths, hostHome, hostEnv, ops)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
@@ -284,7 +316,7 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 	beadsPath := filepath.Clean(filepath.Join(root, "..", ".beads"))
 	sandboxEnv, sandboxMounts, setFromMount := mergeRuntimeSandboxRequirements(project, sandboxConfig)
 
-	extraMounts, resolvedByID, err := resolveExtraMounts(root, beadsPath, home, hostEnv, opts, sandboxMounts, protectedPaths, pathExists, stat, evalSymlinks)
+	extraMounts, resolvedByID, err := resolveExtraMounts(root, beadsPath, home, hostEnv, opts, sandboxMounts, protectedPaths, ops)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
@@ -294,7 +326,7 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 		return sandboxPolicy{}, err
 	}
 
-	pathMounts, err := resolvePathMounts(root, beadsPath, home, hostHome, effectiveSandboxPath(hostEnv, sandboxEnv), sandboxConfig.Path.Mode, extraMounts, protectedPaths, opts.Stderr, stat, evalSymlinks)
+	pathMounts, err := resolvePathMounts(root, beadsPath, home, hostHome, effectiveSandboxPath(hostEnv, sandboxEnv), sandboxConfig.Path.Mode, extraMounts, protectedPaths, opts.Stderr, ops.stat, ops.evalSymlinks)
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
@@ -305,7 +337,7 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 		extraMounts: extraMounts,
 		env:         resolveEnv(hostEnv, sandboxEnv, home, root),
 	}
-	if pathExists(beadsPath) {
+	if ops.pathExists(beadsPath) {
 		policy.beadsPath = beadsPath
 	}
 
@@ -314,7 +346,7 @@ func resolvePolicy(project *config.Project, sandboxConfig *config.SandboxConfig,
 	return policy, nil
 }
 
-func resolveProtectedHostPaths(paths []config.SandboxProtectedPath, hostHome string, hostEnv map[string]string, opts Options, evalSymlinks func(string) (string, error)) (protectedHostPaths, error) {
+func resolveProtectedHostPaths(paths []config.SandboxProtectedPath, hostHome string, hostEnv map[string]string, ops hostOps) (protectedHostPaths, error) {
 	if len(paths) == 0 {
 		return protectedHostPaths{}, nil
 	}
@@ -330,7 +362,7 @@ func resolveProtectedHostPaths(paths []config.SandboxProtectedPath, hostHome str
 			if hostHome == "" {
 				var err error
 
-				hostHome, err = resolveHostHome(hostEnv, opts)
+				hostHome, err = resolveHostHome(hostEnv, ops)
 				if err != nil {
 					return protectedHostPaths{}, fmt.Errorf("%s.host_home: %w", entryName, err)
 				}
@@ -342,11 +374,11 @@ func resolveProtectedHostPaths(paths []config.SandboxProtectedPath, hostHome str
 		literal = filepath.Clean(literal)
 		resolved.add(literal, seen)
 
-		if !literalHostPathExists(literal) {
+		if !ops.lstatExists(literal) {
 			continue
 		}
 
-		realPath, err := evalSymlinks(literal)
+		realPath, err := ops.evalSymlinks(literal)
 		if err != nil {
 			return protectedHostPaths{}, fmt.Errorf("%s %q: resolve symlinks: %w", entryName, literal, err)
 		}
@@ -399,15 +431,10 @@ func runtimeDirCoverageValue(root string, extraMounts []resolvedMount) string {
 	return string(value)
 }
 
-func hostEnvMap(opts Options) map[string]string {
-	environ := os.Environ
-	if opts.Environ != nil {
-		environ = opts.Environ
-	}
-
+func hostEnvMap(ops hostOps) map[string]string {
 	env := make(map[string]string)
 
-	for _, entry := range environ() {
+	for _, entry := range ops.environ() {
 		name, value, ok := strings.Cut(entry, "=")
 		if ok {
 			env[name] = value
@@ -417,9 +444,9 @@ func hostEnvMap(opts Options) map[string]string {
 	return env
 }
 
-func resolveSandboxHome(mode string, hostEnv map[string]string, opts Options) (string, error) {
+func resolveSandboxHome(mode string, hostEnv map[string]string, ops hostOps) (string, error) {
 	if mode == config.SandboxHomeModeHostPath {
-		home, err := resolveHostHome(hostEnv, opts)
+		home, err := resolveHostHome(hostEnv, ops)
 		if err != nil {
 			return "", fmt.Errorf("resolve host HOME for sandbox home mode host_path: %w", err)
 		}
@@ -430,15 +457,10 @@ func resolveSandboxHome(mode string, hostEnv map[string]string, opts Options) (s
 	return syntheticHome, nil
 }
 
-func resolveHostHome(hostEnv map[string]string, opts Options) (string, error) {
+func resolveHostHome(hostEnv map[string]string, ops hostOps) (string, error) {
 	home := hostEnv["HOME"]
 	if home == "" {
-		userHomeDir := os.UserHomeDir
-		if opts.UserHomeDir != nil {
-			userHomeDir = opts.UserHomeDir
-		}
-
-		resolvedHome, err := userHomeDir()
+		resolvedHome, err := ops.userHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve host HOME: %w", err)
 		}
@@ -546,12 +568,12 @@ type runtimeMountKey struct {
 	mountID   string
 }
 
-func resolveExtraMounts(root, beadsPath, sandboxHome string, hostEnv map[string]string, opts Options, mounts []sourcedSandboxMount, protectedPaths protectedHostPaths, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) ([]resolvedMount, map[runtimeMountKey]resolvedMount, error) {
+func resolveExtraMounts(root, beadsPath, sandboxHome string, hostEnv map[string]string, opts Options, mounts []sourcedSandboxMount, protectedPaths protectedHostPaths, ops hostOps) ([]resolvedMount, map[runtimeMountKey]resolvedMount, error) {
 	resolved := make([]resolvedMount, 0, len(mounts))
 	resolvedByID := map[runtimeMountKey]resolvedMount{}
 
 	for _, sourced := range mounts {
-		mount, ok, err := resolveSourcedMount(root, sandboxHome, hostEnv, opts, sourced, protectedPaths, pathExists, stat, evalSymlinks)
+		mount, ok, err := resolveSourcedMount(root, sandboxHome, hostEnv, opts, sourced, protectedPaths, ops)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -598,12 +620,12 @@ func indexResolvedRuntimeMount(resolvedByID map[runtimeMountKey]resolvedMount, m
 	}
 }
 
-func resolveSourcedMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, protectedPaths protectedHostPaths, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+func resolveSourcedMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, protectedPaths protectedHostPaths, ops hostOps) (resolvedMount, bool, error) {
 	if sourced.runtime && sourced.runtimeMount.Host == "" {
-		return resolveRuntimeSandboxMount(root, sandboxHome, hostEnv, opts, sourced, protectedPaths, pathExists, stat, evalSymlinks)
+		return resolveRuntimeSandboxMount(root, sandboxHome, hostEnv, opts, sourced, protectedPaths, ops)
 	}
 
-	return resolveStaticSandboxMount(root, staticSandboxMount(sourced), protectedPaths, pathExists, evalSymlinks)
+	return resolveStaticSandboxMount(root, staticSandboxMount(sourced), protectedPaths, ops.pathExists, ops.lstatExists, ops.evalSymlinks)
 }
 
 type staticSandboxMountDescriptor struct {
@@ -642,7 +664,7 @@ func staticSandboxMount(sourced sourcedSandboxMount) staticSandboxMountDescripto
 	}
 }
 
-func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, protectedPaths protectedHostPaths, pathExists func(string) bool, evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, protectedPaths protectedHostPaths, pathExists, lstatExists func(string) bool, evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
 	host := mount.host
 	if !filepath.IsAbs(host) {
 		host = filepath.Join(root, host)
@@ -657,7 +679,7 @@ func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, 
 		return resolvedMount{}, false, fmt.Errorf("%s.host %q does not exist", mount.source, mount.host)
 	}
 
-	if protected, ok, err := protectedMountConflict(host, protectedPaths, evalSymlinks); err != nil {
+	if protected, ok, err := protectedMountConflict(host, protectedPaths, lstatExists, evalSymlinks); err != nil {
 		return resolvedMount{}, false, fmt.Errorf("%s.host %q: %w", mount.source, mount.host, err)
 	} else if ok {
 		return resolvedMount{}, false, fmt.Errorf("%s.host %q conflicts with sandbox.protected_paths host path %q", mount.source, host, protected)
@@ -689,23 +711,23 @@ func resolveStaticSandboxMount(root string, mount staticSandboxMountDescriptor, 
 	}, true, nil
 }
 
-func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, protectedPaths protectedHostPaths, pathExists func(string) bool, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) (resolvedMount, bool, error) {
+func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]string, opts Options, sourced sourcedSandboxMount, protectedPaths protectedHostPaths, ops hostOps) (resolvedMount, bool, error) {
 	mount := sourced.runtimeMount
 
-	host, usedFallback, err := resolveRuntimeMountSource(sourced.source, mount, hostEnv, opts)
+	host, usedFallback, err := resolveRuntimeMountSource(sourced.source, mount, hostEnv, ops)
 	if err != nil {
 		return resolvedMount{}, false, err
 	}
 
 	host = filepath.Clean(host)
-	if !pathExists(host) {
-		created, err := createRuntimeMountHost(host, opts, sourced, mount, protectedPaths)
+	if !ops.pathExists(host) {
+		created, err := createRuntimeMountHost(host, ops, sourced, mount, protectedPaths)
 		if !created || err != nil {
 			return resolvedMount{}, created, err
 		}
 	}
 
-	info, err := stat(host)
+	info, err := ops.stat(host)
 	if err != nil {
 		return resolvedMount{}, false, fmt.Errorf("%s.source %q: %w", sourced.source, host, err)
 	}
@@ -714,7 +736,7 @@ func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]str
 		return resolvedMount{}, false, fmt.Errorf("%s.source %q must be a directory", sourced.source, host)
 	}
 
-	realHost, err := evalSymlinks(host)
+	realHost, err := ops.evalSymlinks(host)
 	if err != nil {
 		return resolvedMount{}, false, fmt.Errorf("%s.source %q: %w", sourced.source, host, err)
 	}
@@ -742,7 +764,7 @@ func resolveRuntimeSandboxMount(root, sandboxHome string, hostEnv map[string]str
 	}, true, nil
 }
 
-func createRuntimeMountHost(host string, opts Options, sourced sourcedSandboxMount, mount config.RuntimeSandboxMount, protectedPaths protectedHostPaths) (bool, error) {
+func createRuntimeMountHost(host string, ops hostOps, sourced sourcedSandboxMount, mount config.RuntimeSandboxMount, protectedPaths protectedHostPaths) (bool, error) {
 	if mount.Optional.Value {
 		return false, nil
 	}
@@ -755,19 +777,14 @@ func createRuntimeMountHost(host string, opts Options, sourced sourcedSandboxMou
 		return false, fmt.Errorf("%s.source %q conflicts with sandbox.protected_paths host path %q", sourced.source, host, protected)
 	}
 
-	mkdirAll := os.MkdirAll
-	if opts.MkdirAll != nil {
-		mkdirAll = opts.MkdirAll
-	}
-
-	if err := mkdirAll(host, sandboxDirPerm); err != nil {
+	if err := ops.mkdirAll(host, sandboxDirPerm); err != nil {
 		return false, fmt.Errorf("%s.source create %q: %w", sourced.source, host, err)
 	}
 
 	return true, nil
 }
 
-func resolveRuntimeMountSource(source string, mount config.RuntimeSandboxMount, hostEnv map[string]string, opts Options) (string, bool, error) {
+func resolveRuntimeMountSource(source string, mount config.RuntimeSandboxMount, hostEnv map[string]string, ops hostOps) (string, bool, error) {
 	if value := hostEnv[mount.Source.Env]; filepath.IsAbs(value) {
 		return value, false, nil
 	}
@@ -776,7 +793,7 @@ func resolveRuntimeMountSource(source string, mount config.RuntimeSandboxMount, 
 		return "", false, fmt.Errorf("%s.source.env %q is unset, empty, or not absolute and no source fallback is configured", source, mount.Source.Env)
 	}
 
-	hostHome, err := resolveHostHome(hostEnv, opts)
+	hostHome, err := resolveHostHome(hostEnv, ops)
 	if err != nil {
 		return "", false, fmt.Errorf("%s.source.fallback.host_home: %w", source, err)
 	}
@@ -809,12 +826,12 @@ func applyEnvFromMount(env config.SandboxEnvConfig, requirements []envFromMountR
 	return env, nil
 }
 
-func protectedMountConflict(host string, protectedPaths protectedHostPaths, evalSymlinks func(string) (string, error)) (string, bool, error) {
+func protectedMountConflict(host string, protectedPaths protectedHostPaths, lstatExists func(string) bool, evalSymlinks func(string) (string, error)) (string, bool, error) {
 	if protected, ok := protectedPaths.conflict(host); ok {
 		return protected, true, nil
 	}
 
-	if !literalHostPathExists(host) {
+	if !lstatExists(host) {
 		return "", false, nil
 	}
 

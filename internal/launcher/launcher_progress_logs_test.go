@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -19,7 +20,7 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
+		Command: []string{"sh", "-c", "cat"},
 		Stdout:  &stdout,
 		Time:    fixedLauncherTime(),
 	})

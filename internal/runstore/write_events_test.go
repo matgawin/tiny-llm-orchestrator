@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -101,7 +102,7 @@ func TestUpdateStatusAppendsEventAndMaterializesLatestState(t *testing.T) {
 	now := time.Date(2026, 5, 2, 15, 30, 0, 0, time.UTC)
 
 	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{
-		State: readyForHumanState,
+		State: "ready_for_human",
 		Time:  now,
 	})
 	if err != nil {
@@ -112,8 +113,8 @@ func TestUpdateStatusAppendsEventAndMaterializesLatestState(t *testing.T) {
 		t.Fatalf("event = %+v, want status.updated sequence 2", event)
 	}
 
-	if status.State != readyForHumanState || status.LastSequence != 2 {
-		t.Fatalf("status = %+v, want materialized %s at sequence 2", status, readyForHumanState)
+	if status.State != "ready_for_human" || status.LastSequence != 2 {
+		t.Fatalf("status = %+v, want materialized %s at sequence 2", status, "ready_for_human")
 	}
 
 	loaded, err := store.LoadContext(context.Background(), run.ID)
@@ -121,8 +122,8 @@ func TestUpdateStatusAppendsEventAndMaterializesLatestState(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if loaded.Status.State != readyForHumanState {
-		t.Fatalf("loaded state = %q, want %s", loaded.Status.State, readyForHumanState)
+	if loaded.Status.State != "ready_for_human" {
+		t.Fatalf("loaded state = %q, want %s", loaded.Status.State, "ready_for_human")
 	}
 }
 
@@ -131,14 +132,14 @@ func TestUpdateStatusReturnsCommittedEventWhenStatusMaterializationFails(t *test
 	run := createManualRun(t, store, "update-status-failure")
 	denyStatusMaterializationOrSkip(t, run.Path)
 
-	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
+	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: "ready_for_human"})
 	requireStatusMaterializationError(t, err, run.Path)
 
 	if event.Sequence != 2 || event.Type != eventStatusUpdated {
 		t.Fatalf("committed event = %+v, want status.updated sequence 2", event)
 	}
 
-	if status.State != readyForHumanState || status.LastSequence != 2 {
+	if status.State != "ready_for_human" || status.LastSequence != 2 {
 		t.Fatalf("returned status = %+v, want committed in-memory status", status)
 	}
 }
@@ -192,7 +193,7 @@ func TestWriteAPIsRecoverFromStaleMaterializedStatus(t *testing.T) {
 		t.Fatalf("AppendEvent sequence = %d, want 3 from event log replay", event.Sequence)
 	}
 
-	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
+	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: "ready_for_human"})
 	if err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestWriteAPIsRecoverFromStaleMaterializedStatus(t *testing.T) {
 		t.Fatalf("UpdateStatus sequence/status = %d/%d, want 4/4", event.Sequence, status.LastSequence)
 	}
 
-	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestWriteAPIsRejectWrongStatusRunIDBeforeMutating(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "wrong-status-id")
 	status := readRunStatus(t, run)
-	status.RunID = testOtherRunID
+	status.RunID = "other-run"
 	writeRunStatus(t, run, status)
 
 	_, err := store.AppendEvent(run.ID, Event{Type: eventWorkflowStepFinished})

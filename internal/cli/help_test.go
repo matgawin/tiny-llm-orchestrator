@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -10,7 +11,7 @@ func TestExecuteHelp(t *testing.T) {
 	for _, args := range [][]string{
 		{helpFlag},
 		{"-h"},
-		{cliCommandHelp},
+		{"help"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -20,7 +21,7 @@ func TestExecuteHelp(t *testing.T) {
 			}
 
 			output := stdout.String()
-			for _, want := range []string{cliUsage, "Available Commands:", commandCompletion, commandInit, commandProgress, commandReport, commandRun, commandSandbox, commandWorker, commandVersion} {
+			for _, want := range []string{"Usage:", "Available Commands:", commandCompletion, commandInit, commandProgress, commandReport, commandRun, commandSandbox, commandWorker, commandVersion} {
 				if !strings.Contains(output, want) {
 					t.Fatalf("help output missing %q:\n%s", want, output)
 				}
@@ -37,13 +38,13 @@ func TestRootCommandUsesInjectedStreams(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
 	root := newRootCommand(strings.NewReader(""), &stdout, &stderr)
-	root.SetArgs([]string{cliCommandHelp})
+	root.SetArgs([]string{"help"})
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("root Execute returned error: %v", err)
 	}
 
-	if output := stdout.String(); !strings.Contains(output, cliUsage) || !strings.Contains(output, "Available Commands:") {
+	if output := stdout.String(); !strings.Contains(output, "Usage:") || !strings.Contains(output, "Available Commands:") {
 		t.Fatalf("stdout missing Cobra help:\n%s", output)
 	}
 
@@ -59,7 +60,7 @@ func TestExecuteRootNoArgsShowsHelp(t *testing.T) {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
-	if output := stdout.String(); !strings.Contains(output, cliUsage) {
+	if output := stdout.String(); !strings.Contains(output, "Usage:") {
 		t.Fatalf("stdout missing help:\n%s", output)
 	}
 
@@ -125,7 +126,7 @@ func TestExecuteCompletionUnsupportedShell(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 
-	for _, want := range []string{`unsupported shell "nu"`, cliUsage, "completion <shell>"} {
+	for _, want := range []string{`unsupported shell "nu"`, "Usage:", "completion <shell>"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}
@@ -161,7 +162,7 @@ func TestExecuteCompletionMissingShell(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 
-	for _, want := range []string{"requires <shell>", cliUsage, "completion <shell>"} {
+	for _, want := range []string{"requires <shell>", "Usage:", "completion <shell>"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}

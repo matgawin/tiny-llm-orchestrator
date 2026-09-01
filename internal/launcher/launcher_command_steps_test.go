@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -35,7 +36,7 @@ func TestLaunchNextExecutesSuccessfulCommandStep(t *testing.T) {
 		t.Fatal("Launched = false, want true")
 	}
 
-	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != launcherStatusDone || result.Attempt.Result != resultCommandPassed {
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != "done" || result.Attempt.Result != resultCommandPassed {
 		t.Fatalf("attempt = %+v, want reported done/passed", result.Attempt)
 	}
 
@@ -82,7 +83,7 @@ func TestLaunchNextResolvesCommandStepFromConfiguredPATH(t *testing.T) {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
 
-	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != launcherStatusDone || result.Attempt.Result != resultCommandPassed {
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != "done" || result.Attempt.Result != resultCommandPassed {
 		t.Fatalf("attempt = %+v, want reported done/passed", result.Attempt)
 	}
 
@@ -108,7 +109,7 @@ func TestLaunchNextExecutesScriptStep(t *testing.T) {
 		t.Fatalf("LaunchNext returned error: %v", err)
 	}
 
-	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != launcherStatusDone || result.Attempt.Result != resultCommandPassed {
+	if result.Attempt.State != runstore.AttemptStateReported || result.Attempt.Status != "done" || result.Attempt.Result != resultCommandPassed {
 		t.Fatalf("attempt = %+v, want reported done/passed", result.Attempt)
 	}
 
@@ -156,7 +157,7 @@ func TestLaunchNextRoutesFailingCommandStepBackToCode(t *testing.T) {
 		t.Fatalf("Evaluate returned error: %v", err)
 	}
 
-	if decision.Kind != workflow.DecisionSelectStep || decision.Step != launcherCodeStep {
+	if decision.Kind != workflow.DecisionSelectStep || decision.Step != "code" {
 		t.Fatalf("decision = %+v, want select code", decision)
 	}
 
@@ -252,7 +253,7 @@ func TestLaunchNextRecordsSystemReportForCommandSpawnError(t *testing.T) {
 func TestLaunchNextMapsCommandTimeout(t *testing.T) {
 	root, runID := createCommandLauncherRun(t, commandWorkflowOptions{
 		Timeout: "20ms",
-		Argv:    []string{"sh", "-c", launcherCommandSleepOne},
+		Argv:    []string{"sh", "-c", "sleep 1"},
 	})
 
 	result, err := LaunchNext(context.Background(), Options{

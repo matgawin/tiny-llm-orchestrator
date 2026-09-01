@@ -65,7 +65,7 @@ func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 			return fmt.Errorf("runtime %q path %q: path must be relative to .orc", id, relPath)
 		}
 
-		if invalidBaseRelativePath(clean) {
+		if clean == "." || !filepath.IsLocal(clean) {
 			return fmt.Errorf("runtime %q path %q: path must not escape .orc", id, relPath)
 		}
 

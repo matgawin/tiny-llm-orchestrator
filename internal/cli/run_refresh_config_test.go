@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -10,25 +11,25 @@ import (
 func TestExecuteRunRefreshConfigPublishesSnapshot(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 	workflowPath := filepath.Join(root, ".orc", "workflows", "implementation.yaml")
 	workflowContent := string(readCLIFile(t, workflowPath))
 	workflowContent = strings.Replace(workflowContent, "timeout: 30m", "timeout: 45m", 1)
 	writeCLIFile(t, workflowPath, workflowContent)
 
-	output := executeCLICommand(t, []string{commandRun, cliCommandRefreshConfig, result.runID})
+	output := executeCLICommand(t, []string{commandRun, "refresh-config", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{
 		"refreshed run " + result.runID + " config 000001 -> 000002",
 		"manifest sha256:",
 	})
-	current := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, cliCommandConfig, "current.json")))
+	current := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, "config", "current.json")))
 	assertCLIOutputContainsAll(t, current, []string{`"version": 2`, `"version_dir": "000002"`})
 }
 
 func TestExecuteRunRefreshConfigRejectsForceFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{commandRun, cliCommandRefreshConfig, cliRunIDOne, "--force"}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandRun, "refresh-config", "run-1", "--force"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want --force rejection")
 	}
 
@@ -42,9 +43,9 @@ func TestExecuteRunRefreshConfigRejectsForceFlag(t *testing.T) {
 }
 
 func TestExecuteRunRefreshConfigHelp(t *testing.T) {
-	output := executeCLICommand(t, []string{commandRun, cliCommandRefreshConfig, helpFlag})
+	output := executeCLICommand(t, []string{commandRun, "refresh-config", helpFlag})
 	assertCLIOutputContainsAll(t, output, []string{
-		cliRefreshConfigUsage,
+		"orc run refresh-config <run-id>",
 		"There is no --force flag in v1.",
 	})
 }

@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -11,22 +12,22 @@ import (
 func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "loop-start", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "loop-start", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	_, event, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStateCode,
-		AgentID:         testAgentCoder,
-		AttemptID:       testAttemptID,
+		StepID:          "code",
+		AgentID:         "coder",
+		AttemptID:       "attempt-001",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
 		WorkflowStateEntry: WorkflowStateEntryRequest{
-			State:         testWorkflowStateCode,
-			PreviousState: testWorkflowStateTest,
+			State:         "code",
+			PreviousState: "test",
 			TriggerStatus: attemptStatusDone,
-			TriggerResult: reportResultReady,
+			TriggerResult: "ready",
 		},
 	})
 	if err != nil {
@@ -38,16 +39,16 @@ func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts[testWorkflowStateCode]; got != 2 {
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 2 {
 		t.Fatalf("code count = %d, want 2", got)
 	}
 
-	if got := loaded.Status.WorkflowLoop.RepeatedStates; len(got) != 1 || got[0] != testWorkflowStateCode {
+	if got := loaded.Status.WorkflowLoop.RepeatedStates; len(got) != 1 || got[0] != "code" {
 		t.Fatalf("repeated states = %+v, want [code]", got)
 	}
 
 	entry := loaded.Status.WorkflowLoop.Entries[1]
-	if entry.State != testWorkflowStateCode || entry.Count != 2 || !entry.Repeated || entry.PreviousState != testWorkflowStateTest || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != reportResultReady {
+	if entry.State != "code" || entry.Count != 2 || !entry.Repeated || entry.PreviousState != "test" || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != "ready" {
 		t.Fatalf("entry = %+v, want repeated code entry with trigger", entry)
 	}
 
@@ -64,15 +65,15 @@ func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "retry-start", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "retry-start", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	if _, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStateCode,
-		AgentID:         testAgentCoder,
-		AttemptID:       testAttemptID,
+		StepID:          "code",
+		AgentID:         "coder",
+		AttemptID:       "attempt-001",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
 	}); err != nil {
@@ -84,7 +85,7 @@ func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *te
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts[testWorkflowStateCode]; got != 1 {
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
 		t.Fatalf("code count = %d, want unchanged initial count 1", got)
 	}
 
@@ -96,30 +97,30 @@ func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *te
 func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "terminal-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "terminal-loop", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{
-		State: readyForHumanState,
+		State: "ready_for_human",
 		WorkflowStateEntry: WorkflowStateEntryRequest{
-			State:         readyForHumanState,
-			PreviousState: testWorkflowStateCode,
+			State:         "ready_for_human",
+			PreviousState: "code",
 			TriggerStatus: attemptStatusDone,
-			TriggerResult: reportResultReady,
+			TriggerResult: "ready",
 		},
 	})
 	if err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
-	if got := status.WorkflowLoop.Counts[readyForHumanState]; got != 1 {
+	if got := status.WorkflowLoop.Counts["ready_for_human"]; got != 1 {
 		t.Fatalf("terminal count = %d, want 1", got)
 	}
 
 	entry := status.WorkflowLoop.Entries[1]
-	if entry.State != readyForHumanState || entry.Count != 1 || entry.PreviousState != testWorkflowStateCode || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != reportResultReady {
+	if entry.State != "ready_for_human" || entry.Count != 1 || entry.PreviousState != "code" || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != "ready" {
 		t.Fatalf("entry = %+v, want terminal entry with trigger", entry)
 	}
 
@@ -137,7 +138,7 @@ func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts[readyForHumanState]; got != 1 {
+	if got := loaded.Status.WorkflowLoop.Counts["ready_for_human"]; got != 1 {
 		t.Fatalf("loaded terminal count = %d, want 1", got)
 	}
 }
@@ -146,7 +147,7 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 	root := t.TempDir()
 	store := openStore(t, root)
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "skip-step", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "skip-step", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 	at := time.Date(2026, 5, 8, 10, 15, 0, 0, time.UTC)
 
 	status, event, err := store.RecordStepSkipContext(context.Background(), run.ID, RecordStepSkipRequest{
-		StepID: testWorkflowStateCode,
+		StepID: "code",
 		Reason: "not needed after human review",
 		Source: "test",
 		Time:   at,
@@ -167,9 +168,9 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 			State: stateRunning,
 			WorkflowStateEntry: WorkflowStateEntryRequest{
 				State:         "review",
-				PreviousState: testWorkflowStateCode,
+				PreviousState: "code",
 				TriggerStatus: attemptStatusDone,
-				TriggerResult: testWorkflowSkip,
+				TriggerResult: "skipped",
 			},
 		}, nil
 	})
@@ -190,7 +191,7 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 	}
 
 	entry := status.WorkflowLoop.Entries[1]
-	if entry.State != "review" || entry.PreviousState != testWorkflowStateCode || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != testWorkflowSkip {
+	if entry.State != "review" || entry.PreviousState != "code" || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != "skipped" {
 		t.Fatalf("workflow entry = %+v, want skip transition to review", entry)
 	}
 
@@ -199,7 +200,7 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 	}
 
 	skipped := status.SkippedSteps[0]
-	if skipped.StepID != testWorkflowStateCode || skipped.Status != attemptStatusDone || skipped.Result != testWorkflowSkip || skipped.Reason != "not needed after human review" || skipped.EventSequence != event.Sequence || !skipped.Time.Equal(at) || skipped.Source != "test" {
+	if skipped.StepID != "code" || skipped.Status != attemptStatusDone || skipped.Result != "skipped" || skipped.Reason != "not needed after human review" || skipped.EventSequence != event.Sequence || !skipped.Time.Equal(at) || skipped.Source != "test" {
 		t.Fatalf("skipped = %+v, want audited skip", skipped)
 	}
 
@@ -208,7 +209,7 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 		t.Fatalf("unmarshal workflow.step_skipped payload: %v", err)
 	}
 
-	if payload.StepID != testWorkflowStateCode || payload.Status != attemptStatusDone || payload.Result != testWorkflowSkip || payload.Reason != skipped.Reason || payload.WorkflowStateEntry == nil || *payload.WorkflowStateEntry != entry {
+	if payload.StepID != "code" || payload.Status != attemptStatusDone || payload.Result != "skipped" || payload.Reason != skipped.Reason || payload.WorkflowStateEntry == nil || *payload.WorkflowStateEntry != entry {
 		t.Fatalf("payload = %+v, want skip payload with workflow entry %+v", payload, entry)
 	}
 
@@ -230,14 +231,14 @@ func TestRecordStepSkipRejectsBlankReasonWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	store := openStore(t, root)
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "blank-skip", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "blank-skip", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	before := run.Status
 
-	_, _, err = store.RecordStepSkipContext(context.Background(), run.ID, RecordStepSkipRequest{StepID: testWorkflowStateCode, Reason: " \t "}, func(Status) (StepSkipTransition, error) {
+	_, _, err = store.RecordStepSkipContext(context.Background(), run.ID, RecordStepSkipRequest{StepID: "code", Reason: " \t "}, func(Status) (StepSkipTransition, error) {
 		t.Fatal("validator called for blank reason")
 		return StepSkipTransition{}, nil
 	})
@@ -256,7 +257,7 @@ func TestRecordStepSkipRejectsBlankReasonWithoutMutation(t *testing.T) {
 func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "ignored-report-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "ignored-report-loop", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -270,7 +271,7 @@ func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts[testWorkflowStateCode]; got != 1 {
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
 		t.Fatalf("code count = %d, want unchanged initial count 1", got)
 	}
 
@@ -282,14 +283,14 @@ func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "loop-override", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	block := WorkflowLoopHardCap{
-		Workflow:         testWorkflowName,
-		BlockedState:     testWorkflowStateCode,
+		Workflow:         "implementation",
+		BlockedState:     "code",
 		CurrentCount:     1,
 		ProspectiveCount: 2,
 		Soft:             1,
@@ -314,7 +315,7 @@ func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 	}
 
 	override := status.WorkflowLoop.PendingHardCapOverride
-	if override == nil || override.Workflow != testWorkflowName || override.TargetState != testWorkflowStateCode || override.CountBeforeOverride != 1 || override.CountAfterOverride != 2 || override.Soft != 1 || override.Hard != 1 || override.HumanAction != "allow_loop_cap" {
+	if override == nil || override.Workflow != "implementation" || override.TargetState != "code" || override.CountBeforeOverride != 1 || override.CountAfterOverride != 2 || override.Soft != 1 || override.Hard != 1 || override.HumanAction != "allow_loop_cap" {
 		t.Fatalf("pending override = %+v, want block-derived override", override)
 	}
 
@@ -331,7 +332,7 @@ func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 func TestAllowWorkflowLoopHardCapFailsWithoutActiveBlock(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "no-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "no-loop-override", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -359,19 +360,19 @@ func TestAllowWorkflowLoopHardCapFailsWithoutActiveBlock(t *testing.T) {
 func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "resolve-human-block-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
-			AttemptID: testAttemptID,
-			Status:    reportStatusBlocked,
-			Result:    reportStatusBlocked,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
+			Status:    "blocked",
+			Result:    "blocked",
 			Summary:   "Need human config fix.",
 		},
 		Time: time.Date(2026, 5, 4, 12, 2, 0, 0, time.UTC),
@@ -383,9 +384,9 @@ func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
 		State: stateBlockedHuman,
 		WorkflowStateEntry: WorkflowStateEntryRequest{
 			State:         stateBlockedHuman,
-			PreviousState: testWorkflowStatePlan,
-			TriggerStatus: reportStatusBlocked,
-			TriggerResult: reportStatusBlocked,
+			PreviousState: "plan",
+			TriggerStatus: "blocked",
+			TriggerResult: "blocked",
 		},
 	}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
@@ -407,10 +408,10 @@ func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
 	if status.Continued == nil ||
 		status.Continued.Mode != ContinueModeResolveBlock ||
 		status.Continued.Reason != "fixed workflow config and reran checks" ||
-		status.Continued.ResolvedAttemptID != testAttemptID ||
-		status.Continued.ResolvedStepID != testWorkflowStatePlan ||
-		status.Continued.ResolvedStatus != reportStatusBlocked ||
-		status.Continued.ResolvedResult != reportStatusBlocked {
+		status.Continued.ResolvedAttemptID != "attempt-001" ||
+		status.Continued.ResolvedStepID != "plan" ||
+		status.Continued.ResolvedStatus != "blocked" ||
+		status.Continued.ResolvedResult != "blocked" {
 		t.Fatalf("continued marker = %+v, want resolved blocked attempt", status.Continued)
 	}
 
@@ -427,7 +428,7 @@ func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
 		t.Fatal("LatestConsumableOutcome ok = true, want resolved blocked outcome ignored")
 	}
 
-	if step, ok := ResolvedHumanBlockStep(status); !ok || step != testWorkflowStatePlan {
+	if step, ok := ResolvedHumanBlockStep(status); !ok || step != "plan" {
 		t.Fatalf("ResolvedHumanBlockStep = %q/%v, want plan/true", step, ok)
 	}
 
@@ -463,8 +464,8 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 				t.Helper()
 
 				_, _, err := store.BlockWorkflowLoopHardCapContext(context.Background(), runID, WorkflowLoopHardCap{
-					Workflow:         testWorkflowName,
-					BlockedState:     testWorkflowStateCode,
+					Workflow:         "implementation",
+					BlockedState:     "code",
 					CurrentCount:     1,
 					ProspectiveCount: 2,
 					Soft:             1,
@@ -475,21 +476,21 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 					t.Fatalf("BlockWorkflowLoopHardCap returned error: %v", err)
 				}
 			},
-			reason: testReviewedReason,
+			reason: "reviewed",
 			want:   []string{"workflow-loop hard cap", "--allow-loop-cap"},
 		},
 		{
 			name: "active attempt",
 			prepare: func(t *testing.T, store *Store, runID string) {
 				t.Helper()
-				startAttemptForTest(t, store, runID, testAttemptID)
+				startAttemptForTest(t, store, runID, "attempt-001")
 			},
-			reason: testReviewedReason,
+			reason: "reviewed",
 			want:   []string{"active attempt", "wait, recover, or inspect"},
 		},
 		{
 			name:   "running",
-			reason: testReviewedReason,
+			reason: "reviewed",
 			want:   []string{"state is \"running\"", "not in a resumable blocked state"},
 		},
 		{
@@ -501,27 +502,27 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			},
-			reason: testReviewedReason,
+			reason: "reviewed",
 			want:   []string{"no terminal blocked attempt", "inspect the run or start a new workflow"},
 		},
 		{
 			name: "blocked without routing evidence",
 			prepare: func(t *testing.T, store *Store, runID string) {
 				t.Helper()
-				startAttemptForTest(t, store, runID, testAttemptID)
-				linkPromptAndLogForTest(t, store, runID, testAttemptID)
-				recordProcessForTest(t, store, runID, testAttemptID)
+				startAttemptForTest(t, store, runID, "attempt-001")
+				linkPromptAndLogForTest(t, store, runID, "attempt-001")
+				recordProcessForTest(t, store, runID, "attempt-001")
 
 				if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, RecordReportRequest{
 					State: AttemptStateReported,
 					Report: Report{
 						RunID:     runID,
-						StepID:    testWorkflowStatePlan,
-						AgentID:   testAgentPlanner,
-						AttemptID: testAttemptID,
+						StepID:    "plan",
+						AgentID:   "planner",
+						AttemptID: "attempt-001",
 						Status:    attemptStatusDone,
-						Result:    reportResultReady,
-						Summary:   testReportSummaryPlanReady,
+						Result:    "ready",
+						Summary:   "Plan is ready.",
 					},
 				}); err != nil {
 					t.Fatalf("RecordAttemptReport returned error: %v", err)
@@ -531,7 +532,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			},
-			reason: testReviewedReason,
+			reason: "reviewed",
 			want:   []string{"no terminal blocked attempt", "inspect the run or start a new workflow"},
 		},
 	} {
@@ -566,14 +567,14 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "consume-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "consume-loop-override", Workflow: "implementation", InitialState: "code"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	block := WorkflowLoopHardCap{
-		Workflow:         testWorkflowName,
-		BlockedState:     testWorkflowStateCode,
+		Workflow:         "implementation",
+		BlockedState:     "code",
 		CurrentCount:     1,
 		ProspectiveCount: 2,
 		Soft:             1,
@@ -595,13 +596,13 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 	}
 
 	_, event, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:                             testWorkflowStateCode,
+		StepID:                             "code",
 		AgentID:                            "coder",
 		AttemptID:                          "attempt-override",
 		Timeout:                            time.Minute,
 		ReportExitGrace:                    time.Second,
 		Time:                               time.Date(2026, 5, 2, 16, 2, 0, 0, time.UTC),
-		WorkflowStateEntry:                 WorkflowStateEntryRequest{State: testWorkflowStateCode, PreviousState: testWorkflowStateCode, TriggerStatus: attemptStatusDone, TriggerResult: reportResultReady},
+		WorkflowStateEntry:                 WorkflowStateEntryRequest{State: "code", PreviousState: "code", TriggerStatus: attemptStatusDone, TriggerResult: "ready"},
 		ConsumeWorkflowLoopHardCapOverride: override,
 	})
 	if err != nil {
@@ -622,7 +623,7 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts[testWorkflowStateCode]; got != 2 {
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 2 {
 		t.Fatalf("code count = %d, want overridden prospective count 2", got)
 	}
 

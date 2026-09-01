@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package workflow
 
 import (
@@ -16,128 +17,128 @@ func TestEvaluateImplementationWorkflowSelectsNextStep(t *testing.T) {
 	}{
 		{
 			name:     "plan ready",
-			outcome:  Outcome{Step: stepPlan, Status: ReportStatusDone, Result: resultReady},
-			wantStep: stepCode,
+			outcome:  Outcome{Step: "plan", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "code",
 		},
 		{
 			name:     "code ready",
-			outcome:  Outcome{Step: stepCode, Status: ReportStatusDone, Result: resultReady},
-			wantStep: stepLSP,
+			outcome:  Outcome{Step: "code", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "lsp",
 		},
 		{
 			name:     "lsp failed",
-			outcome:  Outcome{Step: stepLSP, Status: ReportStatusDone, Result: resultFailed},
-			wantStep: stepCode,
+			outcome:  Outcome{Step: "lsp", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code",
 		},
 		{
 			name:     "lsp passed",
-			outcome:  Outcome{Step: stepLSP, Status: ReportStatusDone, Result: resultPassed},
-			wantStep: stepTest,
+			outcome:  Outcome{Step: "lsp", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "test",
 		},
 		{
 			name:     "test failed",
-			outcome:  Outcome{Step: stepTest, Status: ReportStatusDone, Result: resultFailed},
-			wantStep: stepCode,
+			outcome:  Outcome{Step: "test", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code",
 		},
 		{
 			name:     "test passed",
-			outcome:  Outcome{Step: stepTest, Status: ReportStatusDone, Result: resultPassed},
-			wantStep: stepReview,
+			outcome:  Outcome{Step: "test", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "review",
 		},
 		{
 			name:     "review changes requested",
-			outcome:  Outcome{Step: stepReview, Status: ReportStatusDone, Result: resultChangesRequested},
-			wantStep: stepCode,
+			outcome:  Outcome{Step: "review", Status: ReportStatusDone, Result: "changes_requested"},
+			wantStep: "code",
 		},
 		{
 			name:     "review approved",
-			outcome:  Outcome{Step: stepReview, Status: ReportStatusDone, Result: resultApproved},
-			wantStep: stepRedundancyReview,
+			outcome:  Outcome{Step: "review", Status: ReportStatusDone, Result: "approved"},
+			wantStep: "redundancy-review",
 		},
 		{
 			name:     "review skipped",
-			outcome:  Outcome{Step: stepReview, Status: ReportStatusDone, Result: resultSkipped},
-			wantStep: stepRedundancyReview,
+			outcome:  Outcome{Step: "review", Status: ReportStatusDone, Result: "skipped"},
+			wantStep: "redundancy-review",
 		},
 		{
 			name:     "code skipped after review changes requested",
-			outcome:  Outcome{Step: stepCode, Status: ReportStatusDone, Result: resultSkipped},
-			wantStep: stepRedundancyReview,
+			outcome:  Outcome{Step: "code", Status: ReportStatusDone, Result: "skipped"},
+			wantStep: "redundancy-review",
 		},
 		{
 			name:     "redundancy review changes requested",
-			outcome:  Outcome{Step: stepRedundancyReview, Status: ReportStatusDone, Result: resultChangesRequested},
-			wantStep: stepCodeFixer,
+			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "changes_requested"},
+			wantStep: "code_fixer",
 		},
 		{
 			name:     "code fixer ready",
-			outcome:  Outcome{Step: stepCodeFixer, Status: ReportStatusDone, Result: resultReady},
-			wantStep: stepLSPRedundancy,
+			outcome:  Outcome{Step: "code_fixer", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "lsp-redundancy",
 		},
 		{
 			name:     "redundancy lsp failed",
-			outcome:  Outcome{Step: stepLSPRedundancy, Status: ReportStatusDone, Result: resultFailed},
-			wantStep: stepCodeFixer,
+			outcome:  Outcome{Step: "lsp-redundancy", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_fixer",
 		},
 		{
 			name:     "redundancy lsp passed",
-			outcome:  Outcome{Step: stepLSPRedundancy, Status: ReportStatusDone, Result: resultPassed},
-			wantStep: stepTestRedundancy,
+			outcome:  Outcome{Step: "lsp-redundancy", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "test-redundancy",
 		},
 		{
 			name:     "redundancy test failed",
-			outcome:  Outcome{Step: stepTestRedundancy, Status: ReportStatusDone, Result: resultFailed},
-			wantStep: stepCodeFixer,
+			outcome:  Outcome{Step: "test-redundancy", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_fixer",
 		},
 		{
 			name:     "redundancy test passed",
-			outcome:  Outcome{Step: stepTestRedundancy, Status: ReportStatusDone, Result: resultPassed},
-			wantStep: stepRedundancyReview,
+			outcome:  Outcome{Step: "test-redundancy", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "redundancy-review",
 		},
 		{
 			name:     "redundancy review approved",
-			outcome:  Outcome{Step: stepRedundancyReview, Status: ReportStatusDone, Result: resultApproved},
-			wantStep: stepReadabilityReview,
+			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "approved"},
+			wantStep: "readability-review",
 		},
 		{
 			name:     "redundancy review skipped",
-			outcome:  Outcome{Step: stepRedundancyReview, Status: ReportStatusDone, Result: resultSkipped},
-			wantStep: stepReadabilityReview,
+			outcome:  Outcome{Step: "redundancy-review", Status: ReportStatusDone, Result: "skipped"},
+			wantStep: "readability-review",
 		},
 		{
 			name:     "code fixer skipped after redundancy review changes requested",
-			outcome:  Outcome{Step: stepCodeFixer, Status: ReportStatusDone, Result: resultSkipped},
-			wantStep: stepReadabilityReview,
+			outcome:  Outcome{Step: "code_fixer", Status: ReportStatusDone, Result: "skipped"},
+			wantStep: "readability-review",
 		},
 		{
 			name:     "readability review changes requested",
-			outcome:  Outcome{Step: stepReadabilityReview, Status: ReportStatusDone, Result: resultChangesRequested},
-			wantStep: stepCodeCleaner,
+			outcome:  Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "changes_requested"},
+			wantStep: "code_cleaner",
 		},
 		{
 			name:     "code cleaner ready",
-			outcome:  Outcome{Step: stepCodeCleaner, Status: ReportStatusDone, Result: resultReady},
-			wantStep: stepLSPReadability,
+			outcome:  Outcome{Step: "code_cleaner", Status: ReportStatusDone, Result: "ready"},
+			wantStep: "lsp-readability",
 		},
 		{
 			name:     "readability lsp failed",
-			outcome:  Outcome{Step: stepLSPReadability, Status: ReportStatusDone, Result: resultFailed},
-			wantStep: stepCodeCleaner,
+			outcome:  Outcome{Step: "lsp-readability", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_cleaner",
 		},
 		{
 			name:     "readability lsp passed",
-			outcome:  Outcome{Step: stepLSPReadability, Status: ReportStatusDone, Result: resultPassed},
-			wantStep: stepTestReadability,
+			outcome:  Outcome{Step: "lsp-readability", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "test-readability",
 		},
 		{
 			name:     "readability test failed",
-			outcome:  Outcome{Step: stepTestReadability, Status: ReportStatusDone, Result: resultFailed},
-			wantStep: stepCodeCleaner,
+			outcome:  Outcome{Step: "test-readability", Status: ReportStatusDone, Result: "failed"},
+			wantStep: "code_cleaner",
 		},
 		{
 			name:     "readability test passed",
-			outcome:  Outcome{Step: stepTestReadability, Status: ReportStatusDone, Result: resultPassed},
-			wantStep: stepReadabilityReview,
+			outcome:  Outcome{Step: "test-readability", Status: ReportStatusDone, Result: "passed"},
+			wantStep: "readability-review",
 		},
 	}
 
@@ -157,15 +158,15 @@ func TestEvaluateImplementationWorkflowRoutesTerminalOutcomes(t *testing.T) {
 	}{
 		{
 			name:    "readability review approved",
-			outcome: Outcome{Step: stepReadabilityReview, Status: ReportStatusDone, Result: resultApproved},
+			outcome: Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "approved"},
 		},
 		{
 			name:    "readability review skipped",
-			outcome: Outcome{Step: stepReadabilityReview, Status: ReportStatusDone, Result: resultSkipped},
+			outcome: Outcome{Step: "readability-review", Status: ReportStatusDone, Result: "skipped"},
 		},
 		{
 			name:    "code cleaner skipped after readability review changes requested",
-			outcome: Outcome{Step: stepCodeCleaner, Status: ReportStatusDone, Result: resultSkipped},
+			outcome: Outcome{Step: "code_cleaner", Status: ReportStatusDone, Result: "skipped"},
 		},
 	}
 
@@ -181,23 +182,23 @@ func TestEvaluateImplementationWorkflowRoutesTerminalOutcomes(t *testing.T) {
 func TestEvaluateRoutesTrustedSkippedOutcome(t *testing.T) {
 	workflow := config.Workflow{
 		Name:  "skip-routing",
-		Start: stepReview,
+		Start: "review",
 		Steps: map[string]config.Step{
-			stepReview: {
+			"review": {
 				Agent:     "reviewer",
 				Skippable: true,
 				AllowedResults: map[string][]string{
-					ReportStatusDone: {resultApproved, resultSkipped},
+					ReportStatusDone: {"approved", "skipped"},
 				},
 				On: map[string]string{
 					"done/approved": "ready_for_human",
-					"done/skipped":  stepCode,
+					"done/skipped":  "code",
 				},
 			},
-			stepCode: {
+			"code": {
 				Agent: "coder",
 				AllowedResults: map[string][]string{
-					ReportStatusDone: {resultReady},
+					ReportStatusDone: {"ready"},
 				},
 				On: map[string]string{
 					"done/ready": "ready_for_human",
@@ -205,15 +206,15 @@ func TestEvaluateRoutesTrustedSkippedOutcome(t *testing.T) {
 			},
 		},
 	}
-	outcome := Outcome{Step: stepReview, Status: ReportStatusDone, Result: resultSkipped}
+	outcome := Outcome{Step: "review", Status: ReportStatusDone, Result: "skipped"}
 
 	decision := evaluateRunningOutcome(t, workflow, outcome, RetryLineage{})
-	assertSelectedStep(t, decision, stepCode)
+	assertSelectedStep(t, decision, "code")
 }
 
 func TestEvaluateImplementationWorkflowBlocksForHumanOnAnyStep(t *testing.T) {
 	workflow := implementationWorkflow(t)
-	for _, step := range []string{stepPlan, stepCode, stepLSP, stepTest, stepReview, stepRedundancyReview, stepCodeFixer, stepLSPRedundancy, stepTestRedundancy, stepReadabilityReview, stepCodeCleaner, stepLSPReadability, stepTestReadability} {
+	for _, step := range []string{"plan", "code", "lsp", "test", "review", "redundancy-review", "code_fixer", "lsp-redundancy", "test-redundancy", "readability-review", "code_cleaner", "lsp-readability", "test-readability"} {
 		t.Run(step, func(t *testing.T) {
 			outcome := Outcome{Step: step, Status: ReportStatusBlocked, Result: "blocked"}
 
@@ -229,28 +230,28 @@ func TestEvaluateSelectsStartForNewRunningRun(t *testing.T) {
 		t.Fatalf("Evaluate returned error: %v", err)
 	}
 
-	assertSelectedStep(t, decision, stepPlan)
+	assertSelectedStep(t, decision, "plan")
 }
 
 func TestEvaluateSelectedStepPreservesRetryLineage(t *testing.T) {
 	workflow := implementationWorkflow(t)
 	retry := RetryLineage{
-		Step:   stepPlan,
-		Counts: map[string]int{pairFailedMissingReport: 1},
+		Step:   "plan",
+		Counts: map[string]int{"failed/missing_report": 1},
 	}
 
 	decision, err := Evaluate(workflow, RunState{
 		Status:       RunStatusRunning,
-		SelectedStep: stepPlan,
+		SelectedStep: "plan",
 		Retry:        retry,
 	})
 	if err != nil {
 		t.Fatalf("Evaluate selected retry step returned error: %v", err)
 	}
 
-	assertSelectedStepWithRetry(t, decision, stepPlan, pairFailedMissingReport, 1)
+	assertSelectedStepWithRetry(t, decision, "plan", "failed/missing_report", 1)
 
-	outcome := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: resultMissingReport}
+	outcome := Outcome{Step: "plan", Status: ReportStatusFailed, Result: "missing_report"}
 	decision = evaluateRunningOutcome(t, workflow, outcome, decision.Retry)
 	assertTerminalDecision(t, decision, RunStatusBlockedForHuman)
 }
@@ -277,24 +278,24 @@ func TestEvaluateTreatsCancelledAsTerminal(t *testing.T) {
 }
 
 func TestEvaluateRetriesBeforeTransition(t *testing.T) {
-	outcome := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: resultMissingReport}
+	outcome := Outcome{Step: "plan", Status: ReportStatusFailed, Result: "missing_report"}
 
 	decision := evaluateRunningOutcome(t, implementationWorkflow(t), outcome, RetryLineage{})
-	assertRetryStep(t, decision, stepPlan, pairFailedMissingReport, 1)
+	assertRetryStep(t, decision, "plan", "failed/missing_report", 1)
 }
 
 func TestEvaluateAppliesTransitionAfterRetryExhaustion(t *testing.T) {
-	outcome := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: resultMissingReport}
+	outcome := Outcome{Step: "plan", Status: ReportStatusFailed, Result: "missing_report"}
 
 	decision := evaluateRunningOutcome(t, implementationWorkflow(t), outcome, RetryLineage{
-		Step:   stepPlan,
-		Counts: map[string]int{pairFailedMissingReport: 1},
+		Step:   "plan",
+		Counts: map[string]int{"failed/missing_report": 1},
 	})
 	assertTerminalDecision(t, decision, RunStatusBlockedForHuman)
 }
 
 func TestEvaluateZeroRetrySynthesizedFailureAppliesTransition(t *testing.T) {
-	outcome := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: "timeout"}
+	outcome := Outcome{Step: "plan", Status: ReportStatusFailed, Result: "timeout"}
 
 	decision := evaluateRunningOutcome(t, implementationWorkflow(t), outcome, RetryLineage{})
 	assertTerminalDecision(t, decision, RunStatusBlockedForHuman)
@@ -302,48 +303,48 @@ func TestEvaluateZeroRetrySynthesizedFailureAppliesTransition(t *testing.T) {
 
 func TestEvaluateSameStepTransitionAfterExhaustionResetsRetryLineage(t *testing.T) {
 	workflow := singleStepRetryWorkflow()
-	outcome := Outcome{Step: stepCode, Status: ReportStatusFailed, Result: resultError}
+	outcome := Outcome{Step: "code", Status: ReportStatusFailed, Result: "error"}
 
 	decision := evaluateRunningOutcome(t, workflow, outcome, RetryLineage{
-		Step:   stepCode,
-		Counts: map[string]int{pairFailedError: 1},
+		Step:   "code",
+		Counts: map[string]int{"failed/error": 1},
 	})
-	assertSelectedStep(t, decision, stepCode)
+	assertSelectedStep(t, decision, "code")
 
 	decision = evaluateRunningOutcome(t, workflow, outcome, RetryLineage{})
-	assertRetryStep(t, decision, stepCode, pairFailedError, 1)
+	assertRetryStep(t, decision, "code", "failed/error", 1)
 }
 
 func TestEvaluateCrossStepReentryResetsRetryLineage(t *testing.T) {
 	workflow := reentryRetryWorkflow()
-	codeFailure := Outcome{Step: stepCode, Status: ReportStatusFailed, Result: resultError}
-	testFailure := Outcome{Step: stepTest, Status: ReportStatusDone, Result: resultFailed}
+	codeFailure := Outcome{Step: "code", Status: ReportStatusFailed, Result: "error"}
+	testFailure := Outcome{Step: "test", Status: ReportStatusDone, Result: "failed"}
 
 	decision := evaluateRunningOutcome(t, workflow, codeFailure, RetryLineage{
-		Step:   stepCode,
-		Counts: map[string]int{pairFailedError: 1},
+		Step:   "code",
+		Counts: map[string]int{"failed/error": 1},
 	})
-	assertSelectedStep(t, decision, stepTest)
+	assertSelectedStep(t, decision, "test")
 
 	decision = evaluateRunningOutcome(t, workflow, testFailure, decision.Retry)
-	assertSelectedStep(t, decision, stepCode)
+	assertSelectedStep(t, decision, "code")
 
 	decision = evaluateRunningOutcome(t, workflow, codeFailure, decision.Retry)
-	assertRetryStep(t, decision, stepCode, pairFailedError, 1)
+	assertRetryStep(t, decision, "code", "failed/error", 1)
 }
 
 func TestEvaluateAlternatingRetryableOutcomesShareStepLineage(t *testing.T) {
 	workflow := implementationWorkflow(t)
-	missingReport := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: resultMissingReport}
-	processError := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: "process_error"}
+	missingReport := Outcome{Step: "plan", Status: ReportStatusFailed, Result: "missing_report"}
+	processError := Outcome{Step: "plan", Status: ReportStatusFailed, Result: "process_error"}
 
 	decision := evaluateRunningOutcome(t, workflow, missingReport, RetryLineage{})
-	assertRetryStep(t, decision, stepPlan, pairFailedMissingReport, 1)
+	assertRetryStep(t, decision, "plan", "failed/missing_report", 1)
 
 	decision = evaluateRunningOutcome(t, workflow, processError, decision.Retry)
-	assertRetryStep(t, decision, stepPlan, pairFailedProcessError, 1)
+	assertRetryStep(t, decision, "plan", "failed/process_error", 1)
 
-	if decision.Retry.Counts[pairFailedMissingReport] != 1 {
+	if decision.Retry.Counts["failed/missing_report"] != 1 {
 		t.Fatalf("retry lineage = %+v, want missing_report count preserved", decision.Retry)
 	}
 
@@ -353,19 +354,19 @@ func TestEvaluateAlternatingRetryableOutcomesShareStepLineage(t *testing.T) {
 
 func TestEvaluateRejectsUndeclaredSynthesizedFailure(t *testing.T) {
 	workflow := implementationWorkflow(t)
-	step := workflow.Steps[stepPlan]
+	step := workflow.Steps["plan"]
 	step.AllowedResults = map[string][]string{
-		ReportStatusDone: {resultReady},
+		ReportStatusDone: {"ready"},
 	}
 	step.On = map[string]string{
-		"done/ready": stepCode,
+		"done/ready": "code",
 	}
-	workflow.Steps[stepPlan] = step
-	outcome := Outcome{Step: stepPlan, Status: ReportStatusFailed, Result: "timeout"}
+	workflow.Steps["plan"] = step
+	outcome := Outcome{Step: "plan", Status: ReportStatusFailed, Result: "timeout"}
 
 	_, err := Evaluate(workflow, RunState{
 		Status:       RunStatusRunning,
-		SelectedStep: stepPlan,
+		SelectedStep: "plan",
 		Outcome:      &outcome,
 	})
 	if err == nil {
@@ -380,7 +381,7 @@ func TestEvaluateRejectsUndeclaredSynthesizedFailure(t *testing.T) {
 func TestEvaluateRejectsInvalidSequentialState(t *testing.T) {
 	_, err := Evaluate(implementationWorkflow(t), RunState{
 		Status:        RunStatusRunning,
-		SelectedStep:  stepPlan,
+		SelectedStep:  "plan",
 		ActiveAttempt: true,
 	})
 	if err == nil {
@@ -405,36 +406,36 @@ func implementationWorkflow(t *testing.T) config.Workflow {
 }
 
 func singleStepRetryWorkflow() config.Workflow {
-	return retryWorkflow("same-step", map[string]string{pairFailedError: stepCode}, nil)
+	return retryWorkflow("same-step", map[string]string{"failed/error": "code"}, nil)
 }
 
 func reentryRetryWorkflow() config.Workflow {
 	testStep := config.Step{
 		Agent: "tester",
 		AllowedResults: map[string][]string{
-			ReportStatusDone: {resultFailed},
+			ReportStatusDone: {"failed"},
 		},
 		On: map[string]string{
-			"done/failed": stepCode,
+			"done/failed": "code",
 		},
 	}
 
-	return retryWorkflow("reentry", map[string]string{pairFailedError: stepTest}, &testStep)
+	return retryWorkflow("reentry", map[string]string{"failed/error": "test"}, &testStep)
 }
 
 func retryWorkflow(name string, codeTransitions map[string]string, testStep *config.Step) config.Workflow {
 	steps := map[string]config.Step{
-		stepCode: retryableCodeStep(codeTransitions),
+		"code": retryableCodeStep(codeTransitions),
 	}
 	if testStep != nil {
-		steps[stepTest] = *testStep
+		steps["test"] = *testStep
 	}
 
 	return config.Workflow{
 		Name:  name,
-		Start: stepCode,
+		Start: "code",
 		Defaults: config.Defaults{
-			Retries: map[string]int{pairFailedError: 1},
+			Retries: map[string]int{"failed/error": 1},
 		},
 		Steps: steps,
 	}
@@ -444,7 +445,7 @@ func retryableCodeStep(transitions map[string]string) config.Step {
 	return config.Step{
 		Agent: "coder",
 		AllowedResults: map[string][]string{
-			ReportStatusFailed: {resultError},
+			ReportStatusFailed: {"error"},
 		},
 		On: transitions,
 	}

@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package config
 
 import "testing"
@@ -11,12 +12,12 @@ func TestLoadRejectsInvalidProjectConfig(t *testing.T) {
 	}{
 		{
 			name:     "step references missing configured agent",
-			agents:   map[string]string{testAgentCoder: validAgentDescriptor(testAgentCoder)},
+			agents:   map[string]string{"coder": validAgentDescriptor("coder")},
 			contains: []string{`step "plan" references missing agent "planner"`},
 		},
 		{
 			name:     "invalid agent frontmatter",
-			agents:   map[string]string{testAgentPlanner: "---\nid: planner\nrole: planner\n---\n\nPlan the work.\n"},
+			agents:   map[string]string{"planner": "---\nid: planner\nrole: planner\n---\n\nPlan the work.\n"},
 			contains: []string{"frontmatter description is required"},
 		},
 	}

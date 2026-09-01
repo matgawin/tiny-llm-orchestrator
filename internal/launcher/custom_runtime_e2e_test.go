@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -34,7 +35,7 @@ func TestLaunchNextRunsCustomRuntimeWithStdinPromptAndModeArgs(t *testing.T) {
 					DirsSupported:  true,
 				},
 				Workflow: customRuntimeWorkflow{
-					DefaultsRuntime: launcherRuntimeRecorder,
+					DefaultsRuntime: "recorder",
 				},
 			})
 			if tt.sandbox {
@@ -89,15 +90,15 @@ func TestLaunchNextCustomRuntimeFilePromptStepOverridesModelAndRuntime(t *testin
 		PromptDelivery:     runtimePromptDeliveryFile,
 		Runtime: customRuntimeDescriptor{
 			ModelSupported: true,
-			ModelDefault:   launcherModelRuntimeDefault,
+			ModelDefault:   "runtime-default",
 			DirsSupported:  true,
 		},
 		Workflow: customRuntimeWorkflow{
 			DefaultsRuntime: "fallback",
-			DefaultsModel:   launcherModelWorkflow,
-			DefaultsDirs:    []string{launcherSharedDir},
-			StepRuntime:     launcherRuntimeRecorder,
-			StepModel:       launcherModelStep,
+			DefaultsModel:   "workflow-model",
+			DefaultsDirs:    []string{"shared"},
+			StepRuntime:     "recorder",
+			StepModel:       "step-model",
 			StepDirs:        []string{"/tmp/external-worktree"},
 		},
 	})
@@ -127,13 +128,13 @@ func TestLaunchNextCustomRuntimeFilePromptStepOverridesModelAndRuntime(t *testin
 		"arg:6=--model",
 		"arg:7=step-model",
 		"arg:8=--dir",
-		"arg:9="+filepath.Join(root, launcherSharedDir),
+		"arg:9="+filepath.Join(root, "shared"),
 		"arg:10=--dir",
 		"arg:11=/tmp/external-worktree",
 		"prompt_file_content:# Tiny Orc Worker Prompt",
 		"prompt_file_content:Launch a worker.",
 	)
-	assertRecordNotContains(t, record, launcherModelWorkflow, launcherModelRuntimeDefault, "stdin:")
+	assertRecordNotContains(t, record, "workflow-model", "runtime-default", "stdin:")
 }
 
 func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
@@ -146,10 +147,10 @@ func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
 	}{
 		{
 			name:          "workflow default overrides runtime default",
-			runtimeModel:  launcherModelRuntimeDefault,
-			workflowModel: launcherModelWorkflow,
+			runtimeModel:  "runtime-default",
+			workflowModel: "workflow-model",
 			want:          "arg:7=workflow-model",
-			notWant:       []string{launcherModelRuntimeDefault},
+			notWant:       []string{"runtime-default"},
 		},
 		{
 			name:    "model args omitted when no model resolves",
@@ -168,7 +169,7 @@ func TestLaunchNextCustomRuntimeModelPrecedenceAndOmission(t *testing.T) {
 					DirsSupported:  true,
 				},
 				Workflow: customRuntimeWorkflow{
-					DefaultsRuntime: launcherRuntimeRecorder,
+					DefaultsRuntime: "recorder",
 					DefaultsModel:   tt.workflowModel,
 				},
 			})
@@ -206,7 +207,7 @@ func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) 
 			name: "live runtime removes model capability",
 			liveUpdate: func(t *testing.T, root, recordPath string) {
 				t.Helper()
-				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML(launcherRuntimeRecorder, runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
+				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
 					ModelSupported: false,
 					DirsSupported:  true,
 				}))
@@ -217,7 +218,7 @@ func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) 
 			name: "live runtime removes directory capability",
 			liveUpdate: func(t *testing.T, root, recordPath string) {
 				t.Helper()
-				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML(launcherRuntimeRecorder, runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
+				writeLauncherFile(t, filepath.Join(root, ".orc", "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", runtimeRecorderFixturePath(t), recordPath, runtimePromptDeliveryFile, customRuntimeDescriptor{
 					ModelSupported: true,
 					DirsSupported:  false,
 				}))
@@ -236,9 +237,9 @@ func TestLaunchNextIgnoresLiveRuntimeCapabilityEditsAfterSnapshot(t *testing.T) 
 					DirsSupported:  true,
 				},
 				Workflow: customRuntimeWorkflow{
-					DefaultsRuntime: launcherRuntimeRecorder,
+					DefaultsRuntime: "recorder",
 					DefaultsModel:   "snapshot-model",
-					DefaultsDirs:    []string{launcherSharedDir},
+					DefaultsDirs:    []string{"shared"},
 				},
 			})
 			tt.liveUpdate(t, root, recordPath)
@@ -322,7 +323,7 @@ runtimes:
 	writeLauncherFile(t, filepath.Join(orcDir, "config.yaml"), configYAML)
 	writeLauncherFile(t, filepath.Join(orcDir, "agents", "coder.md"), "---\nid: coder\nrole: coder\ndescription: Test coder.\n---\n\nCode.\n")
 	fixturePath := runtimeRecorderFixturePath(t)
-	writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "recorder.yaml"), customRuntimeYAML(launcherRuntimeRecorder, fixturePath, project.RecordPath, project.PromptDelivery, project.Runtime))
+	writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "recorder.yaml"), customRuntimeYAML("recorder", fixturePath, project.RecordPath, project.PromptDelivery, project.Runtime))
 
 	if project.FallbackRecordPath != "" {
 		writeLauncherFile(t, filepath.Join(orcDir, "runtimes", "fallback.yaml"), customRuntimeYAML("fallback", fixturePath, project.FallbackRecordPath, project.PromptDelivery, project.Runtime))
@@ -334,8 +335,8 @@ runtimes:
 
 	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "custom-runtime-run",
-		Workflow:     launcherWorkflowImplementation,
-		InitialState: launcherCodeStep,
+		Workflow:     "implementation",
+		InitialState: "code",
 		Time:         fixedLauncherTime(),
 	})
 	if err != nil {
@@ -346,7 +347,7 @@ runtimes:
 
 	if _, err := store.WriteArtifactContext(context.Background(), run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
-		Name:    launcherTaskArtifactName,
+		Name:    "task",
 		Content: []byte("# Task\n\nLaunch a worker.\n"),
 		Time:    fixedLauncherTime(),
 	}); err != nil {

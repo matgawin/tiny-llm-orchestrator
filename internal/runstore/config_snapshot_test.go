@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -11,7 +12,7 @@ import (
 func TestWriteInitialConfigSnapshotPersistsVersionedFilesAndCurrentPointer(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-snapshot-run", Workflow: testWorkflowName})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-snapshot-run", Workflow: "implementation"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestWriteInitialConfigSnapshotRejectsSymlinkedConfigDir(t *testing.T) {
 	root := t.TempDir()
 	store := openStore(t, root)
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-symlink-run", Workflow: testWorkflowName})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-symlink-run", Workflow: "implementation"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestWriteInitialConfigSnapshotRejectsSymlinkedConfigDir(t *testing.T) {
 func TestWriteInitialConfigSnapshotRejectsExistingCurrent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-existing-current-run", Workflow: testWorkflowName})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-existing-current-run", Workflow: "implementation"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}

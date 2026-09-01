@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -14,7 +15,7 @@ func TestLoadReportsMalformedStateWithArtifactPath(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "broken-run")
 
-	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -327,7 +328,7 @@ func TestLoadReplaysStatusStateWhenMaterializedStatusIsStale(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
 	run := createManualRun(t, store, "status-mismatch")
-	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: "ready_for_human"}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
@@ -340,8 +341,8 @@ func TestLoadReplaysStatusStateWhenMaterializedStatusIsStale(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if loaded.Status.State != readyForHumanState {
-		t.Fatalf("loaded state = %q, want replayed %s", loaded.Status.State, readyForHumanState)
+	if loaded.Status.State != "ready_for_human" {
+		t.Fatalf("loaded state = %q, want replayed %s", loaded.Status.State, "ready_for_human")
 	}
 }
 
@@ -349,7 +350,7 @@ func TestLoadReplaysArtifactEventWhenMaterializedStatusIsStale(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-ref")
 
-	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -504,7 +505,7 @@ func TestLoadIgnoresStatusRefMissingArtifactEvent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-event")
 
-	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: "plan", Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}

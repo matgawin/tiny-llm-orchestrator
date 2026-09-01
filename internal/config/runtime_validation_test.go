@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package config
 
 import (
@@ -12,12 +13,12 @@ import (
 func TestLoadValidRuntimeDescriptors(t *testing.T) {
 	root := writeMinimalProject(t, projectFixture{
 		config: configWithRuntimes(map[string]string{
-			testRuntimeCodex:  testRuntimeCodexPath,
-			testRuntimeFileAI: testRuntimeFileAIPath,
+			"codex":  "runtimes/codex.yaml",
+			"fileai": "runtimes/fileai.yaml",
 		}),
 		runtimes: map[string]string{
-			testRuntimeCodex:  validCodexRuntimeDescriptor(),
-			testRuntimeFileAI: validFilePromptRuntimeDescriptor(),
+			"codex":  validCodexRuntimeDescriptor(),
+			"fileai": validFilePromptRuntimeDescriptor(),
 		},
 	})
 
@@ -26,12 +27,12 @@ func TestLoadValidRuntimeDescriptors(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	codex := project.Runtimes[testRuntimeCodex]
-	if codex.ID != testRuntimeCodex {
+	codex := project.Runtimes["codex"]
+	if codex.ID != "codex" {
 		t.Fatalf("codex runtime id = %q, want codex", codex.ID)
 	}
 
-	if got, want := codex.Command.Executable, testRuntimeCodex; got != want {
+	if got, want := codex.Command.Executable, "codex"; got != want {
 		t.Fatalf("codex executable = %q, want %q", got, want)
 	}
 
@@ -51,11 +52,11 @@ func TestLoadValidRuntimeDescriptors(t *testing.T) {
 		t.Fatalf("codex reasoning.default = %q, want %q", got, want)
 	}
 
-	if got, want := project.Runtimes[testRuntimeFileAI].Prompt.Delivery, "file"; got != want {
+	if got, want := project.Runtimes["fileai"].Prompt.Delivery, "file"; got != want {
 		t.Fatalf("fileai prompt.delivery = %q, want %q", got, want)
 	}
 
-	if got, want := project.Runtimes[testRuntimeFileAI].Sandbox.Requirements.Env.Set["ORC_RUNTIME"], testRuntimeFileAI; got != want {
+	if got, want := project.Runtimes["fileai"].Sandbox.Requirements.Env.Set["ORC_RUNTIME"], "fileai"; got != want {
 		t.Fatalf("fileai sandbox env = %q, want %q", got, want)
 	}
 }
@@ -69,31 +70,31 @@ func TestLoadRuntimeSelectionAllowlistValidation(t *testing.T) {
 		{
 			name: "model missing allowed means pass through",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection:   testSelectionModel,
-				defaultName: testModelGPT9,
+				selection:   "model",
+				defaultName: "gpt-9",
 			}),
 		},
 		{
 			name: "model empty allowed means pass through",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection:   testSelectionModel,
-				defaultName: testModelGPT9,
+				selection:   "model",
+				defaultName: "gpt-9",
 				allowed:     []string{},
 			}),
 		},
 		{
 			name: "model default constrained by allowlist",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection:   testSelectionModel,
-				defaultName: testModelGPT9,
+				selection:   "model",
+				defaultName: "gpt-9",
 				allowed:     []string{"gpt-5"},
 			}),
-			contains: []string{testRuntimeCodexFileContext, `model.default "gpt-9" is not allowed by model.allowed`},
+			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `model.default "gpt-9" is not allowed by model.allowed`},
 		},
 		{
 			name: "model empty allowlist entry",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection: testSelectionModel,
+				selection: "model",
 				allowed:   []string{`""`},
 			}),
 			contains: []string{`model.allowed[0] is empty`},
@@ -101,31 +102,31 @@ func TestLoadRuntimeSelectionAllowlistValidation(t *testing.T) {
 		{
 			name: "reasoning missing allowed means pass through",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection:   testSelectionReasoning,
-				defaultName: testReasoningEffort9,
+				selection:   "reasoning",
+				defaultName: "effort-9",
 			}),
 		},
 		{
 			name: "reasoning empty allowed means pass through",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection:   testSelectionReasoning,
-				defaultName: testReasoningEffort9,
+				selection:   "reasoning",
+				defaultName: "effort-9",
 				allowed:     []string{},
 			}),
 		},
 		{
 			name: "reasoning default constrained by allowlist",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection:   testSelectionReasoning,
-				defaultName: testReasoningEffort9,
+				selection:   "reasoning",
+				defaultName: "effort-9",
 				allowed:     []string{"medium"},
 			}),
-			contains: []string{testRuntimeCodexFileContext, `reasoning.default "effort-9" is not allowed by reasoning.allowed`},
+			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `reasoning.default "effort-9" is not allowed by reasoning.allowed`},
 		},
 		{
 			name: "reasoning empty allowlist entry",
 			descriptor: runtimeSelectionDescriptor(runtimeSelectionDescriptorOptions{
-				selection: testSelectionReasoning,
+				selection: "reasoning",
 				allowed:   []string{`""`},
 			}),
 			contains: []string{`reasoning.allowed[0] is empty`},
@@ -135,8 +136,8 @@ func TestLoadRuntimeSelectionAllowlistValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeMinimalProject(t, projectFixture{
-				config:   configWithRuntimes(map[string]string{testRuntimeCodex: testRuntimeCodexPath}),
-				runtimes: map[string]string{testRuntimeCodex: tt.descriptor},
+				config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
+				runtimes: map[string]string{"codex": tt.descriptor},
 			})
 			if len(tt.contains) == 0 {
 				if _, err := Load(root); err != nil {
@@ -167,13 +168,13 @@ prompt:
 model:
 `)
 
-	if options.selection == testSelectionModel {
+	if options.selection == "model" {
 		writeRuntimeSelectionDescriptorFields(&builder, options)
 	} else {
 		builder.WriteString("  supported: false\n")
 	}
 
-	if options.selection == testSelectionReasoning {
+	if options.selection == "reasoning" {
 		builder.WriteString("reasoning:\n")
 		writeRuntimeSelectionDescriptorFields(&builder, options)
 		builder.WriteString(`  args: [--reasoning, "{reasoning}"]
@@ -207,12 +208,12 @@ func writeRuntimeSelectionDescriptorFields(builder *strings.Builder, options run
 
 func TestLoadRuntimeSandboxRequirementsExtendedSchema(t *testing.T) {
 	root := writeMinimalProject(t, projectFixture{
-		config: configWithRuntimes(map[string]string{testRuntimeCustom: "runtimes/custom.yaml"}),
+		config: configWithRuntimes(map[string]string{"custom": "runtimes/custom.yaml"}),
 		workflow: workflowYAML(t, func(workflow Workflow) Workflow {
-			workflow.Defaults.Runtime = testRuntimeCustom
+			workflow.Defaults.Runtime = "custom"
 			return workflow
 		}),
-		runtimes: map[string]string{testRuntimeCustom: `id: custom
+		runtimes: map[string]string{"custom": `id: custom
 command:
   executable: recorder
 prompt:
@@ -256,7 +257,7 @@ sandbox:
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	requirements := project.Runtimes[testRuntimeCustom].Sandbox.Requirements
+	requirements := project.Runtimes["custom"].Sandbox.Requirements
 	if got := requirements.Mounts[0].ID; got != "config_home" {
 		t.Fatalf("extended mount id = %q, want config_home", got)
 	}
@@ -356,12 +357,12 @@ func TestLoadRejectsInvalidRuntimeSandboxRequirementExtendedSchema(t *testing.T)
 			}
 
 			root := writeMinimalProject(t, projectFixture{
-				config: configWithRuntimes(map[string]string{testRuntimeCustom: "runtimes/custom.yaml"}),
+				config: configWithRuntimes(map[string]string{"custom": "runtimes/custom.yaml"}),
 				workflow: workflowYAML(t, func(workflow Workflow) Workflow {
-					workflow.Defaults.Runtime = testRuntimeCustom
+					workflow.Defaults.Runtime = "custom"
 					return workflow
 				}),
-				runtimes: map[string]string{testRuntimeCustom: `id: custom
+				runtimes: map[string]string{"custom": `id: custom
 command:
   executable: recorder
 prompt:
@@ -402,7 +403,7 @@ directories:
 sandbox:
   supported: true
 `,
-			contains: []string{testRuntimeCodexFileContext, `id "other" does not match runtime map key`},
+			contains: []string{`runtime "codex" file "runtimes/codex.yaml"`, `id "other" does not match runtime map key`},
 		},
 		{
 			name: "empty executable",
@@ -773,8 +774,8 @@ sandbox:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeMinimalProject(t, projectFixture{
-				config:   configWithRuntimes(map[string]string{testRuntimeCodex: testRuntimeCodexPath}),
-				runtimes: map[string]string{testRuntimeCodex: tt.descriptor},
+				config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
+				runtimes: map[string]string{"codex": tt.descriptor},
 			})
 			assertLoadErrorContains(t, root, tt.contains...)
 		})
@@ -783,7 +784,7 @@ sandbox:
 
 func TestLoadRejectsSelectedRuntimeSandboxRequirementStaticConflict(t *testing.T) {
 	root := writeMinimalProject(t, projectFixture{
-		config: configWithRuntimes(map[string]string{testRuntimeCodex: testRuntimeCodexPath}) + `
+		config: configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}) + `
 sandbox:
   command:
     argv: [sh]
@@ -792,7 +793,7 @@ sandbox:
     set:
       ORC_RUNTIME: project
 `,
-		runtimes: map[string]string{testRuntimeCodex: `id: codex
+		runtimes: map[string]string{"codex": `id: codex
 command:
   executable: codex
 prompt:
@@ -816,36 +817,36 @@ sandbox:
 func TestLoadRejectsUnsafeRuntimeReferences(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
-			config: configWithRuntimes(map[string]string{testRuntimeCodex: "runtimes/missing.yaml"}),
+			config: configWithRuntimes(map[string]string{"codex": "runtimes/missing.yaml"}),
 		})
 		assertLoadErrorContains(t, root, `runtime "codex" path "runtimes/missing.yaml"`)
 	})
 
 	t.Run("absolute path", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
-			config: configWithRuntimes(map[string]string{testRuntimeCodex: filepath.Join(t.TempDir(), "codex.yaml")}),
+			config: configWithRuntimes(map[string]string{"codex": filepath.Join(t.TempDir(), "codex.yaml")}),
 		})
 		assertLoadErrorContains(t, root, `runtime "codex" path`, `path must be relative to .orc`)
 	})
 
 	t.Run("traversal path", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
-			config: configWithRuntimes(map[string]string{testRuntimeCodex: "../codex.yaml"}),
+			config: configWithRuntimes(map[string]string{"codex": "../codex.yaml"}),
 		})
 		assertLoadErrorContains(t, root, `runtime "codex" path "../codex.yaml": path must not escape .orc`)
 	})
 
 	t.Run("outside runtimes directory", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
-			config: configWithRuntimes(map[string]string{testRuntimeCodex: "agents/planner.md"}),
+			config: configWithRuntimes(map[string]string{"codex": "agents/planner.md"}),
 		})
 		assertLoadErrorContains(t, root, `runtime "codex" path "agents/planner.md" must be under runtimes/`)
 	})
 
 	t.Run("symlink escape", func(t *testing.T) {
 		root := writeMinimalProject(t, projectFixture{
-			config:   configWithRuntimes(map[string]string{testRuntimeCodex: testRuntimeCodexPath}),
-			runtimes: map[string]string{testRuntimeCodex: validCodexRuntimeDescriptor()},
+			config:   configWithRuntimes(map[string]string{"codex": "runtimes/codex.yaml"}),
+			runtimes: map[string]string{"codex": validCodexRuntimeDescriptor()},
 		})
 		outside := filepath.Join(t.TempDir(), "codex.yaml")
 		writeFile(t, outside, validCodexRuntimeDescriptor())

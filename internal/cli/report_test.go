@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -16,29 +17,29 @@ import (
 func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 	reportPath := filepath.Join(root, "detail.md")
 	writeCLIFile(t, reportPath, "## Detail\n")
 
 	output := executeCLICommand(t, []string{
 		commandReport,
 		"--run=" + result.runID,
-		cliFlagStep, cliStepPlan,
-		cliFlagAgent, cliAgentPlanner,
-		cliFlagAttempt, cliAttempt001,
-		cliFlagStatus, cliStatusDone,
-		cliFlagResult, cliResultReady,
-		cliFlagSummary, cliSummaryReady,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "attempt-001",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Plan is ready.",
 		"--changed-path=README.md",
 		"--changed-path", "internal/cli/report.go",
-		"--command", cliGoTestInternalCLI,
-		"--test", cliGoTestInternalCLI,
-		"--risk", cliRiskNone,
-		cliFlagFollowUp, "Document report summaries",
-		cliFlagReportFile, reportPath,
+		"--command", "go test ./internal/cli",
+		"--test", "go test ./internal/cli",
+		"--risk", "none",
+		"--follow-up", "Document report summaries",
+		"--report-file", reportPath,
 	})
-	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
 	store := openCLIStore(t, root)
 
 	loaded, err := store.LoadContext(context.Background(), result.runID)
@@ -51,7 +52,7 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 		t.Fatalf("attempt = %+v, want reported attempt with report", attempt)
 	}
 
-	if attempt.Report.ChangedPaths[0] != "README.md" || attempt.Report.Commands[0] != cliGoTestInternalCLI {
+	if attempt.Report.ChangedPaths[0] != "README.md" || attempt.Report.Commands[0] != "go test ./internal/cli" {
 		t.Fatalf("report = %+v, want preserved optional fields", attempt.Report)
 	}
 
@@ -59,7 +60,7 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 		t.Fatalf("changed paths = %+v, want repeated flag order preserved", attempt.Report.ChangedPaths)
 	}
 
-	if attempt.Report.Tests[0] != cliGoTestInternalCLI || attempt.Report.Risks[0] != cliRiskNone || attempt.Report.Followups[0].Title != "Document report summaries" {
+	if attempt.Report.Tests[0] != "go test ./internal/cli" || attempt.Report.Risks[0] != "none" || attempt.Report.Followups[0].Title != "Document report summaries" {
 		t.Fatalf("report = %+v, want preserved tests, risks, and followups", attempt.Report)
 	}
 
@@ -73,14 +74,14 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 
 	reportContent := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path))))
 	assertCLIOutputContainsAll(t, reportContent, []string{
-		cliWorkerReportHeading,
-		cliMetadataHeading,
+		"# Worker Report\n",
+		"## Metadata\n",
 		"- run_id: `" + result.runID + "`",
 		"- step_id: `plan`",
 		"- agent_id: `planner`",
 		"- attempt_id: `attempt-001`",
 		"- status/result: `done/ready`",
-		cliSummarySectionReady,
+		"## Summary\n\nPlan is ready.",
 		"## Commands\n\n- go test ./internal/cli",
 		"## Tests\n\n- go test ./internal/cli",
 		"## Risks\n\n- none",
@@ -106,20 +107,20 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 func TestExecuteReportFlagsPersistsStructuredOnlyCanonicalReport(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 
 	output := executeCLICommand(t, []string{
 		commandReport,
 		"--run=" + result.runID,
-		cliFlagStep, cliStepPlan,
-		cliFlagAgent, cliAgentPlanner,
-		cliFlagAttempt, cliAttempt001,
-		cliFlagStatus, cliStatusDone,
-		cliFlagResult, cliResultReady,
-		cliFlagSummary, cliSummaryReady,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "attempt-001",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Plan is ready.",
 	})
-	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
 
 	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
@@ -133,9 +134,9 @@ func TestExecuteReportFlagsPersistsStructuredOnlyCanonicalReport(t *testing.T) {
 
 	reportContent := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path))))
 	assertCLIOutputContainsAll(t, reportContent, []string{
-		cliWorkerReportHeading,
-		cliMetadataHeading,
-		cliSummarySectionReady,
+		"# Worker Report\n",
+		"## Metadata\n",
+		"## Summary\n\nPlan is ready.",
 	})
 
 	if strings.Contains(reportContent, "## Report Detail") {
@@ -145,7 +146,7 @@ func TestExecuteReportFlagsPersistsStructuredOnlyCanonicalReport(t *testing.T) {
 
 func TestExecuteReportHelp(t *testing.T) {
 	output := executeCLICommand(t, []string{commandReport, helpFlag})
-	for _, want := range []string{cliUsage, cliFlagJSONFile, "--changed-path", cliFlagFollowUp, cliFlagReportFile} {
+	for _, want := range []string{"Usage:", "--json-file", "--changed-path", "--follow-up", "--report-file"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("report help output missing %q:\n%s", want, output)
 		}
@@ -158,8 +159,8 @@ func TestExecuteReportFlagParsingErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: cliCommandUnknown, args: []string{commandReport, cliFlagBogus}, want: cliUnknownBogusFlag},
-		{name: "missing value", args: []string{commandReport, cliFlagRun}, want: "flag needs an argument"},
+		{name: "unknown", args: []string{commandReport, "--bogus"}, want: "unknown flag: --bogus"},
+		{name: "missing value", args: []string{commandReport, "--run"}, want: "flag needs an argument"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -172,7 +173,7 @@ func TestExecuteReportFlagParsingErrors(t *testing.T) {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
 
-			if got := stderr.String(); !strings.Contains(got, tt.want) || !strings.Contains(got, cliUsage) {
+			if got := stderr.String(); !strings.Contains(got, tt.want) || !strings.Contains(got, "Usage:") {
 				t.Fatalf("stderr = %q, want %q and usage", got, tt.want)
 			}
 		})
@@ -191,7 +192,7 @@ func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
 				t.Helper()
 				return filepath.Join(root, "missing.md")
 			},
-			wantError: cliReportFileField,
+			wantError: "report_file",
 		},
 		{
 			name: "directory",
@@ -232,7 +233,7 @@ func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
 
 				return path
 			},
-			wantError: cliReportFileField,
+			wantError: "report_file",
 		},
 		{
 			name: "symlink",
@@ -250,28 +251,28 @@ func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
 
 				return link
 			},
-			wantError: cliReportFileField,
+			wantError: "report_file",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIProject(t, root, "optional", true)
-			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-			startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 			reportPath := tc.makePath(t, root)
 
 			var stdout, stderr bytes.Buffer
 
 			err := Execute([]string{
 				commandReport,
-				cliFlagRun, result.runID,
-				cliFlagStep, cliStepPlan,
-				cliFlagAgent, cliAgentPlanner,
-				cliFlagAttempt, cliAttempt001,
-				cliFlagStatus, cliStatusDone,
-				cliFlagResult, cliResultReady,
-				cliFlagSummary, cliSummaryReady,
-				cliFlagReportFile, reportPath,
+				"--run", result.runID,
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--status", "done",
+				"--result", "ready",
+				"--summary", "Plan is ready.",
+				"--report-file", reportPath,
 			}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want report_file error")
@@ -299,28 +300,28 @@ func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
 }
 
 func TestExecuteReportRejectsReservedSystemOutcomes(t *testing.T) {
-	for _, reserved := range []string{"invalid_report", "missing_report", cliResultTimeout, "process_error", cliResultError} {
+	for _, reserved := range []string{"invalid_report", "missing_report", "timeout", "process_error", "error"} {
 		t.Run(reserved, func(t *testing.T) {
 			root := withTempCwd(t)
 			testutil.WriteProject(t, root, testutil.ProjectOptions{
 				Beads:            "optional",
 				MarkdownFallback: true,
-				FailedResults:    []string{"invalid_report", "missing_report", cliResultTimeout, "process_error", cliResultError},
+				FailedResults:    []string{"invalid_report", "missing_report", "timeout", "process_error", "error"},
 			})
-			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-			startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 
 			var stdout, stderr bytes.Buffer
 
 			err := Execute([]string{
 				commandReport,
-				cliFlagRun, result.runID,
-				cliFlagStep, cliStepPlan,
-				cliFlagAgent, cliAgentPlanner,
-				cliFlagAttempt, cliAttempt001,
-				cliFlagStatus, cliStatusFailed,
-				cliFlagResult, reserved,
-				cliFlagSummary, "Trying to claim a system outcome.",
+				"--run", result.runID,
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--status", "failed",
+				"--result", reserved,
+				"--summary", "Trying to claim a system outcome.",
 			}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want reserved outcome rejection")
@@ -336,7 +337,7 @@ func TestExecuteReportRejectsReservedSystemOutcomes(t *testing.T) {
 			}
 
 			attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
-			if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != cliStatusFailed || attempt.Result != runstore.AttemptResultInvalidReport {
+			if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != "failed" || attempt.Result != runstore.AttemptResultInvalidReport {
 				t.Fatalf("attempt = %+v, want failed/invalid_report", attempt)
 			}
 		})
@@ -346,21 +347,21 @@ func TestExecuteReportRejectsReservedSystemOutcomes(t *testing.T) {
 func TestExecuteReportInvalidCurrentAttemptTerminalizesInvalidReport(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 
 	var stdout, stderr bytes.Buffer
 
 	err := Execute([]string{
 		commandReport,
-		cliFlagRun, result.runID,
-		cliFlagStep, cliStepPlan,
-		cliFlagAgent, cliAgentPlanner,
-		cliFlagAttempt, cliAttempt001,
-		cliFlagStatus, cliStatusDone,
-		cliFlagResult, "not-allowed",
-		cliFlagSummary, "Bad result.",
-		cliFlagFollowUp, cliFollowupShouldNotAppend,
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "attempt-001",
+		"--status", "done",
+		"--result", "not-allowed",
+		"--summary", "Bad result.",
+		"--follow-up", "Should not append",
 	}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want invalid report error")
@@ -380,7 +381,7 @@ func TestExecuteReportInvalidCurrentAttemptTerminalizesInvalidReport(t *testing.
 	}
 
 	attempt := loaded.Status.Attempts[len(loaded.Status.Attempts)-1]
-	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != cliStatusFailed || attempt.Result != runstore.AttemptResultInvalidReport {
+	if attempt.State != runstore.AttemptStateInvalidReport || attempt.Status != "failed" || attempt.Result != runstore.AttemptResultInvalidReport {
 		t.Fatalf("attempt = %+v, want failed/invalid_report", attempt)
 	}
 
@@ -392,21 +393,21 @@ func TestExecuteReportInvalidCurrentAttemptTerminalizesInvalidReport(t *testing.
 func TestExecuteReportWrongAttemptRecordsIgnoredBeforeConfigLoad(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 	writeCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
 
 	var stdout, stderr bytes.Buffer
 
 	err := Execute([]string{
 		commandReport,
-		cliFlagRun, result.runID,
-		cliFlagStep, cliStepPlan,
-		cliFlagAgent, cliAgentPlanner,
-		cliFlagAttempt, "old-attempt",
-		cliFlagStatus, cliStatusDone,
-		cliFlagResult, cliResultReady,
-		cliFlagSummary, "Stale report.",
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "old-attempt",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Stale report.",
 	}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want wrong attempt error")
@@ -421,7 +422,7 @@ func TestExecuteReportWrongAttemptRecordsIgnoredBeforeConfigLoad(t *testing.T) {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
 
-	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+	if got := loaded.Events[len(loaded.Events)-1].Type; got != "report.ignored" {
 		t.Fatalf("last event type = %q, want report.ignored", got)
 	}
 }
@@ -436,11 +437,11 @@ func TestExecuteReportShapeInvalidCurrentAttemptDoesNotLoadConfig(t *testing.T) 
 			name: "missing-status",
 			args: []string{
 				commandReport,
-				cliFlagStep, cliStepPlan,
-				cliFlagAgent, cliAgentPlanner,
-				cliFlagAttempt, cliAttempt001,
-				cliFlagResult, cliResultReady,
-				cliFlagSummary, "Missing status.",
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--result", "ready",
+				"--summary", "Missing status.",
 			},
 			want: "status is required",
 		},
@@ -448,12 +449,12 @@ func TestExecuteReportShapeInvalidCurrentAttemptDoesNotLoadConfig(t *testing.T) 
 			name: "reserved-outcome",
 			args: []string{
 				commandReport,
-				cliFlagStep, cliStepPlan,
-				cliFlagAgent, cliAgentPlanner,
-				cliFlagAttempt, cliAttempt001,
-				cliFlagStatus, cliStatusFailed,
-				cliFlagResult, cliResultTimeout,
-				cliFlagSummary, "Reserved outcome.",
+				"--step", "plan",
+				"--agent", "planner",
+				"--attempt", "attempt-001",
+				"--status", "failed",
+				"--result", "timeout",
+				"--summary", "Reserved outcome.",
 			},
 			want: "reserved system outcome failed/timeout",
 		},
@@ -461,11 +462,11 @@ func TestExecuteReportShapeInvalidCurrentAttemptDoesNotLoadConfig(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIProject(t, root, "optional", true)
-			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-			startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 			writeCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "version: [\n")
 
-			args := append([]string{commandReport, cliFlagRun, result.runID}, tc.args[1:]...)
+			args := append([]string{commandReport, "--run", result.runID}, tc.args[1:]...)
 
 			var stdout, stderr bytes.Buffer
 
@@ -506,12 +507,12 @@ func TestExecuteReportMissingRequiredFieldTerminalizesInvalidReport(t *testing.T
 			args: func(runID string) []string {
 				return []string{
 					commandReport,
-					cliFlagRun, runID,
-					cliFlagStep, cliStepPlan,
-					cliFlagAgent, cliAgentPlanner,
-					cliFlagAttempt, cliAttempt001,
-					cliFlagResult, cliResultReady,
-					cliFlagSummary, "Missing status.",
+					"--run", runID,
+					"--step", "plan",
+					"--agent", "planner",
+					"--attempt", "attempt-001",
+					"--result", "ready",
+					"--summary", "Missing status.",
 				}
 			},
 			want: "status is required",
@@ -521,12 +522,12 @@ func TestExecuteReportMissingRequiredFieldTerminalizesInvalidReport(t *testing.T
 			args: func(runID string) []string {
 				return []string{
 					commandReport,
-					cliFlagRun, runID,
-					cliFlagStep, cliStepPlan,
-					cliFlagAgent, cliAgentPlanner,
-					cliFlagAttempt, cliAttempt001,
-					cliFlagStatus, cliStatusDone,
-					cliFlagSummary, "Missing result.",
+					"--run", runID,
+					"--step", "plan",
+					"--agent", "planner",
+					"--attempt", "attempt-001",
+					"--status", "done",
+					"--summary", "Missing result.",
 				}
 			},
 			want: "result is required",
@@ -536,13 +537,13 @@ func TestExecuteReportMissingRequiredFieldTerminalizesInvalidReport(t *testing.T
 			args: func(runID string) []string {
 				return []string{
 					commandReport,
-					cliFlagRun, runID,
-					cliFlagStep, cliStepPlan,
-					cliFlagAgent, cliAgentPlanner,
-					cliFlagAttempt, cliAttempt001,
-					cliFlagStatus, cliStatusDone,
-					cliFlagResult, cliResultReady,
-					cliFlagSummary, " \t",
+					"--run", runID,
+					"--step", "plan",
+					"--agent", "planner",
+					"--attempt", "attempt-001",
+					"--status", "done",
+					"--result", "ready",
+					"--summary", " \t",
 				}
 			},
 			want: "summary is required",
@@ -551,8 +552,8 @@ func TestExecuteReportMissingRequiredFieldTerminalizesInvalidReport(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIProject(t, root, "optional", true)
-			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-			startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 
 			var stdout, stderr bytes.Buffer
 
@@ -584,7 +585,7 @@ func TestExecuteReportJSONTrailingObjectTerminalizesInvalidReport(t *testing.T) 
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{commandReport, cliFlagJSONFile, jsonPath}, &stdout, &stderr)
+	err := Execute([]string{commandReport, "--json-file", jsonPath}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want trailing JSON schema error")
 	}
@@ -602,7 +603,7 @@ func TestExecuteReportJSONSchemaInvalidCurrentAttemptDoesNotLoadConfig(t *testin
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{commandReport, cliFlagJSONFile, jsonPath}, &stdout, &stderr)
+	err := Execute([]string{commandReport, "--json-file", jsonPath}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want schema validation error")
 	}
@@ -621,8 +622,8 @@ func TestExecuteReportJSONSchemaInvalidCurrentAttemptDoesNotLoadConfig(t *testin
 func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 	jsonPath := filepath.Join(root, "report.json")
 	writeCLIFile(t, jsonPath, fmt.Sprintf(`{
   "run_id": %q,
@@ -642,7 +643,7 @@ func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
 }`, result.runID))
 
 	output := executeCLICommand(t, []string{commandReport, "--json-file=" + jsonPath})
-	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
 
 	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
@@ -654,7 +655,7 @@ func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
 		t.Fatalf("report = %+v, want JSON command", report)
 	}
 
-	if report.ChangedPaths[0] != "README.md" || report.Tests[0] != "task tests" || report.Risks[0] != cliRiskNone {
+	if report.ChangedPaths[0] != "README.md" || report.Tests[0] != "task tests" || report.Risks[0] != "none" {
 		t.Fatalf("report = %+v, want JSON optional slices", report)
 	}
 
@@ -674,8 +675,8 @@ func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
 func TestExecuteReportJSONFileCopiesMarkdownDetail(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 	reportPath := filepath.Join(root, "detail.md")
 	writeCLIFile(t, reportPath, "")
 
@@ -691,8 +692,8 @@ func TestExecuteReportJSONFileCopiesMarkdownDetail(t *testing.T) {
   "report_file": %q
 }`, result.runID, reportPath))
 
-	output := executeCLICommand(t, []string{commandReport, cliFlagJSONFile, jsonPath})
-	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
+	output := executeCLICommand(t, []string{commandReport, "--json-file", jsonPath})
+	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, "attempt-001"})
 
 	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
@@ -710,9 +711,9 @@ func TestExecuteReportJSONFileCopiesMarkdownDetail(t *testing.T) {
 
 	got := string(readCLIFile(t, filepath.Join(root, ".orc", "runs", result.runID, filepath.FromSlash(attempt.ReportRef.Path))))
 	assertCLIOutputContainsAll(t, got, []string{
-		cliWorkerReportHeading,
-		cliMetadataHeading,
-		cliSummarySectionReady,
+		"# Worker Report\n",
+		"## Metadata\n",
+		"## Summary\n\nPlan is ready.",
 		"## Report Detail\n\n",
 	})
 
@@ -726,7 +727,7 @@ func TestExecuteReportRejectsJSONMixedWithFlags(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{commandReport, cliFlagJSONFile, jsonPath, cliFlagSummary, "mixed"}, &stdout, &stderr)
+	err := Execute([]string{commandReport, "--json-file", jsonPath, "--summary", "mixed"}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want mixed input rejection")
 	}
@@ -743,7 +744,7 @@ func TestExecuteReportJSONUnknownTopLevelFieldTerminalizesInvalidReport(t *testi
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{commandReport, cliFlagJSONFile, jsonPath}, &stdout, &stderr)
+	err := Execute([]string{commandReport, "--json-file", jsonPath}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want unknown field error")
 	}
@@ -764,7 +765,7 @@ func TestExecuteReportJSONReportRefTerminalizesInvalidReport(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{commandReport, cliFlagJSONFile, jsonPath}, &stdout, &stderr)
+	err := Execute([]string{commandReport, "--json-file", jsonPath}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want report_ref schema error")
 	}
@@ -790,7 +791,7 @@ func TestExecuteReportJSONUnknownNestedFieldTerminalizesInvalidReport(t *testing
 
 	var stdout, stderr bytes.Buffer
 
-	err := Execute([]string{commandReport, cliFlagJSONFile, jsonPath}, &stdout, &stderr)
+	err := Execute([]string{commandReport, "--json-file", jsonPath}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want nested unknown field error")
 	}
@@ -805,8 +806,8 @@ func TestExecuteReportJSONUnknownNestedFieldTerminalizesInvalidReport(t *testing
 func TestExecuteReportWrongAttemptRecordsIgnoredEvent(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	startCLIActiveAttempt(t, root, result.runID, cliAttempt001)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	startCLIActiveAttempt(t, root, result.runID, "attempt-001")
 	reportPath := filepath.Join(root, "ignored-detail.md")
 	writeCLIFile(t, reportPath, "## Ignored\n")
 
@@ -814,15 +815,15 @@ func TestExecuteReportWrongAttemptRecordsIgnoredEvent(t *testing.T) {
 
 	err := Execute([]string{
 		commandReport,
-		cliFlagRun, result.runID,
-		cliFlagStep, cliStepPlan,
-		cliFlagAgent, cliAgentPlanner,
-		cliFlagAttempt, "old-attempt",
-		cliFlagStatus, cliStatusDone,
-		cliFlagResult, cliResultReady,
-		cliFlagSummary, "Stale report.",
-		cliFlagReportFile, reportPath,
-		cliFlagFollowUp, cliFollowupShouldNotAppend,
+		"--run", result.runID,
+		"--step", "plan",
+		"--agent", "planner",
+		"--attempt", "old-attempt",
+		"--status", "done",
+		"--result", "ready",
+		"--summary", "Stale report.",
+		"--report-file", reportPath,
+		"--follow-up", "Should not append",
 	}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("Execute returned nil error, want wrong attempt error")
@@ -837,11 +838,11 @@ func TestExecuteReportWrongAttemptRecordsIgnoredEvent(t *testing.T) {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
 
-	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != cliAttempt001 {
+	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != "attempt-001" {
 		t.Fatalf("active attempt = %+v, want unchanged attempt-001", loaded.Status.ActiveAttempt)
 	}
 
-	if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+	if got := loaded.Events[len(loaded.Events)-1].Type; got != "report.ignored" {
 		t.Fatalf("last event type = %q, want report.ignored", got)
 	}
 
@@ -868,28 +869,28 @@ func TestExecuteReportWrongStepAgentAndStartingAttemptRecordIgnoredEvent(t *test
 		start      func(t *testing.T, root, runID, attemptID string)
 		wantActive string
 	}{
-		{name: "wrong-step", step: "future", agent: cliAgentPlanner, start: startCLIActiveAttempt, wantActive: runstore.AttemptStateActive},
-		{name: "wrong-agent", step: cliStepPlan, agent: "other", start: startCLIActiveAttempt, wantActive: runstore.AttemptStateActive},
-		{name: "starting", step: cliStepPlan, agent: cliAgentPlanner, start: startCLIStartingAttempt, wantActive: runstore.AttemptStateStarting},
+		{name: "wrong-step", step: "future", agent: "planner", start: startCLIActiveAttempt, wantActive: runstore.AttemptStateActive},
+		{name: "wrong-agent", step: "plan", agent: "other", start: startCLIActiveAttempt, wantActive: runstore.AttemptStateActive},
+		{name: "starting", step: "plan", agent: "planner", start: startCLIStartingAttempt, wantActive: runstore.AttemptStateStarting},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIProject(t, root, "optional", true)
-			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-			tc.start(t, root, result.runID, cliAttempt001)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+			tc.start(t, root, result.runID, "attempt-001")
 
 			var stdout, stderr bytes.Buffer
 
 			err := Execute([]string{
 				commandReport,
-				cliFlagRun, result.runID,
-				cliFlagStep, tc.step,
-				cliFlagAgent, tc.agent,
-				cliFlagAttempt, cliAttempt001,
-				cliFlagStatus, cliStatusDone,
-				cliFlagResult, cliResultReady,
-				cliFlagSummary, "Ignored.",
-				cliFlagFollowUp, cliFollowupShouldNotAppend,
+				"--run", result.runID,
+				"--step", tc.step,
+				"--agent", tc.agent,
+				"--attempt", "attempt-001",
+				"--status", "done",
+				"--result", "ready",
+				"--summary", "Ignored.",
+				"--follow-up", "Should not append",
 			}, &stdout, &stderr)
 			if err == nil {
 				t.Fatal("Execute returned nil error, want ignored report error")
@@ -904,7 +905,7 @@ func TestExecuteReportWrongStepAgentAndStartingAttemptRecordIgnoredEvent(t *test
 				t.Fatalf("active attempt = %+v, want unchanged %s", loaded.Status.ActiveAttempt, tc.wantActive)
 			}
 
-			if got := loaded.Events[len(loaded.Events)-1].Type; got != reportIgnoredEvent {
+			if got := loaded.Events[len(loaded.Events)-1].Type; got != "report.ignored" {
 				t.Fatalf("last event type = %q, want report.ignored", got)
 			}
 

@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -57,9 +58,9 @@ func TestRecordFollowupAppendsAttributedMarkdown(t *testing.T) {
 			Details: "Capture summary context once follow-up recording lands.",
 		},
 		Source:    FollowupSourceReport,
-		StepID:    testWorkflowStatePlan,
-		AgentID:   testAgentPlanner,
-		AttemptID: testAttemptID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
 		Time:      recordedAt,
 	})
 	if err != nil {
@@ -151,7 +152,7 @@ func TestRecordFollowupRequiresTitleAndReportAttribution(t *testing.T) {
 	_, err = store.RecordFollowup(run.ID, RecordFollowupRequest{
 		Followup: Followup{Title: "Report follow-up"},
 		Source:   FollowupSourceReport,
-		StepID:   testWorkflowStatePlan,
+		StepID:   "plan",
 	})
 	requireErrorContains(t, err, "agent id is required")
 

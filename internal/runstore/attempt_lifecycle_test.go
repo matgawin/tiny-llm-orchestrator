@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -14,9 +15,9 @@ func TestAttemptLifecyclePersistsAndReplaysActiveAttemptState(t *testing.T) {
 	startedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
 	started, event, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStatePlan,
-		AgentID:         testAgentPlanner,
-		AttemptID:       testAttemptID,
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       "attempt-001",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
 		Time:            startedAt,
@@ -31,7 +32,7 @@ func TestAttemptLifecyclePersistsAndReplaysActiveAttemptState(t *testing.T) {
 
 	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindPrompt,
-		Name:    testWorkflowStatePlan,
+		Name:    "plan",
 		Content: []byte("prompt\n"),
 		Time:    startedAt.Add(time.Minute),
 	})
@@ -54,7 +55,7 @@ func TestAttemptLifecyclePersistsAndReplaysActiveAttemptState(t *testing.T) {
 
 	logRef, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindLog,
-		Name:    testPlanAttemptID,
+		Name:    "plan-attempt-001",
 		Content: []byte("log\n"),
 		Time:    startedAt.Add(2500 * time.Millisecond),
 	})
@@ -78,7 +79,7 @@ func TestAttemptLifecyclePersistsAndReplaysActiveAttemptState(t *testing.T) {
 	processed, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
 		AttemptID:        started.AttemptID,
 		PID:              12345,
-		ProcessStartTime: testProcessStartTime,
+		ProcessStartTime: "123456789",
 		Time:             startedAt.Add(4 * time.Minute),
 	})
 	if err != nil {
@@ -118,21 +119,21 @@ func TestAttemptLifecyclePersistsAndReplaysActiveAttemptState(t *testing.T) {
 func TestRecordAttemptProcessOnlyTransitionsStartingAttemptOnce(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-process-once-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
-		AttemptID:        testAttemptID,
+		AttemptID:        "attempt-001",
 		PID:              12345,
-		ProcessStartTime: testProcessStartTime,
+		ProcessStartTime: "123456789",
 	}); err != nil {
 		t.Fatalf("RecordAttemptProcess first call returned error: %v", err)
 	}
 
 	_, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
-		AttemptID:        testAttemptID,
+		AttemptID:        "attempt-001",
 		PID:              23456,
-		ProcessStartTime: testProcessStartTime,
+		ProcessStartTime: "123456789",
 	})
 	requireErrorContains(t, err, "want starting")
 
@@ -149,13 +150,13 @@ func TestRecordAttemptProcessOnlyTransitionsStartingAttemptOnce(t *testing.T) {
 func TestLoadRejectsDuplicateAttemptProcessStarted(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-process-replay-once-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
-		AttemptID:        testAttemptID,
+		AttemptID:        "attempt-001",
 		PID:              12345,
-		ProcessStartTime: testProcessStartTime,
+		ProcessStartTime: "123456789",
 	}); err != nil {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestLoadRejectsDuplicateAttemptProcessStarted(t *testing.T) {
 func TestLoadRejectsAttemptWithNonPositiveDurations(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-duration-replay-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 	mutateRunEventPayload(t, run, eventAttemptStarted, func(payload *attemptStartedPayload) {
 		payload.Attempt.Timeout = "0s"
 	})
@@ -199,7 +200,7 @@ func TestLoadRejectsAttemptWithNonPositiveDurations(t *testing.T) {
 func TestAttemptArtifactRefsMustBeRecordedWithExpectedKind(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-ref-kind-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	logRef, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindLog,
@@ -211,7 +212,7 @@ func TestAttemptArtifactRefsMustBeRecordedWithExpectedKind(t *testing.T) {
 	}
 
 	_, _, err = store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PromptRef: logRef,
 	})
 	requireErrorContains(t, err, "kind", string(KindPrompt))
@@ -226,7 +227,7 @@ func TestAttemptArtifactRefsMustBeRecordedWithExpectedKind(t *testing.T) {
 	}
 
 	_, _, err = store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		LogRef: ArtifactRef{
 			Kind:          KindLog,
 			Path:          "logs/000099-missing.log",
@@ -240,11 +241,11 @@ func TestAttemptArtifactRefsMustBeRecordedWithExpectedKind(t *testing.T) {
 func TestLoadRejectsAttemptArtifactRefsNotRecordedWithExpectedKind(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-replay-ref-kind-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	promptRef, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindPrompt,
-		Name:    testWorkflowStatePlan,
+		Name:    "plan",
 		Content: []byte("prompt\n"),
 	})
 	if err != nil {
@@ -252,7 +253,7 @@ func TestLoadRejectsAttemptArtifactRefsNotRecordedWithExpectedKind(t *testing.T)
 	}
 
 	if _, _, err := store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PromptRef: promptRef,
 	}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
@@ -269,47 +270,47 @@ func TestLoadRejectsAttemptArtifactRefsNotRecordedWithExpectedKind(t *testing.T)
 func TestAttemptPromptAndLogCanOnlyBeLinkedOnceWhileStarting(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-link-once-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	promptRef := writeArtifactForTest(t, store, run.ID, KindPrompt, testWorkflowStatePlan, []byte("prompt\n"))
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	promptRef := writeArtifactForTest(t, store, run.ID, KindPrompt, "plan", []byte("prompt\n"))
 
 	logRef := writeArtifactForTest(t, store, run.ID, KindLog, "plan-attempt-001", []byte("log\n"))
 	if _, _, err := store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PromptRef: promptRef,
 	}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
 	_, _, err := store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PromptRef: promptRef,
 	})
 	requireErrorContains(t, err, "already has prompt ref")
 
 	if _, _, err := store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		LogRef:    logRef,
 	}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
 	_, _, err = store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		LogRef:    logRef,
 	})
 	requireErrorContains(t, err, "already has log ref")
 
 	if _, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
-		AttemptID:        testAttemptID,
+		AttemptID:        "attempt-001",
 		PID:              12345,
-		ProcessStartTime: testProcessStartTime,
+		ProcessStartTime: "123456789",
 	}); err != nil {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
 	latePrompt := writeArtifactForTest(t, store, run.ID, KindPrompt, "late", []byte("late\n"))
 	_, _, err = store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PromptRef: latePrompt,
 	})
 	requireErrorContains(t, err, "want starting")
@@ -318,23 +319,23 @@ func TestAttemptPromptAndLogCanOnlyBeLinkedOnceWhileStarting(t *testing.T) {
 func TestRecordAttemptProcessRequiresPromptAndLogRefs(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-process-requires-refs-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 	_, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PID:       12345,
 	})
 	requireErrorContains(t, err, "prompt ref is required")
 
-	promptRef := writeArtifactForTest(t, store, run.ID, KindPrompt, testWorkflowStatePlan, []byte("prompt\n"))
+	promptRef := writeArtifactForTest(t, store, run.ID, KindPrompt, "plan", []byte("prompt\n"))
 	if _, _, err := store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PromptRef: promptRef,
 	}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
 	_, _, err = store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		PID:       12345,
 	})
 	requireErrorContains(t, err, "log ref is required")
@@ -343,11 +344,11 @@ func TestRecordAttemptProcessRequiresPromptAndLogRefs(t *testing.T) {
 func TestRecordAttemptProcessValidatesProcessStartTime(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-process-start-time-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 
 	_, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{
-		AttemptID:        testAttemptID,
+		AttemptID:        "attempt-001",
 		PID:              12345,
 		ProcessStartTime: "not-a-number",
 	})
@@ -357,15 +358,15 @@ func TestRecordAttemptProcessValidatesProcessStartTime(t *testing.T) {
 func TestLoadRejectsLateOrDuplicatePromptLogAndProcessBeforeRefs(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-replay-order-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	promptRef := writeArtifactForTest(t, store, run.ID, KindPrompt, testWorkflowStatePlan, []byte("prompt\n"))
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	promptRef := writeArtifactForTest(t, store, run.ID, KindPrompt, "plan", []byte("prompt\n"))
 
 	logRef := writeArtifactForTest(t, store, run.ID, KindLog, "plan-attempt-001", []byte("log\n"))
-	if _, _, err := store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{AttemptID: testAttemptID, PromptRef: promptRef}); err != nil {
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), run.ID, AttemptPromptRequest{AttemptID: "attempt-001", PromptRef: promptRef}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{AttemptID: testAttemptID, LogRef: logRef}); err != nil {
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{AttemptID: "attempt-001", LogRef: logRef}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
@@ -388,7 +389,7 @@ func TestLoadRejectsLateOrDuplicatePromptLogAndProcessBeforeRefs(t *testing.T) {
 	events = readRunEvents(t, run)
 	writeRunEvents(t, run, events[:len(events)-1])
 
-	if _, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{AttemptID: testAttemptID, PID: 12345, ProcessStartTime: testProcessStartTime}); err != nil {
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), run.ID, AttemptProcessRequest{AttemptID: "attempt-001", PID: 12345, ProcessStartTime: "123456789"}); err != nil {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
@@ -409,9 +410,9 @@ func TestLoadRejectsLateOrDuplicatePromptLogAndProcessBeforeRefs(t *testing.T) {
 	requireErrorContains(t, err, "want starting")
 
 	run = createManualRun(t, store, "attempt-replay-process-before-refs-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
-	processPayload, err := marshalPayload(attemptProcessPayload{AttemptID: testAttemptID, PID: 12345})
+	processPayload, err := marshalPayload(attemptProcessPayload{AttemptID: "attempt-001", PID: 12345})
 	if err != nil {
 		t.Fatalf("marshal process payload: %v", err)
 	}
@@ -432,11 +433,11 @@ func TestLoadRejectsLateOrDuplicatePromptLogAndProcessBeforeRefs(t *testing.T) {
 func TestLoadRejectsInvalidProcessStartTime(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-process-start-time-replay-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 
 	processPayload, err := marshalPayload(attemptProcessPayload{
-		AttemptID:        testAttemptID,
+		AttemptID:        "attempt-001",
 		PID:              12345,
 		ProcessStartTime: "not-a-number",
 	})
@@ -464,55 +465,55 @@ func TestStartAttemptRejectsDuplicateHistoricalAttemptID(t *testing.T) {
 	run := createManualRun(t, store, "duplicate-attempt-run")
 	startedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
-		ExitState: testExitStateExited,
+		ExitState: "exited",
 		Time:      startedAt.Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("FinishAttempt returned error: %v", err)
 	}
 
 	_, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStatePlan,
-		AgentID:         testAgentPlanner,
-		AttemptID:       testAttemptID,
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       "attempt-001",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
 		Time:            startedAt.Add(2 * time.Minute),
 	})
-	requireErrorContains(t, err, "already has attempt", testAttemptID)
+	requireErrorContains(t, err, "already has attempt", "attempt-001")
 }
 
 func TestStartAttemptRejectsUnconsumedLauncherOutcome(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "unconsumed-outcome-attempt-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateMissingReport,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultMissingReport,
-		ExitState: testExitStateExited,
+		ExitState: "exited",
 	}); err != nil {
 		t.Fatalf("FinishAttempt returned error: %v", err)
 	}
 
 	_, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStatePlan,
-		AgentID:         testAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       "attempt-002",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
 	})
-	requireErrorContains(t, err, "unconsumed launcher outcome", testAttemptID)
+	requireErrorContains(t, err, "unconsumed launcher outcome", "attempt-001")
 }
 
 func TestStartAttemptRejectsRetryLineageWithoutConsumedOutcome(t *testing.T) {
@@ -520,18 +521,18 @@ func TestStartAttemptRejectsRetryLineageWithoutConsumedOutcome(t *testing.T) {
 	run := createManualRun(t, store, "retry-lineage-without-consume-run")
 
 	_, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStatePlan,
-		AgentID:         testAgentPlanner,
-		AttemptID:       testAttemptID,
+		StepID:          "plan",
+		AgentID:         "planner",
+		AttemptID:       "attempt-001",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
-		RetryLineage:    &RetryLineage{StepID: testWorkflowStatePlan, Counts: map[string]int{"failed/missing_report": 1}},
+		RetryLineage:    &RetryLineage{StepID: "plan", Counts: map[string]int{"failed/missing_report": 1}},
 	})
 	requireErrorContains(t, err, "retry lineage requires consume_attempt_id")
 }
 
 func TestStartAttemptRejectsTerminalRunStates(t *testing.T) {
-	for _, state := range []string{readyForHumanState, "blocked_for_human", "cancelled"} {
+	for _, state := range []string{"ready_for_human", "blocked_for_human", "cancelled"} {
 		t.Run(state, func(t *testing.T) {
 			store := openStore(t, t.TempDir())
 
@@ -541,8 +542,8 @@ func TestStartAttemptRejectsTerminalRunStates(t *testing.T) {
 			}
 
 			_, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-				StepID:          testWorkflowStatePlan,
-				AgentID:         testAgentPlanner,
+				StepID:          "plan",
+				AgentID:         "planner",
 				AttemptID:       "attempt-terminal",
 				Timeout:         30 * time.Minute,
 				ReportExitGrace: 30 * time.Second,
@@ -564,9 +565,9 @@ func TestStartAttemptRejectsTerminalRunStates(t *testing.T) {
 func TestUpdateStatusRejectsNonRunningStateWhileAttemptActive(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "active-status-update-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
-	_, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
+	_, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: "ready_for_human"})
 	requireErrorContains(t, err, "active attempt", "ready_for_human")
 
 	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: stateRunning}); err != nil {
@@ -606,8 +607,8 @@ func TestLoadRejectsNewAttemptStartedAfterUnconsumedLauncherOutcome(t *testing.T
 		t.Helper()
 
 		attempt, err := newStartedAttempt(run.ID, StartAttemptRequest{
-			StepID:          testWorkflowStatePlan,
-			AgentID:         testAgentPlanner,
+			StepID:          "plan",
+			AgentID:         "planner",
 			AttemptID:       "attempt-002",
 			Timeout:         30 * time.Minute,
 			ReportExitGrace: 30 * time.Second,
@@ -638,16 +639,16 @@ func assertLoadRejectsAttemptStartAfterUnconsumedLauncherOutcome(t *testing.T, n
 	t.Helper()
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "unconsumed-outcome-"+strings.ReplaceAll(name, " ", "-"))
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateMissingReport,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultMissingReport,
-		ExitState: testExitStateExited,
+		ExitState: "exited",
 	}); err != nil {
 		t.Fatalf("FinishAttempt returned error: %v", err)
 	}
@@ -657,15 +658,15 @@ func assertLoadRejectsAttemptStartAfterUnconsumedLauncherOutcome(t *testing.T, n
 	writeRunEvents(t, run, append(events, unconsumedStart))
 
 	_, err := store.LoadContext(context.Background(), run.ID)
-	requireErrorContains(t, err, "unconsumed launcher outcome", testAttemptID)
+	requireErrorContains(t, err, "unconsumed launcher outcome", "attempt-001")
 }
 
 func TestLoadRejectsStatusUpdatedToTerminalWhileAttemptActive(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "active-status-replay-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
-	payload, err := marshalPayload(statusUpdatedPayload{State: readyForHumanState})
+	payload, err := marshalPayload(statusUpdatedPayload{State: "ready_for_human"})
 	if err != nil {
 		t.Fatalf("marshal status payload: %v", err)
 	}
@@ -682,14 +683,14 @@ func TestLoadRejectsStatusUpdatedToTerminalWhileAttemptActive(t *testing.T) {
 	writeRunEvents(t, run, events)
 
 	_, err = store.LoadContext(context.Background(), run.ID)
-	requireErrorContains(t, err, "updates run state", readyForHumanState, "active")
+	requireErrorContains(t, err, "updates run state", "ready_for_human", "active")
 }
 
 func TestLoadRejectsAttemptStartedAfterTerminalRunState(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
 	run := createManualRun(t, store, "terminal-attempt-replay-run")
-	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: "ready_for_human"}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
@@ -699,8 +700,8 @@ func TestLoadRejectsAttemptStartedAfterTerminalRunState(t *testing.T) {
 	}
 
 	attempt, err := newStartedAttempt(run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStatePlan,
-		AgentID:         testAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       "attempt-terminal-replay",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
@@ -726,13 +727,13 @@ func TestLoadRejectsAttemptStartedAfterTerminalRunState(t *testing.T) {
 	writeRunEvents(t, run, events)
 
 	_, err = store.LoadContext(context.Background(), run.ID)
-	requireErrorContains(t, err, "starts attempt while run state is", readyForHumanState, stateRunning)
+	requireErrorContains(t, err, "starts attempt while run state is", "ready_for_human", stateRunning)
 }
 
 func TestLoadRejectsPollutedAttemptStartedPayload(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "polluted-started-attempt-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	events := readRunEvents(t, run)
 	for i := range events {
@@ -745,7 +746,7 @@ func TestLoadRejectsPollutedAttemptStartedPayload(t *testing.T) {
 			t.Fatalf("unmarshal attempt.started payload: %v", err)
 		}
 
-		payload.Attempt.PromptRef = &ArtifactRef{Kind: KindPrompt, Path: "prompts/000002-plan.md", Name: testWorkflowStatePlan, EventSequence: 2}
+		payload.Attempt.PromptRef = &ArtifactRef{Kind: KindPrompt, Path: "prompts/000002-plan.md", Name: "plan", EventSequence: 2}
 
 		nextPayload, err := json.Marshal(payload)
 		if err != nil {
@@ -768,8 +769,8 @@ func TestStartAttemptWithZeroTimeReplays(t *testing.T) {
 	run := createManualRun(t, store, "zero-time-attempt-run")
 
 	started, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
-		StepID:          testWorkflowStatePlan,
-		AgentID:         testAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       "attempt-zero-time",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
@@ -793,19 +794,19 @@ func TestFinishAttemptTerminalizesActiveAttempt(t *testing.T) {
 	run := createManualRun(t, store, "finish-attempt-run")
 	startedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	_, logRef := linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	_, logRef := linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	exitCode := 0
 
 	finished, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateMissingReport,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultMissingReport,
 		ExitCode:  &exitCode,
-		ExitState: testExitStateExited,
+		ExitState: "exited",
 		LogRef:    &logRef,
 		Time:      startedAt.Add(2 * time.Minute),
 	})
@@ -834,15 +835,15 @@ func TestFinishAttemptTerminalizesActiveAttempt(t *testing.T) {
 func TestFinishAttemptPreservesExistingLogRefWhenRequestOmitsIt(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-preserve-log-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	_, logRef := linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	_, logRef := linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 
 	finished, event, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
-		ExitState: testExitStateExited,
+		ExitState: "exited",
 	})
 	if err != nil {
 		t.Fatalf("FinishAttempt returned error: %v", err)
@@ -865,15 +866,15 @@ func TestFinishAttemptPreservesExistingLogRefWhenRequestOmitsIt(t *testing.T) {
 func TestLoadPreservesExistingLogRefWhenTerminalEventOmitsIt(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-replay-preserve-log-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
-	_, logRef := linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+	_, logRef := linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
-		ExitState: testExitStateExited,
+		ExitState: "exited",
 	}); err != nil {
 		t.Fatalf("FinishAttempt returned error: %v", err)
 	}
@@ -896,10 +897,10 @@ func TestLoadPreservesExistingLogRefWhenTerminalEventOmitsIt(t *testing.T) {
 func TestFinishAttemptWithZeroTimeUsesCommittedEventTime(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-zero-time-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	finished, event, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -923,10 +924,10 @@ func TestFinishAttemptWithZeroTimeUsesCommittedEventTime(t *testing.T) {
 func TestRecoverAttemptWithZeroTimeUsesCommittedEventTime(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "recover-zero-time-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	recovered, event, err := store.RecoverAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -950,10 +951,10 @@ func TestRecoverAttemptWithZeroTimeUsesCommittedEventTime(t *testing.T) {
 func TestFinishAttemptRejectsNonTerminalState(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-non-terminal-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	_, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateActive,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -973,10 +974,10 @@ func TestFinishAttemptRejectsNonTerminalState(t *testing.T) {
 func TestRecoverAttemptRejectsNonTerminalState(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "recover-non-terminal-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	_, _, err := store.RecoverAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateStarting,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -987,10 +988,10 @@ func TestRecoverAttemptRejectsNonTerminalState(t *testing.T) {
 func TestFinishAttemptRejectsInvalidTerminalOutcomeTuple(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-invalid-tuple-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	_, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateTimedOut,
 		Status:    attemptStatusDone,
 		Result:    AttemptResultProcessError,
@@ -1010,15 +1011,15 @@ func TestFinishAttemptRejectsLaunchedOutcomesBeforeProcessMetadata(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			store := openStore(t, t.TempDir())
 			run := createManualRun(t, store, "finish-no-process-"+tc.name)
-			startAttemptForTest(t, store, run.ID, testAttemptID)
-			linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+			startAttemptForTest(t, store, run.ID, "attempt-001")
+			linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 
 			_, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-				AttemptID: testAttemptID,
+				AttemptID: "attempt-001",
 				State:     tc.state,
 				Status:    attemptStatusFailed,
 				Result:    tc.result,
-				ExitState: testExitStateExited,
+				ExitState: "exited",
 			})
 			requireErrorContains(t, err, "no process metadata")
 		})
@@ -1028,10 +1029,10 @@ func TestFinishAttemptRejectsLaunchedOutcomesBeforeProcessMetadata(t *testing.T)
 func TestFinishAttemptAllowsProcessErrorBeforeProcessMetadata(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-pre-process-error-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	finished, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -1049,12 +1050,12 @@ func TestFinishAttemptAllowsProcessErrorBeforeProcessMetadata(t *testing.T) {
 func TestLoadRejectsInvalidTerminalOutcomeTuple(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-invalid-tuple-replay-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateTimedOut,
 		Status:    attemptStatusFailed,
 		Result:    "timeout",
@@ -1074,11 +1075,11 @@ func TestLoadRejectsInvalidTerminalOutcomeTuple(t *testing.T) {
 func TestLoadRejectsLaunchedOutcomeBeforeProcessMetadata(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-no-process-replay-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
 
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -1098,11 +1099,11 @@ func TestLoadRejectsLaunchedOutcomeBeforeProcessMetadata(t *testing.T) {
 func TestFinishAttemptLogRefMustBeRecordedKindLog(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "finish-log-ref-kind-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	promptRef, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindPrompt,
-		Name:    testWorkflowStatePlan,
+		Name:    "plan",
 		Content: []byte("prompt\n"),
 	})
 	if err != nil {
@@ -1110,7 +1111,7 @@ func TestFinishAttemptLogRefMustBeRecordedKindLog(t *testing.T) {
 	}
 
 	_, _, err = store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -1120,7 +1121,7 @@ func TestFinishAttemptLogRefMustBeRecordedKindLog(t *testing.T) {
 
 	missingLog := ArtifactRef{Kind: KindLog, Path: "logs/000099-missing.log", Name: "missing", EventSequence: 99}
 	_, _, err = store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -1132,7 +1133,7 @@ func TestFinishAttemptLogRefMustBeRecordedKindLog(t *testing.T) {
 func TestLoadRejectsTerminalNonTerminalStateAndInvalidLogRef(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "terminal-replay-invalid-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	logRef, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindLog,
@@ -1144,7 +1145,7 @@ func TestLoadRejectsTerminalNonTerminalStateAndInvalidLogRef(t *testing.T) {
 	}
 
 	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
-		AttemptID: testAttemptID,
+		AttemptID: "attempt-001",
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
 		Result:    AttemptResultProcessError,
@@ -1175,8 +1176,8 @@ func startAttemptForTest(t *testing.T, store *Store, runID, attemptID string) {
 	t.Helper()
 
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, StartAttemptRequest{
-		StepID:          testWorkflowStatePlan,
-		AgentID:         testAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       attemptID,
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
@@ -1189,7 +1190,7 @@ func startAttemptForTest(t *testing.T, store *Store, runID, attemptID string) {
 func linkPromptAndLogForTest(t *testing.T, store *Store, runID, attemptID string) (ArtifactRef, ArtifactRef) {
 	t.Helper()
 
-	promptRef := writeArtifactForTest(t, store, runID, KindPrompt, testWorkflowStatePlan, []byte("prompt\n"))
+	promptRef := writeArtifactForTest(t, store, runID, KindPrompt, "plan", []byte("prompt\n"))
 	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
@@ -1214,7 +1215,7 @@ func recordProcessForTest(t *testing.T, store *Store, runID, attemptID string) {
 	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              12345,
-		ProcessStartTime: testProcessStartTime,
+		ProcessStartTime: "123456789",
 	}); err != nil {
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}

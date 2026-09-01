@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -13,30 +14,30 @@ func TestExecuteRunInspectCommands(t *testing.T) {
 		want string
 	}{
 		{
-			name: cliCommandStatus,
-			args: func(runID string) []string { return []string{commandRun, cliCommandStatus, runID} },
+			name: "status",
+			args: func(runID string) []string { return []string{commandRun, "status", runID} },
 			want: "state: running",
 		},
 		{
-			name: cliCommandShow,
-			args: func(runID string) []string { return []string{commandRun, cliCommandShow, runID} },
+			name: "show",
+			args: func(runID string) []string { return []string{commandRun, "show", runID} },
 			want: "workflow_loop:",
 		},
 		{
-			name: cliCommandNext,
-			args: func(runID string) []string { return []string{commandRun, cliCommandNext, runID} },
+			name: "next",
+			args: func(runID string) []string { return []string{commandRun, "next", runID} },
 			want: "decision: select_step",
 		},
 		{
-			name: cliCommandSummaryContext,
-			args: func(runID string) []string { return []string{commandRun, cliCommandSummaryContext, runID} },
+			name: "summary-context",
+			args: func(runID string) []string { return []string{commandRun, "summary-context", runID} },
 			want: "# Summary Context",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
 			writeCLIProject(t, root, "optional", true)
-			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
+			result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
 
 			output := executeCLICommand(t, tc.args(result.runID))
 			if !strings.Contains(output, tc.want) {
@@ -52,10 +53,10 @@ func TestExecuteRunInspectUnknownRunFailsClearly(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: cliCommandStatus, args: []string{commandRun, cliCommandStatus, cliMissingRunID}, want: `orc run status: run "missing-run" not found`},
-		{name: cliCommandShow, args: []string{commandRun, cliCommandShow, cliMissingRunID}, want: `orc run show: run "missing-run" not found`},
-		{name: cliCommandNext, args: []string{commandRun, cliCommandNext, cliMissingRunID}, want: `orc run next: run "missing-run" not found`},
-		{name: cliCommandSummaryContext, args: []string{commandRun, cliCommandSummaryContext, cliMissingRunID}, want: `orc run summary-context: run "missing-run" not found`},
+		{name: "status", args: []string{commandRun, "status", "missing-run"}, want: `orc run status: run "missing-run" not found`},
+		{name: "show", args: []string{commandRun, "show", "missing-run"}, want: `orc run show: run "missing-run" not found`},
+		{name: "next", args: []string{commandRun, "next", "missing-run"}, want: `orc run next: run "missing-run" not found`},
+		{name: "summary-context", args: []string{commandRun, "summary-context", "missing-run"}, want: `orc run summary-context: run "missing-run" not found`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := withTempCwd(t)
@@ -80,10 +81,10 @@ func TestExecuteRunInspectUnknownRunFailsClearly(t *testing.T) {
 func TestExecuteRunShowDisplaysWorkflowLoopCapStatus(t *testing.T) {
 	root := withTempCwd(t)
 	writeCLIProject(t, root, "optional", true)
-	result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	blockCLIWorkflowLoopHardCap(t, root, result.runID, cliStepPlan, 1, 2)
+	result := executeCLIRunStart(t, root, []string{"--task", "# Task"}, nil)
+	blockCLIWorkflowLoopHardCap(t, root, result.runID, "plan", 1, 2)
 
-	output := executeCLICommand(t, []string{commandRun, cliCommandShow, result.runID})
+	output := executeCLICommand(t, []string{commandRun, "show", result.runID})
 	assertCLIOutputContainsAll(t, output, []string{
 		"workflow_loop:\n",
 		"    plan:\n",

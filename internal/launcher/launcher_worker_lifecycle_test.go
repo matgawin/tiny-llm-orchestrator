@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -41,19 +42,19 @@ func TestFinishAttemptWithCleanupContextReturnsNilOnSuccessfulFinish(t *testing.
 func TestWorkerRunnerUsesTerminalReportInsteadOfSynthesizedFinish(t *testing.T) {
 	root, runID := createLauncherRun(t, "200ms")
 	loaded, attempt := prepareRunProcessAttempt(t, root, runID, "reported-attempt")
-	linkLauncherPromptAndLogNamed(t, loaded.Store, runID, attempt.AttemptID, launcherPlanStep)
+	linkLauncherPromptAndLogNamed(t, loaded.Store, runID, attempt.AttemptID, "plan")
 	recordProcessForLauncherTest(t, loaded.Store, runID, attempt.AttemptID)
 
 	reported, _, err := loaded.Store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    launcherPlanStep,
-			AgentID:   launcherAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: attempt.AttemptID,
-			Status:    launcherStatusDone,
-			Result:    launcherResultReady,
-			Summary:   launcherReportSummaryReady,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 		Time: fixedLauncherTime().Add(time.Second),
 	})
@@ -169,7 +170,7 @@ func TestLaunchNextRecordsTimeout(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{"sh", "-c", launcherCommandSleepOne},
+		Command: []string{"sh", "-c", "sleep 1"},
 		Time:    fixedLauncherTime(),
 	})
 	if err != nil {
@@ -189,7 +190,7 @@ func TestLaunchNextTerminalizesPromptRenderFailure(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
+		Command: []string{"sh", "-c", "cat"},
 		Time:    fixedLauncherTime(),
 		Stdout:  &stdout,
 	})
@@ -419,7 +420,7 @@ func TestLaunchNextCancellationBeforeStartAttemptDoesNotCreateAttempt(t *testing
 		result, err := LaunchNext(ctx, Options{
 			Root:    root,
 			RunID:   runID,
-			Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
+			Command: []string{"sh", "-c", "cat"},
 			Time:    fixedLauncherTime(),
 			Stdout:  &stdout,
 		})
@@ -458,10 +459,10 @@ func TestLaunchNextCancellationWhileStartAttemptBlockedDoesNotCreateAttempt(t *t
 	done := make(chan launchOutcome, 1)
 
 	runCanceledWhileLauncherRunLockHeld(t, store, runID, cancel, nil, func() {
-		step := loaded.Workflow.Steps[launcherPlanStep]
+		step := loaded.Workflow.Steps["plan"]
 
 		attempt, _, err := loaded.Store.StartAttemptContext(ctx, runID, runstore.StartAttemptRequest{
-			StepID:          launcherPlanStep,
+			StepID:          "plan",
 			AgentID:         step.Agent,
 			AttemptID:       "blocked-start-attempt",
 			Timeout:         loaded.Workflow.Defaults.Timeout.Duration,

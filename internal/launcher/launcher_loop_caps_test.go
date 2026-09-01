@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -19,7 +20,7 @@ func TestLaunchNextAppliesWorkflowLoopHardCapAfterResolvedHumanBlock(t *testing.
 	blockedAttempt, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
+		Command: []string{"sh", "-c", "cat"},
 		Time:    fixedLauncherTime(),
 	})
 	if err != nil {
@@ -35,7 +36,7 @@ func TestLaunchNextAppliesWorkflowLoopHardCapAfterResolvedHumanBlock(t *testing.
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
+		Command: []string{"sh", "-c", "cat"},
 		Time:    fixedLauncherTime().Add(3 * time.Second),
 	})
 	if err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {
@@ -69,7 +70,7 @@ func TestLaunchNextWarnsAndContinuesAtWorkflowLoopSoftCap(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
+		Command: []string{"sh", "-c", "cat >/dev/null"},
 		Time:    fixedLauncherTime().Add(3 * time.Second),
 		Stdout:  &stdout,
 	})
@@ -86,11 +87,11 @@ func TestLaunchNextWarnsAndContinuesAtWorkflowLoopSoftCap(t *testing.T) {
 	}
 
 	loaded := loadLauncherRun(t, root, runID)
-	if got := loaded.Status.WorkflowLoop.Counts[launcherPlanStep]; got != 3 {
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 3 {
 		t.Fatalf("plan count = %d, want soft-cap entry count 3", got)
 	}
 
-	if got := loaded.Status.WorkflowLoop.SoftCapWarnings; len(got) != 1 || got[0].Count != 3 || got[0].TriggerStatus != launcherStatusDone || got[0].TriggerResult != launcherResultReady {
+	if got := loaded.Status.WorkflowLoop.SoftCapWarnings; len(got) != 1 || got[0].Count != 3 || got[0].TriggerStatus != "done" || got[0].TriggerResult != "ready" {
 		t.Fatalf("soft cap warnings = %+v, want one threshold warning with trigger", got)
 	}
 }
@@ -104,7 +105,7 @@ func TestLaunchNextBlocksBeforeWorkflowLoopHardCapIncrement(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
+		Command: []string{"sh", "-c", "cat >/dev/null"},
 		Time:    fixedLauncherTime().Add(3 * time.Second),
 	})
 	if err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {
@@ -120,7 +121,7 @@ func TestLaunchNextBlocksBeforeWorkflowLoopHardCapIncrement(t *testing.T) {
 		t.Fatalf("run state = %q, want blocked_for_human", loaded.Status.State)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts[launcherPlanStep]; got != 2 {
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 2 {
 		t.Fatalf("plan count = %d, want hard cap to leave count at 2", got)
 	}
 
@@ -129,7 +130,7 @@ func TestLaunchNextBlocksBeforeWorkflowLoopHardCapIncrement(t *testing.T) {
 	}
 
 	block := loaded.Status.WorkflowLoop.HardCapBlock
-	if block == nil || block.BlockedState != launcherPlanStep || block.CurrentCount != 2 || block.ProspectiveCount != 3 || block.Reason != runstore.WorkflowLoopHardCapReason {
+	if block == nil || block.BlockedState != "plan" || block.CurrentCount != 2 || block.ProspectiveCount != 3 || block.Reason != runstore.WorkflowLoopHardCapReason {
 		t.Fatalf("hard cap block = %+v, want blocked plan prospective count 3", block)
 	}
 }
@@ -143,7 +144,7 @@ func TestLaunchNextConsumesWorkflowLoopHardCapOverride(t *testing.T) {
 	if _, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
+		Command: []string{"sh", "-c", "cat >/dev/null"},
 		Time:    fixedLauncherTime().Add(3 * time.Second),
 	}); err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {
 		t.Fatalf("initial LaunchNext error = %v, want hard-cap block", err)
@@ -165,7 +166,7 @@ func TestLaunchNextConsumesWorkflowLoopHardCapOverride(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
+		Command: []string{"sh", "-c", "cat >/dev/null"},
 		Time:    fixedLauncherTime().Add(5 * time.Second),
 	})
 	if err != nil {
@@ -177,7 +178,7 @@ func TestLaunchNextConsumesWorkflowLoopHardCapOverride(t *testing.T) {
 	}
 
 	loaded := loadLauncherRun(t, root, runID)
-	if got := loaded.Status.WorkflowLoop.Counts[launcherPlanStep]; got != countAfterOverride {
+	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != countAfterOverride {
 		t.Fatalf("plan count = %d, want override count %d", got, countAfterOverride)
 	}
 
@@ -195,7 +196,7 @@ func TestLaunchNextBypassesDisabledWorkflowLoopCaps(t *testing.T) {
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
+		Command: []string{"sh", "-c", "cat >/dev/null"},
 		Time:    fixedLauncherTime().Add(3 * time.Second),
 	})
 	if err != nil {
@@ -221,7 +222,7 @@ func TestLaunchNextUsesWorkflowSpecificLoopCapOverride(t *testing.T) {
 	_, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
-		Command: []string{launcherShell, launcherShellFlag, launcherCommandCatDiscard},
+		Command: []string{"sh", "-c", "cat >/dev/null"},
 		Time:    fixedLauncherTime().Add(3 * time.Second),
 	})
 	if err == nil || !strings.Contains(err.Error(), runstore.WorkflowLoopHardCapReason) {

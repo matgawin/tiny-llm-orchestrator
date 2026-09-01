@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runinspect
 
 import (
@@ -34,7 +35,7 @@ func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 
 	if _, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
-		Name:    inspectArtifactTask,
+		Name:    "task",
 		Content: []byte("# Task\n"),
 		Time:    fixedTime().Add(time.Minute),
 	}); err != nil {
@@ -47,11 +48,11 @@ func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 	}
 
 	output := stdout.String()
-	assertContainsAll(t, inspectCommandStatus, output, []string{
+	assertContainsAll(t, "status", output, []string{
 		"run: inspect-run\n",
 		"state: running\n",
 		"workflow: implementation\n",
-		inspectSelectedStepPlanLine,
+		"selected_step: plan\n",
 		"active_attempt: none\n",
 		"recent_reports:\n  none\n",
 		"artifacts:\n  - task_context: task/context.md\n",
@@ -71,10 +72,10 @@ func TestNextShowsSelectedStepWithoutLaunching(t *testing.T) {
 
 	output := stdout.String()
 	assertContainsAll(t, "next", output, []string{
-		inspectDecisionSelectStepLine,
-		inspectSelectedStepPlanLine,
-		inspectAgentPlannerLine,
-		inspectLaunchNotLaunchedLine,
+		"decision: select_step\n",
+		"selected_step: plan\n",
+		"agent: planner\n",
+		"launch: not launched\n",
 	})
 
 	after := snapshotRunDir(t, root, runID)
@@ -115,9 +116,9 @@ steps:
 
 	output := stdout.String()
 	assertContainsAll(t, "next", output, []string{
-		inspectDecisionSelectStepLine,
-		inspectSelectedStepPlanLine,
-		inspectAgentPlannerLine,
+		"decision: select_step\n",
+		"selected_step: plan\n",
+		"agent: planner\n",
 	})
 
 	if strings.Contains(output, "selected_step: review") {
@@ -200,7 +201,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 
 	if _, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
-		Name:    inspectArtifactTask,
+		Name:    "task",
 		Content: []byte("# Task\n"),
 		Time:    fixedTime().Add(time.Minute),
 	}); err != nil {
@@ -208,7 +209,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 	}
 
 	if _, _, err := store.RecordStepSkipContext(context.Background(), runID, runstore.RecordStepSkipRequest{
-		StepID: inspectStepPlan,
+		StepID: "plan",
 		Reason: "not worth another review",
 		Time:   fixedTime().Add(2 * time.Minute),
 	}, func(runstore.Status) (runstore.StepSkipTransition, error) {
@@ -216,8 +217,8 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 			State: workflow.RunStatusReadyForHuman,
 			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
 				State:         workflow.RunStatusReadyForHuman,
-				PreviousState: inspectStepPlan,
-				TriggerStatus: inspectStatusDone,
+				PreviousState: "plan",
+				TriggerStatus: "done",
 				TriggerResult: "skipped",
 			},
 		}, nil
@@ -230,7 +231,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 		t.Fatalf("Status returned error: %v", err)
 	}
 
-	assertContainsAll(t, inspectCommandStatus, statusOut.String(), []string{
+	assertContainsAll(t, "status", statusOut.String(), []string{
 		"skipped_steps:\n",
 		"  - step_id: plan\n",
 		"    status: done\n",
@@ -260,8 +261,8 @@ func TestStatusAndNextShowActiveAttempt(t *testing.T) {
 	}
 
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-		StepID:          inspectStepPlan,
-		AgentID:         inspectAgentPlanner,
+		StepID:          "plan",
+		AgentID:         "planner",
 		AttemptID:       "attempt-active",
 		Timeout:         30 * time.Minute,
 		ReportExitGrace: 30 * time.Second,
@@ -271,15 +272,15 @@ func TestStatusAndNextShowActiveAttempt(t *testing.T) {
 	}
 
 	status, next := inspectStatusAndNext(t, root, runID)
-	assertContainsAll(t, inspectCommandStatus, status, []string{
-		inspectSelectedStepNoneLine,
+	assertContainsAll(t, "status", status, []string{
+		"selected_step: none\n",
 		"active_attempt: attempt-active\n",
 	})
 	assertContainsAll(t, "next", next, []string{
 		"decision: wait_active_attempt\n",
 		"active_attempt: attempt-active\n",
-		inspectSelectedStepPlanLine,
-		inspectAgentPlannerLine,
+		"selected_step: plan\n",
+		"agent: planner\n",
 		"launch: already active\n",
 	})
 }
@@ -298,11 +299,11 @@ func TestNextRoutesExhaustedLauncherOutcome(t *testing.T) {
 
 	status, next := inspectStatusAndNext(t, root, runID)
 	statusOnly := []string{
-		inspectSelectedStepNoneLine,
+		"selected_step: none\n",
 		"active_attempt: none\n",
 	}
 	terminalOutcome := []string{
-		inspectTerminalBlockedLine,
+		"terminal_reason: blocked_for_human\n",
 		"last_outcome: failed/missing_report\n",
 		"last_attempt: attempt-missing-report\n",
 		"retry_exhausted: failed/missing_report\n",
@@ -310,11 +311,11 @@ func TestNextRoutesExhaustedLauncherOutcome(t *testing.T) {
 		"transition: failed/missing_report -> blocked_for_human\n",
 	}
 
-	assertContainsAll(t, inspectCommandStatus, status, statusOnly)
+	assertContainsAll(t, "status", status, statusOnly)
 	assertBothOutputsContain(t, status, next, terminalOutcome)
 	assertContainsAll(t, "next", next, []string{
-		inspectDecisionTerminalLine,
-		inspectLaunchNoWorkerLine,
+		"decision: terminal\n",
+		"launch: no worker should launch\n",
 	})
 }
 
@@ -334,10 +335,10 @@ func TestStatusAndNextShowInvalidReportOutcome(t *testing.T) {
 		State: runstore.AttemptStateInvalidReport,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    inspectStepPlan,
-			AgentID:   inspectAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: "attempt-invalid-report",
-			Status:    inspectStatusFailed,
+			Status:    "failed",
 			Result:    runstore.AttemptResultInvalidReport,
 			Summary:   "report schema invalid: missing summary",
 		},
@@ -348,7 +349,7 @@ func TestStatusAndNextShowInvalidReportOutcome(t *testing.T) {
 
 	status, next := inspectStatusAndNext(t, root, runID)
 	assertBothOutputsContain(t, status, next, []string{
-		inspectTerminalBlockedLine,
+		"terminal_reason: blocked_for_human\n",
 		"last_outcome: failed/invalid_report\n",
 		"last_attempt: attempt-invalid-report\n",
 		"invalid_report_reason: report schema invalid: missing summary\n",
@@ -391,18 +392,18 @@ func TestNextRoutesValidReportedOutcome(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	recordLaunchedAttempt(t, store, runID, inspectAttemptReported)
+	recordLaunchedAttempt(t, store, runID, "attempt-reported")
 
 	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    inspectStepPlan,
-			AgentID:   inspectAgentPlanner,
-			AttemptID: inspectAttemptReported,
-			Status:    inspectStatusDone,
-			Result:    inspectResultReady,
-			Summary:   inspectSummaryReady,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-reported",
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 		Time: fixedTime().Add(2 * time.Minute),
 	}); err != nil {
@@ -410,21 +411,21 @@ func TestNextRoutesValidReportedOutcome(t *testing.T) {
 	}
 
 	status, next := inspectStatusAndNext(t, root, runID)
-	assertContainsAll(t, inspectCommandStatus, status, []string{
+	assertContainsAll(t, "status", status, []string{
 		"state: ready_for_human\n",
-		inspectSelectedStepNoneLine,
-		inspectTerminalReadyLine,
-		inspectReviewReadyLine,
+		"selected_step: none\n",
+		"terminal_reason: ready_for_human\n",
+		"review_state: ready_for_human; no more workers should launch\n",
 	})
 	assertContainsAll(t, "next", next, []string{
 		"state: ready_for_human\n",
-		inspectDecisionTerminalLine,
-		inspectTerminalReadyLine,
-		inspectLaunchNoWorkerLine,
-		inspectReviewReadyLine,
+		"decision: terminal\n",
+		"terminal_reason: ready_for_human\n",
+		"launch: no worker should launch\n",
+		"review_state: ready_for_human; no more workers should launch\n",
 	})
 
-	if strings.Contains(next, forbiddenLegacyPendingWorkerOutcome) {
+	if strings.Contains(next, "pending_worker_outcome") {
 		t.Fatalf("next output contains legacy pending worker outcome for valid report:\n%s", next)
 	}
 }
@@ -439,17 +440,17 @@ func TestStatusRoutesValidReportedOutcomeToBlockedForHuman(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	recordLaunchedAttempt(t, store, runID, inspectAttemptReported)
+	recordLaunchedAttempt(t, store, runID, "attempt-reported")
 
 	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    inspectStepPlan,
-			AgentID:   inspectAgentPlanner,
-			AttemptID: inspectAttemptReported,
-			Status:    inspectStatusBlocked,
-			Result:    inspectStatusBlocked,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-reported",
+			Status:    "blocked",
+			Result:    "blocked",
 			Summary:   "Blocked for human input.",
 		},
 		Time: fixedTime().Add(2 * time.Minute),
@@ -458,18 +459,18 @@ func TestStatusRoutesValidReportedOutcomeToBlockedForHuman(t *testing.T) {
 	}
 
 	status, next := inspectStatusAndNext(t, root, runID)
-	assertContainsAll(t, inspectCommandStatus, status, []string{
+	assertContainsAll(t, "status", status, []string{
 		"state: blocked_for_human\n",
-		inspectTerminalBlockedLine,
+		"terminal_reason: blocked_for_human\n",
 		"recent_reports:\n  - reports/000008-plan.md\n",
-		inspectHumanBlockedLine,
+		"human_attention: blocked_for_human; see recent_reports\n",
 	})
 	assertContainsAll(t, "next", next, []string{
 		"state: blocked_for_human\n",
-		inspectDecisionTerminalLine,
-		inspectTerminalBlockedLine,
+		"decision: terminal\n",
+		"terminal_reason: blocked_for_human\n",
 		"recent_reports:\n  - reports/000008-plan.md\n",
-		inspectHumanBlockedLine,
+		"human_attention: blocked_for_human; see recent_reports\n",
 	})
 }
 
@@ -477,7 +478,7 @@ func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
 		MarkdownFallback: true,
-		BlockedResults:   []string{inspectStatusBlocked},
+		BlockedResults:   []string{"blocked"},
 		TwoStep:          true,
 	})
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
@@ -487,18 +488,18 @@ func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	recordLaunchedAttempt(t, store, runID, inspectAttemptReported)
+	recordLaunchedAttempt(t, store, runID, "attempt-reported")
 
 	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    inspectStepPlan,
-			AgentID:   inspectAgentPlanner,
-			AttemptID: inspectAttemptReported,
-			Status:    inspectStatusDone,
-			Result:    inspectResultReady,
-			Summary:   inspectSummaryReady,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-reported",
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 		Time: fixedTime().Add(2 * time.Minute),
 	}); err != nil {
@@ -507,13 +508,13 @@ func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
 
 	_, next := inspectStatusAndNext(t, root, runID)
 	assertContainsAll(t, "next", next, []string{
-		inspectDecisionSelectStepLine,
+		"decision: select_step\n",
 		"selected_step: code\n",
 		"agent: coder\n",
-		inspectLaunchNotLaunchedLine,
+		"launch: not launched\n",
 	})
 
-	if strings.Contains(next, forbiddenLegacyPendingWorkerOutcome) {
+	if strings.Contains(next, "pending_worker_outcome") {
 		t.Fatalf("next output contains legacy pending worker outcome for valid report:\n%s", next)
 	}
 }
@@ -522,7 +523,7 @@ func TestNextShowsReportedRetryStepOutcome(t *testing.T) {
 	root := t.TempDir()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
 		MarkdownFallback: true,
-		BlockedResults:   []string{inspectStatusBlocked},
+		BlockedResults:   []string{"blocked"},
 		Retries:          map[string]int{"done/ready": 1},
 	})
 	runID := createRun(t, root, workflow.RunStatusRunning, nil)
@@ -538,12 +539,12 @@ func TestNextShowsReportedRetryStepOutcome(t *testing.T) {
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
-			StepID:    inspectStepPlan,
-			AgentID:   inspectAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: "attempt-retry",
-			Status:    inspectStatusDone,
-			Result:    inspectResultReady,
-			Summary:   inspectSummaryReady,
+			Status:    "done",
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 		Time: fixedTime().Add(2 * time.Minute),
 	}); err != nil {
@@ -553,11 +554,11 @@ func TestNextShowsReportedRetryStepOutcome(t *testing.T) {
 	_, next := inspectStatusAndNext(t, root, runID)
 	assertContainsAll(t, "next", next, []string{
 		"decision: retry_step\n",
-		inspectSelectedStepPlanLine,
+		"selected_step: plan\n",
 		"retrying_after: done/ready\n",
 		"retry_count: 1/1\n",
 		"retry_source_attempt: attempt-retry\n",
-		inspectLaunchNotLaunchedLine,
+		"launch: not launched\n",
 	})
 }
 
@@ -568,7 +569,7 @@ func recordMissingReportAttempt(t *testing.T, store *runstore.Store, runID, atte
 	if _, _, err := store.FinishAttemptContext(context.Background(), runID, runstore.FinishAttemptRequest{
 		AttemptID: attemptID,
 		State:     runstore.AttemptStateMissingReport,
-		Status:    inspectStatusFailed,
+		Status:    "failed",
 		Result:    runstore.AttemptResultMissingReport,
 		ExitState: "exited",
 		Time:      fixedTime().Add(2 * time.Minute),
@@ -588,25 +589,25 @@ func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runI
 	recordMissingReportAttempt(t, store, runID, firstAttemptID)
 
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
-		StepID:           inspectStepPlan,
-		AgentID:          inspectAgentPlanner,
+		StepID:           "plan",
+		AgentID:          "planner",
 		AttemptID:        retryAttemptID,
 		Timeout:          30 * time.Minute,
 		ReportExitGrace:  30 * time.Second,
 		ConsumeAttemptID: firstAttemptID,
-		RetryLineage:     &runstore.RetryLineage{StepID: inspectStepPlan, Counts: map[string]int{"failed/missing_report": retryCount}},
+		RetryLineage:     &runstore.RetryLineage{StepID: "plan", Counts: map[string]int{"failed/missing_report": retryCount}},
 		SupersedeReason:  "retry",
 		Time:             fixedTime().Add(3 * time.Minute),
 	}); err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	recordAttemptPromptLogAndProcess(t, store, runID, inspectStepPlan, retryAttemptID, 3200*time.Millisecond)
+	recordAttemptPromptLogAndProcess(t, store, runID, "plan", retryAttemptID, 3200*time.Millisecond)
 
 	if _, _, err := store.FinishAttemptContext(context.Background(), runID, runstore.FinishAttemptRequest{
 		AttemptID: retryAttemptID,
 		State:     runstore.AttemptStateMissingReport,
-		Status:    inspectStatusFailed,
+		Status:    "failed",
 		Result:    runstore.AttemptResultMissingReport,
 		ExitState: "exited",
 		Time:      fixedTime().Add(4 * time.Minute),
@@ -712,7 +713,7 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		Dirty:         true,
 		Summary:       "Pre-existing dirty file: preexisting.md",
 		ChangedPaths:  []string{"preexisting.md"},
-		Commands:      [][]string{{"jj", "root"}, {"jj", inspectCommandStatus}},
+		Commands:      [][]string{{"jj", "root"}, {"jj", "status"}},
 	}, fixedTime().Add(500*time.Millisecond))
 	// Record code before plan so the golden locks workflow declaration order
 	// rather than report event order.
@@ -722,8 +723,8 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		StepID:       "code",
 		AgentID:      "coder",
 		AttemptID:    "attempt-code",
-		Status:       inspectStatusDone,
-		Result:       inspectResultReady,
+		Status:       "done",
+		Result:       "ready",
 		Summary:      "Code changed.",
 		ChangedPaths: []string{"internal/runinspect/runinspect.go"},
 		Commands:     []string{"go test ./internal/runinspect"},
@@ -731,14 +732,14 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		Risks:        []string{"format needs human approval"},
 		Followups:    []runstore.Followup{{Title: "Update release note", Details: "Mention summary-context."}},
 	}, fixedTime().Add(2*time.Minute))
-	recordLaunchedStepAttempt(t, store, runID, inspectStepPlan, inspectAgentPlanner, "attempt-plan")
+	recordLaunchedStepAttempt(t, store, runID, "plan", "planner", "attempt-plan")
 	recordSummaryContextReport(t, store, runID, runstore.Report{
 		RunID:        runID,
-		StepID:       inspectStepPlan,
-		AgentID:      inspectAgentPlanner,
+		StepID:       "plan",
+		AgentID:      "planner",
 		AttemptID:    "attempt-plan",
-		Status:       inspectStatusDone,
-		Result:       inspectResultReady,
+		Status:       "done",
+		Result:       "ready",
 		Summary:      "Plan approved.",
 		ChangedPaths: []string{"docs/features/summary-context.md"},
 		Commands:     []string{"go test ./internal/cli"},
@@ -765,7 +766,7 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		Dirty:         true,
 		Summary:       "Modified files: docs/features/summary-context.md internal/runinspect/runinspect.go",
 		ChangedPaths:  []string{"docs/features/summary-context.md", "internal/runinspect/runinspect.go", "preexisting.md"},
-		Commands:      [][]string{{"jj", "root"}, {"jj", inspectCommandStatus}},
+		Commands:      [][]string{{"jj", "root"}, {"jj", "status"}},
 	}, fixedTime().Add(5*time.Minute))
 
 	if _, _, err := store.UpdateStatusContext(context.Background(), runID, runstore.StatusUpdate{
@@ -909,10 +910,10 @@ func TestSummaryContextQuotesReportScalars(t *testing.T) {
 	}{
 		{name: "outcome_result", value: "ready\n## fake result", want: "- outcome_result: %s\n"},
 		{name: "summary", value: "Line one\n## fake heading", want: "- summary: %s\n"},
-		{name: "changed_path", value: "README.md\n- fake path", want: inspectListFormat},
-		{name: "command", value: "go test ./...\n## fake command", want: inspectListFormat},
-		{name: "test", value: "task tests\n- fake test", want: inspectListFormat},
-		{name: "risk", value: "risk\n### fake risk", want: inspectListFormat},
+		{name: "changed_path", value: "README.md\n- fake path", want: "- %s\n"},
+		{name: "command", value: "go test ./...\n## fake command", want: "- %s\n"},
+		{name: "test", value: "task tests\n- fake test", want: "- %s\n"},
+		{name: "risk", value: "risk\n### fake risk", want: "- %s\n"},
 		{name: "followup_title", value: "title\n- fake follow-up", want: "- title: %s\n"},
 		{name: "followup_details", value: "details\n## fake details", want: "  details: %s\n"},
 	}
@@ -936,10 +937,10 @@ func TestSummaryContextQuotesReportScalars(t *testing.T) {
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:        fixture.runID,
-			StepID:       inspectStepPlan,
-			AgentID:      inspectAgentPlanner,
+			StepID:       "plan",
+			AgentID:      "planner",
 			AttemptID:    "attempt-report",
-			Status:       inspectStatusDone,
+			Status:       "done",
 			Result:       scalar("outcome_result"),
 			Summary:      scalar("summary"),
 			ChangedPaths: []string{scalar("changed_path")},
@@ -1000,11 +1001,11 @@ func TestSummaryContextBlockedRunIncludesBlockedReportReason(t *testing.T) {
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     fixture.runID,
-			StepID:    inspectStepPlan,
-			AgentID:   inspectAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: "attempt-blocked",
-			Status:    inspectStatusBlocked,
-			Result:    inspectStatusBlocked,
+			Status:    "blocked",
+			Result:    "blocked",
 			Summary:   "Waiting for network approval.",
 			Risks:     []string{"Cannot verify without approval."},
 		},
@@ -1023,7 +1024,7 @@ func TestSummaryContextBlockedRunIncludesBlockedReportReason(t *testing.T) {
 
 func recordLaunchedAttempt(t *testing.T, store *runstore.Store, runID, attemptID string) {
 	t.Helper()
-	recordLaunchedStepAttempt(t, store, runID, inspectStepPlan, inspectAgentPlanner, attemptID)
+	recordLaunchedStepAttempt(t, store, runID, "plan", "planner", attemptID)
 }
 
 func recordLaunchedStepAttempt(t *testing.T, store *runstore.Store, runID, stepID, agentID, attemptID string) {
@@ -1048,7 +1049,7 @@ func writeSummaryTaskContext(t *testing.T, store *runstore.Store, runID, content
 
 	if _, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
-		Name:    inspectArtifactTask,
+		Name:    "task",
 		Content: []byte(content),
 		Time:    fixedTime().Add(250 * time.Millisecond),
 	}); err != nil {
@@ -1065,17 +1066,17 @@ func TestReadyForHumanStatusAndNextShowReviewPaths(t *testing.T) {
 	paths := terminalPaths(root, runID)
 	assertTerminalOutputs(t, status, next, terminalOutputWants{
 		status: []string{
-			inspectSelectedStepNoneLine,
-			inspectTerminalReadyLine,
-			inspectReviewReadyLine,
+			"selected_step: none\n",
+			"terminal_reason: ready_for_human\n",
+			"review_state: ready_for_human; no more workers should launch\n",
 			"summary_context: " + paths.run + "\n",
 			"final_summaries: " + paths.summaries + "\n",
 		},
 		next: []string{
-			inspectDecisionTerminalLine,
-			inspectTerminalReadyLine,
-			inspectLaunchNoWorkerLine,
-			inspectReviewReadyLine,
+			"decision: terminal\n",
+			"terminal_reason: ready_for_human\n",
+			"launch: no worker should launch\n",
+			"review_state: ready_for_human; no more workers should launch\n",
 			"final_summaries: " + paths.summaries + "\n",
 		},
 	})
@@ -1090,16 +1091,16 @@ func TestBlockedForHumanStatusAndNextShowUnavailableReportDetails(t *testing.T) 
 	paths := terminalPaths(root, runID)
 	assertTerminalOutputs(t, status, next, terminalOutputWants{
 		status: []string{
-			inspectSelectedStepNoneLine,
-			inspectTerminalBlockedLine,
+			"selected_step: none\n",
+			"terminal_reason: blocked_for_human\n",
 			"human_attention: blocked_for_human; report details not available\n",
 			"summary_context: " + paths.run + "\n",
 			"final_summaries: " + paths.summaries + "\n",
 		},
 		next: []string{
-			inspectDecisionTerminalLine,
-			inspectTerminalBlockedLine,
-			inspectLaunchNoWorkerLine,
+			"decision: terminal\n",
+			"terminal_reason: blocked_for_human\n",
+			"launch: no worker should launch\n",
 			"human_attention: blocked_for_human; report details not available\n",
 			"final_summaries: " + paths.summaries + "\n",
 		},
@@ -1127,7 +1128,7 @@ func terminalPaths(root, runID string) terminalPathWants {
 
 func assertTerminalOutputs(t *testing.T, status, next string, wants terminalOutputWants) {
 	t.Helper()
-	assertContainsAll(t, inspectCommandStatus, status, wants.status)
+	assertContainsAll(t, "status", status, wants.status)
 	assertContainsAll(t, "next", next, wants.next)
 }
 
@@ -1136,22 +1137,22 @@ func TestBlockedStatusAndNextShowReportArtifact(t *testing.T) {
 	writeProject(t, root)
 	runID := createRun(t, root, workflow.RunStatusBlockedForHuman, &runstore.Artifact{
 		Kind:    runstore.KindReport,
-		Name:    inspectStepPlan,
+		Name:    "plan",
 		Content: []byte("blocked report\n"),
 		Time:    fixedTime().Add(time.Minute),
 	})
 
 	status, next := inspectStatusAndNext(t, root, runID)
-	assertContainsAll(t, inspectCommandStatus, status, []string{
-		inspectTerminalBlockedLine,
+	assertContainsAll(t, "status", status, []string{
+		"terminal_reason: blocked_for_human\n",
 		"recent_reports:\n  - reports/000002-plan.md\n",
-		inspectHumanBlockedLine,
+		"human_attention: blocked_for_human; see recent_reports\n",
 	})
 	assertContainsAll(t, "next", next, []string{
-		inspectDecisionTerminalLine,
-		inspectTerminalBlockedLine,
+		"decision: terminal\n",
+		"terminal_reason: blocked_for_human\n",
 		"recent_reports:\n  - reports/000002-plan.md\n",
-		inspectHumanBlockedLine,
+		"human_attention: blocked_for_human; see recent_reports\n",
 	})
 }
 
@@ -1163,7 +1164,7 @@ func TestInspectUnknownRunFailsClearly(t *testing.T) {
 		name    string
 		inspect func(context.Context, Options) error
 	}{
-		{name: inspectCommandStatus, inspect: Status},
+		{name: "status", inspect: Status},
 		{name: "next", inspect: Next},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1203,7 +1204,7 @@ func assertContainsAll(t *testing.T, label, output string, wants []string) {
 
 func assertBothOutputsContain(t *testing.T, status, next string, wants []string) {
 	t.Helper()
-	assertContainsAll(t, inspectCommandStatus, status, wants)
+	assertContainsAll(t, "status", status, wants)
 	assertContainsAll(t, "next", next, wants)
 }
 
@@ -1279,7 +1280,7 @@ func writeProject(t *testing.T, root string) {
 	t.Helper()
 	testutil.WriteProject(t, root, testutil.ProjectOptions{
 		MarkdownFallback: true,
-		BlockedResults:   []string{inspectStatusBlocked},
+		BlockedResults:   []string{"blocked"},
 		FailedResults:    []string{"missing_report", "process_error", "timeout", "invalid_report"},
 	})
 }

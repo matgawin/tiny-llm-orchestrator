@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package launcher
 
 import (
@@ -18,23 +19,23 @@ import (
 func TestRuntimeCommandBuildsCodexNormalAndSandboxArgv(t *testing.T) {
 	root := t.TempDir()
 	codex := config.Runtime{
-		ID: launcherRuntimeCodex,
+		ID: "codex",
 		Command: config.RuntimeCommand{
-			Executable:  launcherRuntimeCodex,
+			Executable:  "codex",
 			NormalArgs:  []string{"--ask-for-approval", "never"},
 			SandboxArgs: []string{"--dangerously-bypass-approvals-and-sandbox"},
-			Args:        []string{launcherCommandExec, launcherArgSkipGitRepoCheck, "-"},
+			Args:        []string{"exec", "--skip-git-repo-check", "-"},
 		},
 		Prompt: config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
-		Model:  config.RuntimeModel{Supported: true, Args: []string{launcherArgModel, placeholderModel}},
+		Model:  config.RuntimeModel{Supported: true, Args: []string{"--model", placeholderModel}},
 		Sandbox: config.RuntimeSandbox{
 			Supported: true,
 		},
 	}
 	workflow := config.Workflow{
-		Defaults: config.Defaults{Runtime: launcherRuntimeCodex},
+		Defaults: config.Defaults{Runtime: "codex"},
 		Steps: map[string]config.Step{
-			launcherPlanStep: {Agent: launcherAgentPlanner},
+			"plan": {Agent: "planner"},
 		},
 	}
 
@@ -47,7 +48,7 @@ func TestRuntimeCommandBuildsCodexNormalAndSandboxArgv(t *testing.T) {
 			t.Fatalf("runtimeCommand returned error: %v", err)
 		}
 
-		want := []string{launcherRuntimeCodex, "--ask-for-approval", "never", launcherCommandExec, launcherArgSkipGitRepoCheck, "-"}
+		want := []string{"codex", "--ask-for-approval", "never", "exec", "--skip-git-repo-check", "-"}
 		if !slices.Equal(command, want) {
 			t.Fatalf("command = %#v, want %#v", command, want)
 		}
@@ -66,7 +67,7 @@ func TestRuntimeCommandBuildsCodexNormalAndSandboxArgv(t *testing.T) {
 			t.Fatalf("runtimeCommand returned error: %v", err)
 		}
 
-		want := []string{launcherRuntimeCodex, "--dangerously-bypass-approvals-and-sandbox", launcherCommandExec, launcherArgSkipGitRepoCheck, "-"}
+		want := []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check", "-"}
 		if !slices.Equal(command, want) {
 			t.Fatalf("command = %#v, want %#v", command, want)
 		}
@@ -83,9 +84,9 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 
 	fileAI := config.Runtime{
-		ID: launcherRuntimeFileAI,
+		ID: "fileai",
 		Command: config.RuntimeCommand{
-			Executable: launcherRuntimeFileAI,
+			Executable: "fileai",
 			NormalArgs: []string{
 				"--attempt", "{attempt_id}",
 			},
@@ -96,22 +97,22 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 			},
 		},
 		Prompt:      config.RuntimePrompt{Delivery: runtimePromptDeliveryFile},
-		Model:       config.RuntimeModel{Supported: true, Args: []string{launcherArgModel, placeholderModel}},
-		Reasoning:   config.RuntimeReasoning{Supported: true, Args: []string{launcherArgReasoning, placeholderReasoning}},
-		Directories: config.RuntimeDirectories{Supported: true, Args: []string{launcherArgAddDir, placeholderDir}},
+		Model:       config.RuntimeModel{Supported: true, Args: []string{"--model", placeholderModel}},
+		Reasoning:   config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", placeholderReasoning}},
+		Directories: config.RuntimeDirectories{Supported: true, Args: []string{"--add-dir", placeholderDir}},
 		Sandbox:     config.RuntimeSandbox{Supported: true},
 	}
 	workflow := config.Workflow{
 		Defaults: config.Defaults{
-			Runtime:     launcherRuntimeFileAI,
-			Model:       launcherModelWorkflow,
-			Reasoning:   launcherReasoningMedium,
-			RuntimeDirs: []string{launcherSharedDir},
+			Runtime:     "fileai",
+			Model:       "workflow-model",
+			Reasoning:   "medium",
+			RuntimeDirs: []string{"shared"},
 		},
 		Steps: map[string]config.Step{
-			launcherCodeStep: {
-				Agent:       launcherAgentCoder,
-				Model:       launcherModelStep,
+			"code": {
+				Agent:       "coder",
+				Model:       "step-model",
 				Reasoning:   "high",
 				RuntimeDirs: []string{"/tmp/external"},
 			},
@@ -126,15 +127,15 @@ func TestRuntimeCommandSubstitutesModelPromptMetadataAndDirs(t *testing.T) {
 	promptPath := filepath.ToSlash(filepath.Join(root, ".orc", "runs", "run-1", "prompts", "code.md"))
 
 	want := []string{
-		launcherRuntimeFileAI,
+		"fileai",
 		"--attempt", "attempt-1",
 		"--prompt", promptPath,
-		"--run-step", "run-1:" + launcherCodeStep,
-		"--agent", launcherAgentCoder,
-		launcherArgModel, launcherModelStep,
-		launcherArgReasoning, "high",
-		launcherArgAddDir, filepath.Join(root, launcherSharedDir),
-		launcherArgAddDir, "/tmp/external",
+		"--run-step", "run-1:" + "code",
+		"--agent", "coder",
+		"--model", "step-model",
+		"--reasoning", "high",
+		"--add-dir", filepath.Join(root, "shared"),
+		"--add-dir", "/tmp/external",
 	}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
@@ -161,67 +162,67 @@ func TestRuntimeCommandAppendsModelReasoningAndDirsInOrder(t *testing.T) {
 		{
 			name: "model only",
 			runtime: config.Runtime{
-				ID:      launcherRuntimeRecorder,
-				Command: config.RuntimeCommand{Executable: launcherRuntimeRecorder},
+				ID:      "recorder",
+				Command: config.RuntimeCommand{Executable: "recorder"},
 				Prompt:  config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
-				Model:   config.RuntimeModel{Supported: true, Args: []string{launcherArgModel, placeholderModel}},
+				Model:   config.RuntimeModel{Supported: true, Args: []string{"--model", placeholderModel}},
 				Sandbox: config.RuntimeSandbox{Supported: true},
 			},
-			defaults: config.Defaults{Runtime: launcherRuntimeRecorder, Model: launcherModelA},
-			step:     config.Step{Agent: launcherAgentPlanner},
-			want:     []string{launcherRuntimeRecorder, launcherArgModel, launcherModelA},
-			notWant:  []string{launcherArgReasoning, launcherArgDir},
+			defaults: config.Defaults{Runtime: "recorder", Model: "model-a"},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder", "--model", "model-a"},
+			notWant:  []string{"--reasoning", "--dir"},
 		},
 		{
 			name: "reasoning only",
 			runtime: config.Runtime{
-				ID:        launcherRuntimeRecorder,
-				Command:   config.RuntimeCommand{Executable: launcherRuntimeRecorder},
+				ID:        "recorder",
+				Command:   config.RuntimeCommand{Executable: "recorder"},
 				Prompt:    config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
-				Reasoning: config.RuntimeReasoning{Supported: true, Args: []string{launcherArgReasoning, placeholderReasoning}},
+				Reasoning: config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", placeholderReasoning}},
 				Sandbox:   config.RuntimeSandbox{Supported: true},
 			},
-			defaults: config.Defaults{Runtime: launcherRuntimeRecorder, Reasoning: launcherReasoningMedium},
-			step:     config.Step{Agent: launcherAgentPlanner},
-			want:     []string{launcherRuntimeRecorder, launcherArgReasoning, launcherReasoningMedium},
-			notWant:  []string{launcherArgModel, launcherArgDir},
+			defaults: config.Defaults{Runtime: "recorder", Reasoning: "medium"},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder", "--reasoning", "medium"},
+			notWant:  []string{"--model", "--dir"},
 		},
 		{
 			name: "model reasoning and dirs",
 			runtime: config.Runtime{
-				ID:          launcherRuntimeRecorder,
-				Command:     config.RuntimeCommand{Executable: launcherRuntimeRecorder},
+				ID:          "recorder",
+				Command:     config.RuntimeCommand{Executable: "recorder"},
 				Prompt:      config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
-				Model:       config.RuntimeModel{Supported: true, Args: []string{launcherArgModel, placeholderModel}},
-				Reasoning:   config.RuntimeReasoning{Supported: true, Args: []string{launcherArgReasoning, placeholderReasoning}},
-				Directories: config.RuntimeDirectories{Supported: true, Args: []string{launcherArgDir, placeholderDir}},
+				Model:       config.RuntimeModel{Supported: true, Args: []string{"--model", placeholderModel}},
+				Reasoning:   config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", placeholderReasoning}},
+				Directories: config.RuntimeDirectories{Supported: true, Args: []string{"--dir", placeholderDir}},
 				Sandbox:     config.RuntimeSandbox{Supported: true},
 			},
-			defaults: config.Defaults{Runtime: launcherRuntimeRecorder, Model: launcherModelA, Reasoning: launcherReasoningMedium, RuntimeDirs: []string{launcherSharedDir}},
-			step:     config.Step{Agent: launcherAgentPlanner},
-			want:     []string{launcherRuntimeRecorder, launcherArgModel, launcherModelA, launcherArgReasoning, launcherReasoningMedium, launcherArgDir, filepath.Join(root, launcherSharedDir)},
+			defaults: config.Defaults{Runtime: "recorder", Model: "model-a", Reasoning: "medium", RuntimeDirs: []string{"shared"}},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder", "--model", "model-a", "--reasoning", "medium", "--dir", filepath.Join(root, "shared")},
 		},
 		{
 			name: "neither",
 			runtime: config.Runtime{
-				ID:        launcherRuntimeRecorder,
-				Command:   config.RuntimeCommand{Executable: launcherRuntimeRecorder},
+				ID:        "recorder",
+				Command:   config.RuntimeCommand{Executable: "recorder"},
 				Prompt:    config.RuntimePrompt{Delivery: runtimePromptDeliveryStdin},
-				Model:     config.RuntimeModel{Supported: true, Args: []string{launcherArgModel, placeholderModel}},
-				Reasoning: config.RuntimeReasoning{Supported: true, Args: []string{launcherArgReasoning, placeholderReasoning}},
+				Model:     config.RuntimeModel{Supported: true, Args: []string{"--model", placeholderModel}},
+				Reasoning: config.RuntimeReasoning{Supported: true, Args: []string{"--reasoning", placeholderReasoning}},
 				Sandbox:   config.RuntimeSandbox{Supported: true},
 			},
-			defaults: config.Defaults{Runtime: launcherRuntimeRecorder},
-			step:     config.Step{Agent: launcherAgentPlanner},
-			want:     []string{launcherRuntimeRecorder},
-			notWant:  []string{launcherArgModel, launcherArgReasoning, launcherArgDir},
+			defaults: config.Defaults{Runtime: "recorder"},
+			step:     config.Step{Agent: "planner"},
+			want:     []string{"recorder"},
+			notWant:  []string{"--model", "--reasoning", "--dir"},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			workflow := config.Workflow{
 				Defaults: tt.defaults,
 				Steps: map[string]config.Step{
-					launcherPlanStep: tt.step,
+					"plan": tt.step,
 				},
 			}
 
@@ -245,7 +246,7 @@ func TestRuntimeCommandAppendsModelReasoningAndDirsInOrder(t *testing.T) {
 
 func TestRuntimeCommandSandboxRuntimeDirsAllowRepositoryRelativeDirs(t *testing.T) {
 	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, launcherSharedDir), 0o750); err != nil {
+	if err := os.Mkdir(filepath.Join(root, "shared"), 0o750); err != nil {
 		t.Fatalf("create shared runtime dir: %v", err)
 	}
 
@@ -253,11 +254,11 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRepositoryRelativeDirs(t *testing.
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root)
 
-	runtime := runtimeWithDirs(launcherRuntimeRecorder)
+	runtime := runtimeWithDirs("recorder")
 	workflow := config.Workflow{
-		Defaults: config.Defaults{Runtime: launcherRuntimeRecorder, RuntimeDirs: []string{launcherSharedDir, launcherSharedDir}},
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{"shared", "shared"}},
 		Steps: map[string]config.Step{
-			launcherPlanStep: {Agent: launcherAgentPlanner},
+			"plan": {Agent: "planner"},
 		},
 	}
 
@@ -266,7 +267,7 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRepositoryRelativeDirs(t *testing.
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
 
-	want := []string{launcherRuntimeRecorder, launcherArgDir, filepath.Join(root, launcherSharedDir), launcherArgDir, filepath.Join(root, launcherSharedDir)}
+	want := []string{"recorder", "--dir", filepath.Join(root, "shared"), "--dir", filepath.Join(root, "shared")}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want duplicate runtime_dirs preserved as %#v", command, want)
 	}
@@ -284,11 +285,11 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowProjectSandboxMount(t *testing.T) 
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root, external)
 
-	runtime := runtimeWithDirs(launcherRuntimeRecorder)
+	runtime := runtimeWithDirs("recorder")
 	workflow := config.Workflow{
-		Defaults: config.Defaults{Runtime: launcherRuntimeRecorder, RuntimeDirs: []string{external}},
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
 		Steps: map[string]config.Step{
-			launcherPlanStep: {Agent: launcherAgentPlanner},
+			"plan": {Agent: "planner"},
 		},
 	}
 	sandboxConfig := config.SandboxConfig{
@@ -300,7 +301,7 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowProjectSandboxMount(t *testing.T) 
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
 
-	want := []string{launcherRuntimeRecorder, launcherArgDir, external}
+	want := []string{"recorder", "--dir", external}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
 	}
@@ -318,14 +319,14 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRuntimeSandboxRequirement(t *testi
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root, external)
 
-	runtime := runtimeWithDirs(launcherRuntimeRecorder)
+	runtime := runtimeWithDirs("recorder")
 	runtime.Sandbox.Requirements.Mounts = []config.RuntimeSandboxMount{
 		{Host: external, Target: config.RuntimeSandboxMountTarget{Path: external}, Mode: "rw"},
 	}
 	workflow := config.Workflow{
-		Defaults: config.Defaults{Runtime: launcherRuntimeRecorder, RuntimeDirs: []string{external}},
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
 		Steps: map[string]config.Step{
-			launcherPlanStep: {Agent: launcherAgentPlanner},
+			"plan": {Agent: "planner"},
 		},
 	}
 
@@ -334,7 +335,7 @@ func TestRuntimeCommandSandboxRuntimeDirsAllowRuntimeSandboxRequirement(t *testi
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
 
-	want := []string{launcherRuntimeRecorder, launcherArgDir, external}
+	want := []string{"recorder", "--dir", external}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
 	}
@@ -352,7 +353,7 @@ func TestRuntimeCommandSandboxRuntimeDirsUseActiveSandboxCoverage(t *testing.T) 
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root, external)
 
-	runtime := runtimeWithDirs(launcherRuntimeRecorder)
+	runtime := runtimeWithDirs("recorder")
 	runtime.Sandbox.Requirements.Mounts = []config.RuntimeSandboxMount{
 		{
 			ID: "config_home",
@@ -366,9 +367,9 @@ func TestRuntimeCommandSandboxRuntimeDirsUseActiveSandboxCoverage(t *testing.T) 
 		},
 	}
 	workflow := config.Workflow{
-		Defaults: config.Defaults{Runtime: launcherRuntimeRecorder, RuntimeDirs: []string{external}},
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
 		Steps: map[string]config.Step{
-			launcherPlanStep: {Agent: launcherAgentPlanner},
+			"plan": {Agent: "planner"},
 		},
 	}
 
@@ -377,7 +378,7 @@ func TestRuntimeCommandSandboxRuntimeDirsUseActiveSandboxCoverage(t *testing.T) 
 		t.Fatalf("runtimeCommand returned error: %v", err)
 	}
 
-	want := []string{launcherRuntimeRecorder, launcherArgDir, external}
+	want := []string{"recorder", "--dir", external}
 	if !slices.Equal(command, want) {
 		t.Fatalf("command = %#v, want %#v", command, want)
 	}
@@ -419,11 +420,11 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectMissingOrNonDirectoryBeforeArgv(t
 			t.Setenv("ORC_SANDBOX_ROOT", root)
 			setRuntimeDirCoverageEnv(t, root)
 
-			runtime := runtimeWithDirs(launcherRuntimeRecorder)
+			runtime := runtimeWithDirs("recorder")
 			workflow := config.Workflow{
-				Defaults: config.Defaults{Runtime: launcherRuntimeRecorder, RuntimeDirs: []string{dir}},
+				Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{dir}},
 				Steps: map[string]config.Step{
-					launcherPlanStep: {Agent: launcherAgentPlanner},
+					"plan": {Agent: "planner"},
 				},
 			}
 
@@ -457,11 +458,11 @@ func TestRuntimeCommandSandboxRuntimeDirsRejectUncoveredAbsoluteDir(t *testing.T
 	t.Setenv("ORC_SANDBOX_ROOT", root)
 	setRuntimeDirCoverageEnv(t, root)
 
-	runtime := runtimeWithDirs(launcherRuntimeRecorder)
+	runtime := runtimeWithDirs("recorder")
 	workflow := config.Workflow{
-		Defaults: config.Defaults{Runtime: launcherRuntimeRecorder, RuntimeDirs: []string{external}},
+		Defaults: config.Defaults{Runtime: "recorder", RuntimeDirs: []string{external}},
 		Steps: map[string]config.Step{
-			launcherPlanStep: {Agent: launcherAgentPlanner},
+			"plan": {Agent: "planner"},
 		},
 	}
 
@@ -506,11 +507,11 @@ func runtimeCommandForTest(root string, workflow config.Workflow, runtime config
 }
 
 func runtimeCommandForTestWithSandbox(root string, workflow config.Workflow, runtime config.Runtime, sandboxConfig config.SandboxConfig) ([]string, string, error) {
-	stepID := launcherPlanStep
-	agentID := launcherAgentPlanner
+	stepID := "plan"
+	agentID := "planner"
 
-	if _, ok := workflow.Steps[launcherCodeStep]; ok {
-		stepID = launcherCodeStep
+	if _, ok := workflow.Steps["code"]; ok {
+		stepID = "code"
 		agentID = "coder"
 	}
 

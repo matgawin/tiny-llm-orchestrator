@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package runstore
 
 import (
@@ -14,20 +15,20 @@ import (
 func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	recorded, event, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:        run.ID,
-			StepID:       testWorkflowStatePlan,
-			AgentID:      testAgentPlanner,
-			AttemptID:    testAttemptID,
+			StepID:       "plan",
+			AgentID:      "planner",
+			AttemptID:    "attempt-001",
 			Status:       attemptStatusDone,
-			Result:       reportResultReady,
-			Summary:      testReportSummaryPlanReady,
+			Result:       "ready",
+			Summary:      "Plan is ready.",
 			ChangedPaths: []string{"README.md"},
 			Commands:     []string{"go test ./internal/runstore"},
 			Tests:        []string{"go test ./internal/runstore"},
@@ -40,11 +41,11 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 
-	if recorded.State != AttemptStateReported || recorded.Status != attemptStatusDone || recorded.Result != reportResultReady {
+	if recorded.State != AttemptStateReported || recorded.Status != attemptStatusDone || recorded.Result != "ready" {
 		t.Fatalf("reported attempt = %+v, want reported done/ready", recorded)
 	}
 
-	if recorded.Report == nil || recorded.Report.Summary != testReportSummaryPlanReady || len(recorded.Report.Followups) != 1 {
+	if recorded.Report == nil || recorded.Report.Summary != "Plan is ready." || len(recorded.Report.Followups) != 1 {
 		t.Fatalf("reported attempt report = %+v, want structured report", recorded.Report)
 	}
 
@@ -61,7 +62,7 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 		t.Fatalf("unmarshal report payload: %v", err)
 	}
 
-	if payload.State != AttemptStateReported || payload.Report.Summary != testReportSummaryPlanReady {
+	if payload.State != AttemptStateReported || payload.Report.Summary != "Plan is ready." {
 		t.Fatalf("report payload = %+v, want reported payload", payload)
 	}
 
@@ -145,12 +146,12 @@ func TestRecordAttemptReportFollowupStageFailureLeavesAttemptActive(t *testing.T
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: attemptID,
 			Status:    attemptStatusDone,
-			Result:    reportResultReady,
-			Summary:   testReportSummaryPlanReady,
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 			Followups: []Followup{{Title: "Later"}},
 		},
 	})
@@ -177,19 +178,19 @@ func TestRecordAttemptReportFollowupStageFailureLeavesAttemptActive(t *testing.T
 func TestRecordAttemptReportRequiresReportRunID(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-missing-run-id")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
-			AttemptID: testAttemptID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
 			Status:    attemptStatusDone,
-			Result:    reportResultReady,
-			Summary:   testReportSummaryPlanReady,
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 	})
 	requireErrorContains(t, err, "run id is required")
@@ -198,20 +199,20 @@ func TestRecordAttemptReportRequiresReportRunID(t *testing.T) {
 func TestRecordAttemptReportReturnsTargetErrorForStaleAttempt(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-stale-attempt")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
-			AttemptID: testOldAttemptID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "old-attempt",
 			Status:    attemptStatusDone,
-			Result:    reportResultReady,
-			Summary:   testReportSummaryPlanReady,
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 	})
 
@@ -228,18 +229,18 @@ func TestRecordAttemptReportReturnsTargetErrorForStaleAttempt(t *testing.T) {
 func TestRecordAttemptReportRejectsStartingAttempt(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-starting-report-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
-			AttemptID: testAttemptID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
 			Status:    attemptStatusDone,
-			Result:    reportResultReady,
-			Summary:   testReportSummaryPlanReady,
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 		ReportContent:    []byte("# Should not persist\n"),
 		ReportContentSet: true,
@@ -268,17 +269,17 @@ func TestRecordAttemptReportRejectsStartingAttempt(t *testing.T) {
 func TestRecordAttemptInvalidReportCreatesNoReportArtifact(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-invalid-report-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	recorded, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateInvalidReport,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
-			AttemptID: testAttemptID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
 			Status:    attemptStatusFailed,
 			Result:    AttemptResultInvalidReport,
 			Summary:   "invalid report: bad result",
@@ -307,20 +308,20 @@ func TestRecordAttemptInvalidReportCreatesNoReportArtifact(t *testing.T) {
 func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-artifact-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	recorded, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
-			AttemptID: testAttemptID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
 			Status:    attemptStatusDone,
-			Result:    reportResultReady,
-			Summary:   testReportSummaryPlanReady,
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 		ReportContent:    []byte("# Detail\n"),
 		ReportContentSet: true,
@@ -352,7 +353,7 @@ func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 }
 
 func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
-	const attemptID = testAttemptID
+	const attemptID = "attempt-001"
 
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-existing-ref-run")
@@ -374,12 +375,12 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
+			StepID:    "plan",
+			AgentID:   "planner",
 			AttemptID: attemptID,
 			Status:    attemptStatusDone,
-			Result:    reportResultReady,
-			Summary:   testReportSummaryPlanReady,
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 			ReportRef: &ref,
 		},
 	})
@@ -414,16 +415,16 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "record-report-orphan-retry-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
-	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
-	recordProcessForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
+	linkPromptAndLogForTest(t, store, run.ID, "attempt-001")
+	recordProcessForTest(t, store, run.ID, "attempt-001")
 
 	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	relPath, err := artifactPath(KindReport, testWorkflowStatePlan, nextEventSequence(loaded))
+	relPath, err := artifactPath(KindReport, "plan", nextEventSequence(loaded))
 	if err != nil {
 		t.Fatalf("artifactPath returned error: %v", err)
 	}
@@ -435,12 +436,12 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 
 	orphanContent := canonicalReportMarkdown(Report{
 		RunID:     run.ID,
-		StepID:    testWorkflowStatePlan,
-		AgentID:   testAgentPlanner,
-		AttemptID: testAttemptID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "attempt-001",
 		Status:    attemptStatusDone,
-		Result:    reportResultReady,
-		Summary:   testReportSummaryPlanReady,
+		Result:    "ready",
+		Summary:   "Plan is ready.",
 	}, []byte("# Detail\n"), true)
 
 	if err := os.WriteFile(orphanPath, orphanContent, 0o600); err != nil {
@@ -451,12 +452,12 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
-			StepID:    testWorkflowStatePlan,
-			AgentID:   testAgentPlanner,
-			AttemptID: testAttemptID,
+			StepID:    "plan",
+			AgentID:   "planner",
+			AttemptID: "attempt-001",
 			Status:    attemptStatusDone,
-			Result:    reportResultReady,
-			Summary:   testReportSummaryPlanReady,
+			Result:    "ready",
+			Summary:   "Plan is ready.",
 		},
 		ReportContent:    []byte("# Detail\n"),
 		ReportContentSet: true,
@@ -481,13 +482,13 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 func TestRecordIgnoredReportDoesNotMutateActiveAttempt(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "ignored-report-run")
-	startAttemptForTest(t, store, run.ID, testAttemptID)
+	startAttemptForTest(t, store, run.ID, "attempt-001")
 
 	event, err := store.RecordIgnoredReportContext(context.Background(), run.ID, IgnoreReportRequest{
 		RunID:     run.ID,
-		StepID:    testWorkflowStatePlan,
-		AgentID:   testAgentPlanner,
-		AttemptID: testOldAttemptID,
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "old-attempt",
 		Reason:    reportTargetCurrentAttemptReason,
 		Errors:    []string{"attempt mismatch"},
 		Time:      time.Date(2026, 5, 4, 12, 2, 0, 0, time.UTC),
@@ -505,7 +506,7 @@ func TestRecordIgnoredReportDoesNotMutateActiveAttempt(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != testAttemptID {
+	if loaded.Status.ActiveAttempt == nil || loaded.Status.ActiveAttempt.AttemptID != "attempt-001" {
 		t.Fatalf("active attempt = %+v, want unchanged attempt-001", loaded.Status.ActiveAttempt)
 	}
 }
@@ -515,13 +516,13 @@ func TestRecordIgnoredReportRejectsMismatchedRunID(t *testing.T) {
 	run := createManualRun(t, store, "ignored-report-mismatch-run")
 
 	_, err := store.RecordIgnoredReportContext(context.Background(), run.ID, IgnoreReportRequest{
-		RunID:     testOtherRunID,
-		StepID:    testWorkflowStatePlan,
-		AgentID:   testAgentPlanner,
-		AttemptID: testOldAttemptID,
+		RunID:     "other-run",
+		StepID:    "plan",
+		AgentID:   "planner",
+		AttemptID: "old-attempt",
 		Reason:    reportTargetCurrentAttemptReason,
 	})
-	requireErrorContains(t, err, "run_id", testOtherRunID, "does not match")
+	requireErrorContains(t, err, "run_id", "other-run", "does not match")
 }
 
 func TestLoadRejectsIgnoredReportRunIDMismatch(t *testing.T) {
@@ -530,7 +531,7 @@ func TestLoadRejectsIgnoredReportRunIDMismatch(t *testing.T) {
 	events := readRunEvents(t, run)
 
 	payload, err := marshalPayload(reportIgnoredPayload{
-		RunID:  testOtherRunID,
+		RunID:  "other-run",
 		Reason: reportTargetCurrentAttemptReason,
 	})
 	if err != nil {
@@ -548,7 +549,7 @@ func TestLoadRejectsIgnoredReportRunIDMismatch(t *testing.T) {
 	writeRunEvents(t, run, events)
 
 	_, err = store.LoadContext(context.Background(), run.ID)
-	requireErrorContains(t, err, "report ignored run_id", testOtherRunID, "does not match")
+	requireErrorContains(t, err, "report ignored run_id", "other-run", "does not match")
 }
 
 func assertContainsAll(t *testing.T, got string, wants []string) {

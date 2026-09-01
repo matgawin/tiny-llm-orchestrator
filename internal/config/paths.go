@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -49,7 +48,7 @@ func resolveOrcRelativePath(orcDir, realOrcDir, relPath string) (string, error) 
 	}
 
 	clean := filepath.Clean(relPath)
-	if invalidBaseRelativePath(clean) {
+	if clean == "." || !filepath.IsLocal(clean) {
 		return "", errors.New("path must not escape .orc")
 	}
 
@@ -74,13 +73,9 @@ func validateResolvedUnderDir(realDir, path string) error {
 		return fmt.Errorf("resolve path relative to .orc: %w", err)
 	}
 
-	if invalidBaseRelativePath(rel) {
+	if rel == "." || !filepath.IsLocal(rel) {
 		return errors.New("path must not escape .orc")
 	}
 
 	return nil
-}
-
-func invalidBaseRelativePath(rel string) bool {
-	return rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

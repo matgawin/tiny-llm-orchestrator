@@ -7,7 +7,7 @@
     pname = "orc";
     inherit version;
     inherit src;
-    vendorHash = "sha256-0+1XmAQKF3zp462IwZmkheruGxlgKnFSAoa4ZHOOWwA=";
+    vendorHash = "sha256-3f3tHrgQRyEyVGKxU9GAiClBgm5lMJY/QC6tjYPnViA=";
     subPackages = ["cmd/orc"];
 
     ldflags = [

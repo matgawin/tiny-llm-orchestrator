@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -13,7 +14,7 @@ import (
 
 func TestExecuteSandboxHelp(t *testing.T) {
 	output := executeCLICommand(t, []string{commandSandbox, helpFlag})
-	for _, want := range []string{cliUsage, "Available Commands:", commandRun} {
+	for _, want := range []string{"Usage:", "Available Commands:", commandRun} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("sandbox help output missing %q:\n%s", want, output)
 		}
@@ -31,7 +32,7 @@ func TestExecuteSandboxRunHelp(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 
-	for _, want := range []string{cliUsage, "sandbox run"} {
+	for _, want := range []string{"Usage:", "sandbox run"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("sandbox run help output missing %q:\n%s", want, stdout.String())
 		}
@@ -41,7 +42,7 @@ func TestExecuteSandboxRunHelp(t *testing.T) {
 func TestExecuteSandboxUnknownSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{commandSandbox, cliCommandUnknown}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandSandbox, "unknown"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown subcommand")
 	}
 

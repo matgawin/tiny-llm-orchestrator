@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package cli
 
 import (
@@ -20,7 +21,7 @@ func TestExecuteInitDryRunUsesCurrentDirectory(t *testing.T) {
 	withTempCwd(t)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, cliFlagDryRun}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, "--dry-run"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
@@ -36,7 +37,7 @@ func TestExecuteInitDryRunUsesCurrentDirectory(t *testing.T) {
 func TestExecuteInitRejectsDryRunWithYes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{commandInit, cliFlagDryRun, cliFlagYes}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandInit, "--dry-run", "--yes"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want invalid flags")
 	}
 
@@ -57,7 +58,7 @@ func TestExecuteInitHelp(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, want := range []string{"orc init scaffolds", cliUsage, cliFlagDryRun, cliFlagYes} {
+	for _, want := range []string{"orc init scaffolds", "Usage:", "--dry-run", "--yes"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q:\n%s", want, output)
 		}
@@ -70,7 +71,7 @@ func TestExecuteInitHelp(t *testing.T) {
 
 func TestExecuteInitUpgradePlansWithoutWriting(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 
 	before := string(readCLIFile(t, filepath.Join(root, ".orc", "config.yaml")))
@@ -92,16 +93,16 @@ func TestExecuteInitUpgradePlansWithoutWriting(t *testing.T) {
 
 func TestExecuteInitUpgradeApplyWritesSafePlan(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 
-	output := executeCLICommand(t, []string{commandInit, commandUpgrade, cliFlagApply})
+	output := executeCLICommand(t, []string{commandInit, commandUpgrade, "--apply"})
 
 	assertCLIOutputContainsAll(t, output, []string{
 		"orc init upgrade applied",
 		"setup version: 0 -> 1",
 		"modified files:",
-		cliConfigPath,
+		".orc/config.yaml",
 		"result: safe planned changes were written",
 	})
 
@@ -113,12 +114,12 @@ func TestExecuteInitUpgradeApplyWritesSafePlan(t *testing.T) {
 
 func TestExecuteInitUpgradeApplyPartiallyAppliesWithManualRefreshSkippedAction(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 	writeCLIFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "custom planner\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--apply"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -126,7 +127,7 @@ func TestExecuteInitUpgradeApplyPartiallyAppliesWithManualRefreshSkippedAction(t
 		"orc init upgrade partially applied",
 		initUpgradeStatusPartialLine,
 		"modified files:",
-		cliConfigPath,
+		".orc/config.yaml",
 		"skipped actions:",
 		"customized-scaffold-file",
 		"local customization was preserved",
@@ -144,13 +145,13 @@ func TestExecuteInitUpgradeApplyPartiallyAppliesWithManualRefreshSkippedAction(t
 
 func TestExecuteInitUpgradeApplyReportsDirtyAffectedPathConflict(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 	initCleanJJProject(t, root)
 	appendCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "# local change\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--apply"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want dirty affected path refusal")
 	}
 
@@ -160,7 +161,7 @@ func TestExecuteInitUpgradeApplyReportsDirtyAffectedPathConflict(t *testing.T) {
 		"created files:",
 		"AGENTS.md",
 		"conflicts:",
-		cliConfigPath,
+		".orc/config.yaml",
 		"dirty-affected-path",
 		"result: safe independent changes were written; unresolved conflicts remain",
 	})
@@ -176,7 +177,7 @@ func TestExecuteInitUpgradeApplyReportsDirtyAffectedPathConflict(t *testing.T) {
 
 func TestExecuteInitUpgradeJSONPlanIncludesStructuredFields(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 
 	if err := os.Remove(filepath.Join(root, ".orc", "runtimes", "codex.yaml")); err != nil {
@@ -186,7 +187,7 @@ func TestExecuteInitUpgradeJSONPlanIncludesStructuredFields(t *testing.T) {
 	writeCLIFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), "custom planner\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagJSON}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--json"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -224,13 +225,13 @@ func TestExecuteInitUpgradeJSONPlanIncludesStructuredFields(t *testing.T) {
 
 func TestExecuteInitUpgradeJSONApplyReportsDirtyAffectedPathConflict(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 	initCleanJJProject(t, root)
 	appendCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "# local change\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply, cliFlagJSON}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--apply", "--json"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want dirty affected path refusal")
 	}
 
@@ -297,11 +298,11 @@ func TestExecuteInitUpgradeJSONApplyReportsCustomizedScaffoldSkip(t *testing.T) 
 
 func TestExecuteInitUpgradeJSONApplyIncludesWrittenPaths(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply, cliFlagJSON}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--apply", "--json"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -318,7 +319,7 @@ func TestExecuteInitUpgradeJSONApplyIncludesWrittenPaths(t *testing.T) {
 		t.Fatalf("applied/refused = %t/%t, want true/false", payload.Applied, payload.Refused)
 	}
 
-	if !containsString(payload.ModifiedPaths, cliConfigPath) {
+	if !containsString(payload.ModifiedPaths, ".orc/config.yaml") {
 		t.Fatalf("modified paths = %#v, want config path", payload.ModifiedPaths)
 	}
 
@@ -331,7 +332,7 @@ func TestExecuteInitUpgradeJSONApplyIncludesWrittenPaths(t *testing.T) {
 
 func TestExecuteInitUpgradeJSONApplyReportsDependencySkippedAction(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 
 	configPath := filepath.Join(root, ".orc", "config.yaml")
@@ -342,7 +343,7 @@ func TestExecuteInitUpgradeJSONApplyReportsDependencySkippedAction(t *testing.T)
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagApply, cliFlagJSON}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--apply", "--json"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unresolved config conflict")
 	}
 
@@ -366,7 +367,7 @@ func TestExecuteInitUpgradeJSONApplyReportsDependencySkippedAction(t *testing.T)
 
 func TestExecuteInitUpgradeJSONPlanReportsDependencySkippedAction(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 
 	configPath := filepath.Join(root, ".orc", "config.yaml")
@@ -377,7 +378,7 @@ func TestExecuteInitUpgradeJSONPlanReportsDependencySkippedAction(t *testing.T) 
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagJSON}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--json"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -438,11 +439,11 @@ func TestInitUpgradeOutputIncludesSchemaMigrationReason(t *testing.T) {
 
 func TestExecuteInitUpgradeOutputsProductionSchemaMigration(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	replaceCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  max_loops: 3\n")
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagJSON}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--json"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -452,7 +453,7 @@ func TestExecuteInitUpgradeOutputsProductionSchemaMigration(t *testing.T) {
 
 	payload := decodeInitUpgradeJSON(t, stdout.Bytes())
 
-	action := initUpgradeJSONActionForPath(t, payload, cliConfigPath)
+	action := initUpgradeJSONActionForPath(t, payload, ".orc/config.yaml")
 	if !strings.Contains(action.Reason, "schema migration config-defaults-max-loops-to-loop-caps: migrate defaults.max_loops to defaults.loop_caps") {
 		t.Fatalf("action reason = %q, want production schema migration", action.Reason)
 	}
@@ -472,7 +473,7 @@ func TestExecuteInitUpgradeOutputsProductionSchemaMigration(t *testing.T) {
 
 func TestExecuteInitUpgradeReportsProductionSchemaMigrationConflictWithSafeActions(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	replaceCLIFile(t, filepath.Join(root, ".orc", "config.yaml"), "defaults:\n  loop_caps:\n    enabled: true\n    soft: 2\n    hard: 4\n", "defaults:\n  max_loops: 3\n  loop_caps:\n    enabled: true\n    soft: 3\n    hard: 4\n")
 
 	if err := os.Remove(filepath.Join(root, ".orc", "runtimes", "codex.yaml")); err != nil {
@@ -480,7 +481,7 @@ func TestExecuteInitUpgradeReportsProductionSchemaMigrationConflictWithSafeActio
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagJSON}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--json"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -497,7 +498,7 @@ func TestExecuteInitUpgradeReportsProductionSchemaMigrationConflictWithSafeActio
 		t.Fatalf("conflicts = %#v, want schema migration conflict", payload.Conflicts)
 	}
 
-	if hasInitUpgradeAction(payload.Actions, "modify", cliConfigPath) {
+	if hasInitUpgradeAction(payload.Actions, "modify", ".orc/config.yaml") {
 		t.Fatalf("actions = %#v, want no config action while schema migration conflicts", payload.Actions)
 	}
 
@@ -526,16 +527,16 @@ func TestExecuteInitUpgradeHelpDoesNotExposeDryRunFlag(t *testing.T) {
 	}
 
 	output := stdout.String()
-	assertCLIOutputContainsAll(t, output, []string{"Bare orc init upgrade is plan-only", cliFlagApply, cliFlagJSON, cliRefreshConfigUsage})
+	assertCLIOutputContainsAll(t, output, []string{"Bare orc init upgrade is plan-only", "--apply", "--json", "orc run refresh-config <run-id>"})
 
-	if strings.Contains(output, cliFlagDryRun) {
+	if strings.Contains(output, "--dry-run") {
 		t.Fatalf("help output advertised --dry-run:\n%s", output)
 	}
 
 	stdout.Reset()
 	stderr.Reset()
 
-	if err := Execute([]string{commandInit, commandUpgrade, cliFlagDryRun}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandInit, commandUpgrade, "--dry-run"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown --dry-run flag")
 	}
 
@@ -546,22 +547,22 @@ func TestExecuteInitUpgradeHelpDoesNotExposeDryRunFlag(t *testing.T) {
 
 func TestExecuteInitUpgradeDoesNotModifyRunsTree(t *testing.T) {
 	root := withTempCwd(t)
-	executeCLICommand(t, []string{commandInit, cliFlagYes})
+	executeCLICommand(t, []string{commandInit, "--yes"})
 	removeCLISetupVersion(t, root)
 
-	runPath := filepath.Join(root, ".orc", "runs", cliRunIDOne, "snapshot.yaml")
+	runPath := filepath.Join(root, ".orc", "runs", "run-1", "snapshot.yaml")
 	if err := os.MkdirAll(filepath.Dir(runPath), 0o750); err != nil {
 		t.Fatalf("mkdir run dir: %v", err)
 	}
 
 	writeCLIFile(t, runPath, "setup_version: 999\n")
 
-	output := executeCLICommand(t, []string{commandInit, commandUpgrade, cliFlagApply})
+	output := executeCLICommand(t, []string{commandInit, commandUpgrade, "--apply"})
 	if got := string(readCLIFile(t, runPath)); got != "setup_version: 999\n" {
 		t.Fatalf("run file = %q, want untouched", got)
 	}
 
-	assertCLIOutputContainsAll(t, output, []string{cliRefreshConfigUsage})
+	assertCLIOutputContainsAll(t, output, []string{"orc run refresh-config <run-id>"})
 }
 
 func TestExecuteRunStartWarnsForOlderLiveSetup(t *testing.T) {
@@ -570,7 +571,7 @@ func TestExecuteRunStartWarnsForOlderLiveSetup(t *testing.T) {
 	removeCLISetupVersion(t, root)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandRun, cliCommandStart, cliFlagWorkflow, cliWorkflowImplementation, cliFlagTask, cliTaskMarkdown}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, "start", "--workflow", "implementation", "--task", "# Task"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -584,7 +585,7 @@ func TestExecuteRunStartDoesNotWarnForCurrentSetup(t *testing.T) {
 	writeCLIProject(t, root, "optional", true)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandRun, cliCommandStart, cliFlagWorkflow, cliWorkflowImplementation, cliFlagTask, cliTaskMarkdown}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandRun, "start", "--workflow", "implementation", "--task", "# Task"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -596,7 +597,7 @@ func TestExecuteRunStartDoesNotWarnForCurrentSetup(t *testing.T) {
 func TestExecuteInitUnknownFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	if err := Execute([]string{commandInit, cliFlagBogus}, &stdout, &stderr); err == nil {
+	if err := Execute([]string{commandInit, "--bogus"}, &stdout, &stderr); err == nil {
 		t.Fatal("Execute returned nil error, want unknown flag error")
 	}
 
@@ -605,7 +606,7 @@ func TestExecuteInitUnknownFlag(t *testing.T) {
 	}
 
 	output := stderr.String()
-	for _, want := range []string{`unknown flag: --bogus`, cliUsage, "orc init"} {
+	for _, want := range []string{`unknown flag: --bogus`, "Usage:", "orc init"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, output)
 		}
@@ -616,7 +617,7 @@ func TestExecuteInitYesCreatesScaffold(t *testing.T) {
 	root := withTempCwd(t)
 
 	var stdout, stderr bytes.Buffer
-	if err := Execute([]string{commandInit, cliFlagYes}, &stdout, &stderr); err != nil {
+	if err := Execute([]string{commandInit, "--yes"}, &stdout, &stderr); err != nil {
 		t.Fatalf("Execute returned error: %v\nstderr: %s", err, stderr.String())
 	}
 
@@ -683,7 +684,7 @@ func withTempCwd(t *testing.T) string {
 }
 
 func confirmThreeInitPromptsThroughCLI() *strings.Reader {
-	return strings.NewReader(strings.Join([]string{cliConfirmYes, cliConfirmYes, cliConfirmYes}, "\n") + "\n")
+	return strings.NewReader(strings.Join([]string{"yes", "yes", "yes"}, "\n") + "\n")
 }
 
 type initUpgradeTestJSON struct {

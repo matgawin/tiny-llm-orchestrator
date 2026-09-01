@@ -1,3 +1,4 @@
+//nolint:goconst // Test strings are clearer in place.
 package config
 
 import (
@@ -53,8 +54,8 @@ func readConfigTestdata(t *testing.T, name string) string {
 
 func minimalWorkflowSpec() Workflow {
 	return Workflow{
-		Name:  testWorkflowImplementation,
-		Start: testStepPlan,
+		Name:  "implementation",
+		Start: "plan",
 		Execution: Execution{
 			Mode: "sequential",
 		},
@@ -66,13 +67,13 @@ func minimalWorkflowSpec() Workflow {
 			Timeout:         Duration{Duration: 30 * time.Minute, Set: true},
 			ReportExitGrace: Duration{Duration: 30 * time.Second, Set: true},
 			Retries:         map[string]int{},
-			Runtime:         testRuntimeCodex,
+			Runtime:         "codex",
 		},
 		Steps: map[string]Step{
-			testStepPlan: {
-				Agent:          testAgentPlanner,
+			"plan": {
+				Agent:          "planner",
 				AllowedResults: map[string][]string{"done": {"ready"}},
-				On:             map[string]string{"done/ready": testTerminalReadyForHuman},
+				On:             map[string]string{"done/ready": "ready_for_human"},
 			},
 		},
 	}
@@ -98,7 +99,7 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 
 	agents := fixture.agents
 	if agents == nil {
-		agents = map[string]string{testAgentPlanner: validAgentDescriptor(testAgentPlanner)}
+		agents = map[string]string{"planner": validAgentDescriptor("planner")}
 	}
 
 	config := fixture.config
@@ -108,7 +109,7 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 
 	runtimes := fixture.runtimes
 	if runtimes == nil {
-		runtimes = map[string]string{testRuntimeCodex: validCodexRuntimeDescriptor()}
+		runtimes = map[string]string{"codex": validCodexRuntimeDescriptor()}
 
 		if !strings.Contains(config, "\nruntimes:") {
 			config += "runtimes:\n  codex: runtimes/codex.yaml\n"
@@ -121,7 +122,7 @@ func writeMinimalProject(t *testing.T, fixture projectFixture) string {
 	}
 
 	writeFile(t, filepath.Join(orcDir, "config.yaml"), config)
-	writeFile(t, filepath.Join(orcDir, "workflows", testWorkflowImplementation+".yaml"), workflow)
+	writeFile(t, filepath.Join(orcDir, "workflows", "implementation"+".yaml"), workflow)
 
 	for id, descriptor := range agents {
 		writeFile(t, filepath.Join(orcDir, "agents", id+".md"), descriptor)
