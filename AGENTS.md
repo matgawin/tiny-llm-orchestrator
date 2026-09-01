@@ -4,6 +4,11 @@
 
 Keep the always-loaded agent context small. Use this file for repo-wide guardrails, then rely on local `AGENTS.md` files and repo docs for subtree-specific guidance.
 
+## Communication
+
+- In all communication, exclusively use ASD-STE100 Simplified Technical English
+- Avoid language abstractions at all cost
+
 ## Repo Map
 
 - [README.md](README.md): repo map and subsystem ownership
@@ -43,6 +48,18 @@ Use `docs-sync` whenever a change affects durable behavior, contracts, or workfl
 
 ### Go semantic navigation
 - `go-lsp-workflow`: when inspecting, editing, reviewing, or verifying Go code where `gopls` can provide semantic navigation, symbol references, definitions, implementations, call hierarchy, workspace symbols, or edited-file diagnostics
+
+### Minimality and prose
+- `minimum`: when coding work asks for the smallest correct solution or when over-engineering, bloat, boilerplate, unnecessary abstractions, or unnecessary dependencies are in scope
+- `minimum-review`: when reviewing a diff for over-engineering, deletion candidates, speculative abstractions, or avoidable dependencies
+- `minimum-audit`: when auditing the whole repo for over-engineering or deletion candidates
+- `simple-english`: when writing, rewriting, or checking durable docs, prompts, AGENTS.md files, skills, runbooks, error messages, or text that must translate well
+
+For implementation work, run `minimum` after `change-scope` and any required boundary skill. Use it before the first edit.
+For review work, run `minimum-review` after the diff exists and before `verify-change`.
+Do not use `minimum-review` as the only review pass. It checks complexity only.
+Minimum does not replace required repo skills. First read the code path and local `AGENTS.md` files, then choose the smallest correct change.
+Do not remove validation, error handling, security checks, accessibility, tests, generated-artifact rules, or repository boundary rules to reduce code size.
 
 ## Global Rules
 
