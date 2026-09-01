@@ -15,11 +15,11 @@ state under `.orc/runs`.
 ## Latest Status
 
 `status.json` is the materialized fast-read state for a run. The append-only
-event log is the source of truth; when `status.json` lags behind the event log,
+event log is the source of truth. If `status.json` lags behind the event log,
 loaders replay events and return reconstructed latest state. `status.json` is
-still required bootstrap metadata: it must exist and contain valid schema,
+still required bootstrap metadata. It must exist and contain valid schema,
 `run_id`, workflow, and timestamp fields before replay can proceed.
-Stale materialized fields, including extra artifact references, may be ignored
+Stale materialized fields, including extra artifact references, can be ignored
 during replay because events are authoritative.
 
 Store-written status files contain:
@@ -58,7 +58,7 @@ workflow/report layers own the allowed-state policy.
 `status.json` materializes current attempt state and attempt history:
 
 - Starting or active workers appear in `active_attempt` and `attempts`.
-- Terminal attempts remain in `attempts`; terminalizing an attempt removes
+- Terminal attempts remain in `attempts`. Terminalizing an attempt removes
   `active_attempt`.
 - Retry launches materialize the `attempt.started` routing metadata on latest
   status.
@@ -79,13 +79,13 @@ workflow/report layers own the allowed-state policy.
 - Audited step skips are materialized in `skipped_steps`. Each entry is
   reconstructed from `workflow.step_skipped` and includes `step_id`, `status`,
   `result`, `reason`, `event_sequence`, `timestamp`, and optional `source`.
-  Skips do not add entries to `attempts`; the paired workflow transition is
+  Skips do not add entries to `attempts`. The paired workflow transition is
   visible through `workflow_loop.entries`.
 - When `workflow.step_skipped` consumes the latest terminal attempt outcome,
   that existing attempt is materialized with `consumed_by_event` set to the
   skip event sequence.
 
-The history entry below is abbreviated; entries use the same attempt object
+The history entry below is abbreviated. Entries use the same attempt object
 shape as `active_attempt`.
 
 ```json
@@ -155,7 +155,7 @@ Report persistence also materializes:
 - `reported`
 - `invalid_report`
 
-Retries do not replace terminal attempt states with a `superseded` state; see
+Retries do not replace terminal attempt states with a `superseded` state. See
 the `attempt.started` contract in
 [run-store-events.md](run-store-events.md#v1-event-types) for retry routing
 metadata.
@@ -209,11 +209,11 @@ the task snapshot schema.
 Final handoff summaries are repeatable `summary` artifacts. Their artifact
 references in `status.json` are the durable record that human-review summaries
 exist. State-guarded artifact writes check the run state while holding the run
-lock; `record-summary` uses that to require `ready_for_human` at commit time.
+lock. `record-summary` uses that to require `ready_for_human` at commit time.
 
 VCS pre-run and post-run summaries are ordinary `snapshot` artifacts named
 `vcs-pre-run` and `vcs-post-run`, for example
-`snapshots/000004-vcs-pre-run.json`. The VCS inspector owns their JSON schema;
+`snapshots/000004-vcs-pre-run.json`. The VCS inspector owns their JSON schema.
 the Run Store owns only artifact path allocation and event references. See
 [../features/run-start.md](../features/run-start.md#vcs-snapshot-schema) for
 the snapshot fields.
@@ -228,14 +228,14 @@ The file is committed before the event append. Definite append failures roll the
 file back, but a process or host crash between file commit and event append can
 leave an unreferenced artifact file for later cleanup tooling. Retrying the same
 canonical report is tolerated when the expected report artifact path already
-exists with identical content; different existing content remains an error.
+exists with identical content. Different existing content remains an error.
 
-`RecordAttemptReport` rejects caller-supplied `report_ref` values, so report refs
-are assigned only by the store. The canonical Markdown starts with generated
-structured sections (`# Worker Report`, metadata, summary, and any non-empty
-commands, tests, risks, changed paths, and follow-ups). If `--report-file` or
-JSON `report_file` supplied Markdown detail, the exact supplied content is
-appended under `## Report Detail`.
+`RecordAttemptReportContext` rejects caller-supplied `report_ref` values, so
+report refs are assigned only by the store. The canonical Markdown starts with
+generated structured sections (`# Worker Report`, metadata, summary, and any
+non-empty commands, tests, risks, changed paths, and follow-ups). If
+`--report-file` or JSON `report_file` supplied Markdown detail, the exact
+supplied content is appended under `## Report Detail`.
 
 `followup` appends new content by rewriting `followups.md`. Follow-up entries
 are formatted by the typed Run Store follow-up API rather than by callers.
@@ -269,7 +269,7 @@ The details block is omitted when no details are provided.
 
 Orchestrator-sourced appends are recorded with the existing `artifact.written`
 event for `kind=followup`. Report-sourced appends are staged and committed by
-`RecordAttemptReport`; the resulting `attempt.reported` payload carries
+`RecordAttemptReportContext`. The resulting `attempt.reported` payload carries
 `followup_refs` so the accepted report and its follow-up artifact share one
 store-owned success boundary. V1 does not emit a separate `followup.recorded`
 event.

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"tiny-llm-orchestrator/orc/internal/sandbox"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func TestExecuteSandboxHelp(t *testing.T) {
@@ -118,7 +117,7 @@ func TestExecuteSandboxRunMissingBwrapDoesNotRunConfiguredCommand(t *testing.T) 
 }
 
 func TestExitCodeUsesSandboxChildExitStatus(t *testing.T) {
-	err := sandbox.ExitError{Code: 7, Err: stableerr.New("exit status 7")}
+	err := sandbox.ExitError{Code: 7, Err: errors.New("exit status 7")}
 	if got := ExitCode(err); got != 7 {
 		t.Fatalf("ExitCode = %d, want 7", got)
 	}

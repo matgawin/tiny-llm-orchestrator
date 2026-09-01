@@ -17,6 +17,8 @@ import (
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
+const refreshEmptyPathEnv = "PATH="
+
 func TestRefreshPublishesNextSnapshotAndEvent(t *testing.T) {
 	root, store, runID := writeRefreshRun(t)
 	mutateWorkflow(t, root, `name: implementation
@@ -108,7 +110,7 @@ steps:
 		t.Fatalf("manifest hash = %s, want %s", result.ManifestHash, wantManifestHash)
 	}
 
-	loaded, err := store.Load(runID)
+	loaded, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -139,7 +141,7 @@ steps:
 
 func TestRefreshRejectsActiveAttempt(t *testing.T) {
 	root, store, runID := writeRefreshRun(t)
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:                "plan",
 		AgentID:               "planner",
 		AttemptID:             "attempt-active",
@@ -255,7 +257,7 @@ func writeRefreshRun(t *testing.T) (string, *runstore.Store, string) {
 		t.Fatalf("Open store returned error: %v", err)
 	}
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "refresh-run",
 		Workflow:     "implementation",
 		InitialState: "plan",
@@ -270,7 +272,7 @@ func writeRefreshRun(t *testing.T) (string, *runstore.Store, string) {
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
 
-	if err := store.WriteInitialConfigSnapshot(run.ID, snapshot); err != nil {
+	if err := store.WriteInitialConfigSnapshotContext(context.Background(), run.ID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
 

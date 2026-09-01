@@ -13,7 +13,6 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -56,7 +55,7 @@ type currentSnapshot struct {
 // back to live .orc files; missing or corrupt snapshots are run-store errors.
 func LoadCurrent(run *runstore.Run) (LoadedSnapshot, error) {
 	if run == nil {
-		return LoadedSnapshot{}, stableerr.Errorf("run is required")
+		return LoadedSnapshot{}, fmt.Errorf("run is required")
 	}
 
 	configDir := filepath.Join(run.Path, configDirName)
@@ -99,7 +98,7 @@ func LoadCurrent(run *runstore.Run) (LoadedSnapshot, error) {
 // project config or the snapshot resolved runtime contract.
 func InspectCurrent(run *runstore.Run) (Inspection, error) {
 	if run == nil {
-		return Inspection{}, stableerr.Errorf("run is required")
+		return Inspection{}, fmt.Errorf("run is required")
 	}
 
 	configDir := filepath.Join(run.Path, configDirName)
@@ -251,7 +250,7 @@ func readRegularSnapshotFile(path string) ([]byte, error) {
 	}
 
 	if !info.Mode().IsRegular() {
-		return nil, stableerr.Errorf("not a regular file")
+		return nil, fmt.Errorf("not a regular file")
 	}
 
 	content, err := os.ReadFile(path) // #nosec G304 -- path is derived from a validated run directory.
@@ -264,16 +263,16 @@ func readRegularSnapshotFile(path string) ([]byte, error) {
 
 func validateVersionDirName(name string) error {
 	if len(name) != versionDirLength {
-		return stableerr.Errorf("invalid version_dir %q", name)
+		return fmt.Errorf("invalid version_dir %q", name)
 	}
 
 	if _, err := strconv.Atoi(name); err != nil {
-		return stableerr.Errorf("invalid version_dir %q", name)
+		return fmt.Errorf("invalid version_dir %q", name)
 	}
 
 	return nil
 }
 
 func snapshotPathError(runID, path, detail string) error {
-	return stableerr.Errorf("run %q config snapshot %s: %s", runID, filepath.ToSlash(path), detail)
+	return fmt.Errorf("run %q config snapshot %s: %s", runID, filepath.ToSlash(path), detail)
 }

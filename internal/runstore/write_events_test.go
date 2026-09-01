@@ -2,11 +2,11 @@ package runstore
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func TestAppendEventPreservesOrderedLogAndUpdatesStatus(t *testing.T) {
@@ -100,7 +100,7 @@ func TestUpdateStatusAppendsEventAndMaterializesLatestState(t *testing.T) {
 	run := createManualRun(t, store, "status-run")
 	now := time.Date(2026, 5, 2, 15, 30, 0, 0, time.UTC)
 
-	status, event, err := store.UpdateStatus(run.ID, StatusUpdate{
+	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{
 		State: readyForHumanState,
 		Time:  now,
 	})
@@ -116,7 +116,7 @@ func TestUpdateStatusAppendsEventAndMaterializesLatestState(t *testing.T) {
 		t.Fatalf("status = %+v, want materialized %s at sequence 2", status, readyForHumanState)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestUpdateStatusReturnsCommittedEventWhenStatusMaterializationFails(t *test
 	run := createManualRun(t, store, "update-status-failure")
 	denyStatusMaterializationOrSkip(t, run.Path)
 
-	status, event, err := store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState})
+	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
 	requireStatusMaterializationError(t, err, run.Path)
 
 	if event.Sequence != 2 || event.Type != eventStatusUpdated {
@@ -157,7 +157,7 @@ func TestEventAppendPossiblyCommitted(t *testing.T) {
 			err := &EventAppendError{
 				Path:             "events.jsonl",
 				PossiblyAppended: tc.possiblyAppended,
-				Err:              stableerr.New(tc.underlyingMessage),
+				Err:              errors.New(tc.underlyingMessage),
 			}
 
 			if got := eventAppendPossiblyCommitted(err); got != tc.want {
@@ -192,7 +192,7 @@ func TestWriteAPIsRecoverFromStaleMaterializedStatus(t *testing.T) {
 		t.Fatalf("AppendEvent sequence = %d, want 3 from event log replay", event.Sequence)
 	}
 
-	status, event, err := store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState})
+	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
 	if err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestWriteAPIsRecoverFromStaleMaterializedStatus(t *testing.T) {
 		t.Fatalf("UpdateStatus sequence/status = %d/%d, want 4/4", event.Sequence, status.LastSequence)
 	}
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}

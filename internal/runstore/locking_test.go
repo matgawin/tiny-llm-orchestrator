@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,8 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func TestStartAttemptAllowsOnlyOneConcurrentActiveAttempt(t *testing.T) {
@@ -30,7 +29,7 @@ func TestStartAttemptAllowsOnlyOneConcurrentActiveAttempt(t *testing.T) {
 		go func(attemptID string) {
 			defer wg.Done()
 
-			_, _, err := store.StartAttempt(run.ID, StartAttemptRequest{
+			_, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
 				StepID:          testWorkflowStatePlan,
 				AgentID:         testAgentPlanner,
 				AttemptID:       attemptID,
@@ -63,7 +62,7 @@ func TestStartAttemptAllowsOnlyOneConcurrentActiveAttempt(t *testing.T) {
 		t.Fatalf("successes/failures = %d/%d, want 1/1", successes, failures)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -94,9 +93,9 @@ func TestStatusBackedWritesShareRunLock(t *testing.T) {
 			case 0:
 				_, err = store.AppendEvent(run.ID, Event{Type: eventWorkflowStepFinished})
 			case 1:
-				_, _, err = store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState})
+				_, _, err = store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
 			default:
-				_, err = store.WriteArtifact(run.ID, Artifact{
+				_, err = store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 					Kind:    KindFollowup,
 					Name:    "followup",
 					Content: []byte("- follow-up\n"),
@@ -116,7 +115,7 @@ func TestStatusBackedWritesShareRunLock(t *testing.T) {
 		}
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error after concurrent writes: %v", err)
 	}
@@ -154,7 +153,7 @@ func TestStartAttemptContextCancellationWhileLocalRunLockHeld(t *testing.T) {
 		t.Fatalf("StartAttemptContext error = %v, want context.Canceled", err)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -183,7 +182,7 @@ func TestRecordAttemptProcessContextCancellationWhileLocalRunLockHeld(t *testing
 		t.Fatalf("RecordAttemptProcessContext error = %v, want context.Canceled", err)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -309,7 +308,7 @@ func TestLoadRejectsSymlinkedStoreParents(t *testing.T) {
 			run := createManualRun(t, store, "load-parent-symlink")
 			tc.setup(t, root)
 
-			_, err := store.Load(run.ID)
+			_, err := store.LoadContext(context.Background(), run.ID)
 			requireErrorContains(t, err, "symlink")
 		})
 	}
@@ -324,7 +323,7 @@ func TestLoadWaitsForRunLock(t *testing.T) {
 	loadDone := make(chan error, 1)
 
 	go func() {
-		_, err := store.Load(run.ID)
+		_, err := store.LoadContext(context.Background(), run.ID)
 		loadDone <- err
 	}()
 
@@ -344,7 +343,7 @@ func TestReadArtifactWaitsForRunLock(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "read-artifact-lock-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -355,9 +354,9 @@ func TestReadArtifactWaitsForRunLock(t *testing.T) {
 	readDone := make(chan error, 1)
 
 	go func() {
-		content, err := store.ReadArtifact(run.ID, ref)
+		content, err := store.ReadArtifactContext(context.Background(), run.ID, ref)
 		if err == nil && string(content) != testReportContent {
-			err = stableerr.Errorf("content = %q, want report", string(content))
+			err = fmt.Errorf("content = %q, want report", string(content))
 		}
 
 		readDone <- err
@@ -380,7 +379,7 @@ func TestReadOnlyLegacyRunWithoutLockBackfillsLock(t *testing.T) {
 	store := openStore(t, root)
 	run := createManualRun(t, store, "legacy-no-lock-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -390,7 +389,7 @@ func TestReadOnlyLegacyRunWithoutLockBackfillsLock(t *testing.T) {
 		t.Fatalf("remove legacy lock: %v", err)
 	}
 
-	if _, err := store.Load(run.ID); err != nil {
+	if _, err := store.LoadContext(context.Background(), run.ID); err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
@@ -400,7 +399,7 @@ func TestReadOnlyLegacyRunWithoutLockBackfillsLock(t *testing.T) {
 		t.Fatalf("remove legacy lock before ReadArtifact: %v", err)
 	}
 
-	if content, err := store.ReadArtifact(run.ID, ref); err != nil {
+	if content, err := store.ReadArtifactContext(context.Background(), run.ID, ref); err != nil {
 		t.Fatalf("ReadArtifact returned error: %v", err)
 	} else if string(content) != testReportContent {
 		t.Fatalf("artifact content = %q, want report", string(content))
@@ -428,7 +427,7 @@ func TestLoadRejectsSymlinkedRunLock(t *testing.T) {
 
 	replacePathWithSymlink(t, lockPath, outside)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "run lock", "symlink")
 }
 
@@ -437,7 +436,7 @@ func TestRunLockCoordinatesAcrossProcesses(t *testing.T) {
 	store := openStore(t, root)
 	run := createManualRun(t, store, "cross-process-lock-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -534,7 +533,7 @@ func runstoreLockHelper(mode string) int {
 	case "load":
 		runstoreMarkLockAttempt()
 
-		if _, err := store.Load(runID); err != nil {
+		if _, err := store.LoadContext(context.Background(), runID); err != nil {
 			return runstoreLockExitLoad
 		}
 	case "read":
@@ -545,7 +544,7 @@ func runstoreLockHelper(mode string) int {
 
 		runstoreMarkLockAttempt()
 
-		if _, err := store.ReadArtifact(runID, ref); err != nil {
+		if _, err := store.ReadArtifactContext(context.Background(), runID, ref); err != nil {
 			return runstoreLockExitReadArtifact
 		}
 	case "append":
@@ -572,7 +571,7 @@ func runstoreHoldFileLock(store *Store, runID, readyPath, releasePath string) in
 		return runstoreLockExitLockEnv
 	}
 
-	run, err := store.Load(runID)
+	run, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		return runstoreLockExitLockLoad
 	}

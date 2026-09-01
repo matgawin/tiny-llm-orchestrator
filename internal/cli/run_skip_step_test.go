@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -123,7 +124,7 @@ func TestExecuteRunSkipStepRejectsIneligibleRunState(t *testing.T) {
 			setup: func(t *testing.T, root, runID string) {
 				t.Helper()
 
-				if _, _, err := openCLIStore(t, root).UpdateStatus(runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
+				if _, _, err := openCLIStore(t, root).UpdateStatusContext(context.Background(), runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			},

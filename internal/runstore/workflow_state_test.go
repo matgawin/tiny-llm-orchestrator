@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -10,12 +11,12 @@ import (
 func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "loop-start", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "loop-start", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	_, event, err := store.StartAttempt(run.ID, StartAttemptRequest{
+	_, event, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
 		StepID:          testWorkflowStateCode,
 		AgentID:         testAgentCoder,
 		AttemptID:       testAttemptID,
@@ -32,7 +33,7 @@ func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -63,12 +64,12 @@ func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "retry-start", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "retry-start", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	if _, _, err := store.StartAttempt(run.ID, StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
 		StepID:          testWorkflowStateCode,
 		AgentID:         testAgentCoder,
 		AttemptID:       testAttemptID,
@@ -78,7 +79,7 @@ func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *te
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -95,12 +96,12 @@ func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *te
 func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "terminal-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "terminal-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	status, event, err := store.UpdateStatus(run.ID, StatusUpdate{
+	status, event, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{
 		State: readyForHumanState,
 		WorkflowStateEntry: WorkflowStateEntryRequest{
 			State:         readyForHumanState,
@@ -131,7 +132,7 @@ func TestUpdateStatusPersistsTerminalWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("payload entry = %+v, want %+v", payload.WorkflowStateEntry, entry)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -145,14 +146,14 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 	root := t.TempDir()
 	store := openStore(t, root)
 
-	run, err := store.Create(CreateRunRequest{RunID: "skip-step", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "skip-step", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	at := time.Date(2026, 5, 8, 10, 15, 0, 0, time.UTC)
 
-	status, event, err := store.RecordStepSkip(run.ID, RecordStepSkipRequest{
+	status, event, err := store.RecordStepSkipContext(context.Background(), run.ID, RecordStepSkipRequest{
 		StepID: testWorkflowStateCode,
 		Reason: "not needed after human review",
 		Source: "test",
@@ -211,7 +212,7 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 		t.Fatalf("payload = %+v, want skip payload with workflow entry %+v", payload, entry)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -229,20 +230,20 @@ func TestRecordStepSkipRejectsBlankReasonWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	store := openStore(t, root)
 
-	run, err := store.Create(CreateRunRequest{RunID: "blank-skip", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "blank-skip", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
 	before := run.Status
 
-	_, _, err = store.RecordStepSkip(run.ID, RecordStepSkipRequest{StepID: testWorkflowStateCode, Reason: " \t "}, func(Status) (StepSkipTransition, error) {
+	_, _, err = store.RecordStepSkipContext(context.Background(), run.ID, RecordStepSkipRequest{StepID: testWorkflowStateCode, Reason: " \t "}, func(Status) (StepSkipTransition, error) {
 		t.Fatal("validator called for blank reason")
 		return StepSkipTransition{}, nil
 	})
 	requireErrorContains(t, err, "skip reason is required")
 
-	after, err := store.Load(run.ID)
+	after, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -255,16 +256,16 @@ func TestRecordStepSkipRejectsBlankReasonWithoutMutation(t *testing.T) {
 func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "ignored-report-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "ignored-report-loop", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	if _, err := store.RecordIgnoredReport(run.ID, IgnoreReportRequest{Reason: "validation_failed"}); err != nil {
+	if _, err := store.RecordIgnoredReportContext(context.Background(), run.ID, IgnoreReportRequest{Reason: "validation_failed"}); err != nil {
 		t.Fatalf("RecordIgnoredReport returned error: %v", err)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -281,7 +282,7 @@ func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -295,7 +296,7 @@ func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 		Hard:             1,
 		Reason:           WorkflowLoopHardCapReason,
 	}
-	if _, _, err := store.BlockWorkflowLoopHardCap(run.ID, block, time.Date(2026, 5, 2, 16, 0, 0, 0, time.UTC)); err != nil {
+	if _, _, err := store.BlockWorkflowLoopHardCapContext(context.Background(), run.ID, block, time.Date(2026, 5, 2, 16, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("BlockWorkflowLoopHardCap returned error: %v", err)
 	}
 
@@ -317,7 +318,7 @@ func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 		t.Fatalf("pending override = %+v, want block-derived override", override)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -330,12 +331,12 @@ func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 func TestAllowWorkflowLoopHardCapFailsWithoutActiveBlock(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "no-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "no-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	before, err := store.Load(run.ID)
+	before, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load before returned error: %v", err)
 	}
@@ -345,7 +346,7 @@ func TestAllowWorkflowLoopHardCapFailsWithoutActiveBlock(t *testing.T) {
 		t.Fatalf("AllowWorkflowLoopHardCap error = %v, want no-active-block failure", err)
 	}
 
-	after, err := store.Load(run.ID)
+	after, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load after returned error: %v", err)
 	}
@@ -362,7 +363,7 @@ func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
 	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 	recordProcessForTest(t, store, run.ID, testAttemptID)
 
-	if _, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
@@ -378,7 +379,7 @@ func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 
-	if _, _, err := store.UpdateStatus(run.ID, StatusUpdate{
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{
 		State: stateBlockedHuman,
 		WorkflowStateEntry: WorkflowStateEntryRequest{
 			State:         stateBlockedHuman,
@@ -430,7 +431,7 @@ func TestResolveHumanBlockPersistsContinuationAndReplays(t *testing.T) {
 		t.Fatalf("ResolvedHumanBlockStep = %q/%v, want plan/true", step, ok)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -461,7 +462,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 			prepare: func(t *testing.T, store *Store, runID string) {
 				t.Helper()
 
-				_, _, err := store.BlockWorkflowLoopHardCap(runID, WorkflowLoopHardCap{
+				_, _, err := store.BlockWorkflowLoopHardCapContext(context.Background(), runID, WorkflowLoopHardCap{
 					Workflow:         testWorkflowName,
 					BlockedState:     testWorkflowStateCode,
 					CurrentCount:     1,
@@ -496,7 +497,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 			prepare: func(t *testing.T, store *Store, runID string) {
 				t.Helper()
 
-				if _, _, err := store.UpdateStatus(runID, StatusUpdate{State: stateBlockedHuman}); err != nil {
+				if _, _, err := store.UpdateStatusContext(context.Background(), runID, StatusUpdate{State: stateBlockedHuman}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			},
@@ -511,7 +512,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 				linkPromptAndLogForTest(t, store, runID, testAttemptID)
 				recordProcessForTest(t, store, runID, testAttemptID)
 
-				if _, _, err := store.RecordAttemptReport(runID, RecordReportRequest{
+				if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, RecordReportRequest{
 					State: AttemptStateReported,
 					Report: Report{
 						RunID:     runID,
@@ -526,7 +527,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 					t.Fatalf("RecordAttemptReport returned error: %v", err)
 				}
 
-				if _, _, err := store.UpdateStatus(runID, StatusUpdate{State: stateBlockedHuman}); err != nil {
+				if _, _, err := store.UpdateStatusContext(context.Background(), runID, StatusUpdate{State: stateBlockedHuman}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			},
@@ -542,7 +543,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 				tc.prepare(t, store, run.ID)
 			}
 
-			before, err := store.Load(run.ID)
+			before, err := store.LoadContext(context.Background(), run.ID)
 			if err != nil {
 				t.Fatalf("Load before returned error: %v", err)
 			}
@@ -550,7 +551,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 			_, _, err = store.ResolveHumanBlock(run.ID, tc.reason, time.Time{})
 			requireErrorContains(t, err, tc.want...)
 
-			after, err := store.Load(run.ID)
+			after, err := store.LoadContext(context.Background(), run.ID)
 			if err != nil {
 				t.Fatalf("Load after returned error: %v", err)
 			}
@@ -565,7 +566,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "consume-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "consume-loop-override", Workflow: testWorkflowName, InitialState: testWorkflowStateCode})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -579,7 +580,7 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 		Hard:             1,
 		Reason:           WorkflowLoopHardCapReason,
 	}
-	if _, _, err := store.BlockWorkflowLoopHardCap(run.ID, block, time.Date(2026, 5, 2, 16, 0, 0, 0, time.UTC)); err != nil {
+	if _, _, err := store.BlockWorkflowLoopHardCapContext(context.Background(), run.ID, block, time.Date(2026, 5, 2, 16, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("BlockWorkflowLoopHardCap returned error: %v", err)
 	}
 
@@ -593,7 +594,7 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 		t.Fatal("pending override is nil")
 	}
 
-	_, event, err := store.StartAttempt(run.ID, StartAttemptRequest{
+	_, event, err := store.StartAttemptContext(context.Background(), run.ID, StartAttemptRequest{
 		StepID:                             testWorkflowStateCode,
 		AgentID:                            "coder",
 		AttemptID:                          "attempt-override",
@@ -616,7 +617,7 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 		t.Fatalf("consumed override payload = %+v, want %+v", payload.ConsumedWorkflowLoopHardCapOverride, override)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}

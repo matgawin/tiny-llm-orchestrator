@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -25,7 +26,7 @@ func openStore(t *testing.T, root string) *Store {
 func createManualRun(t *testing.T, store *Store, id string) *Run {
 	t.Helper()
 
-	run, err := store.Create(CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{
 		RunID:    id,
 		Workflow: testWorkflowName,
 		Time:     time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC),
@@ -41,7 +42,7 @@ func createRunWithMutatedArtifactEvent(t *testing.T, store *Store, id string, mu
 	t.Helper()
 	run := createManualRun(t, store, id)
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -57,7 +58,7 @@ func createRunWithReportArtifact(t *testing.T, store *Store, id string) (*Run, A
 	t.Helper()
 	run := createManualRun(t, store, id)
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}

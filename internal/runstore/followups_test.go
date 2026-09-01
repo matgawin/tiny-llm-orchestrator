@@ -2,6 +2,7 @@ package runstore
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,12 +13,12 @@ func TestWriteArtifactAppendsFollowupsToSingleFile(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "followup-append")
 
-	first, err := store.WriteArtifact(run.ID, Artifact{Kind: KindFollowup, Name: "first", Content: []byte("- first\n")})
+	first, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindFollowup, Name: "first", Content: []byte("- first\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact first followup returned error: %v", err)
 	}
 
-	second, err := store.WriteArtifact(run.ID, Artifact{Kind: KindFollowup, Name: "second", Content: []byte("- second\n")})
+	second, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindFollowup, Name: "second", Content: []byte("- second\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact second followup returned error: %v", err)
 	}
@@ -100,7 +101,7 @@ Recorded-At: 2026-05-04T12:04:00Z
 		t.Fatalf("followups.md = %q, want %q", content, want)
 	}
 
-	loaded, loadErr := store.Load(run.ID)
+	loaded, loadErr := store.LoadContext(context.Background(), run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -122,7 +123,7 @@ func TestRecordFollowupUsesSameDefaultTimeForMarkdownAndEvent(t *testing.T) {
 		t.Fatalf("RecordFollowup returned error: %v", err)
 	}
 
-	loaded, loadErr := store.Load(run.ID)
+	loaded, loadErr := store.LoadContext(context.Background(), run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -165,7 +166,7 @@ func TestWriteArtifactRejectsPreexistingFollowupsSymlink(t *testing.T) {
 	followupsPath := filepath.Join(run.Path, followupsName)
 	outside := outsideFileSymlink(t, run.Path, followupsPath, "outside-followups.md", []byte("outside\n"))
 
-	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindFollowup, Name: "next", Content: []byte("inside\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindFollowup, Name: "next", Content: []byte("inside\n")})
 	requireErrorContains(t, err, "symlink")
 
 	if got := string(readFile(t, outside)); got != "outside\n" {
@@ -178,7 +179,7 @@ func TestWriteArtifactRollsBackFollowupAppendWhenEventAppendFails(t *testing.T) 
 	run := createManualRun(t, store, "followup-rollback")
 
 	first := []byte("- first\n")
-	if _, err := store.WriteArtifact(run.ID, Artifact{Kind: KindFollowup, Name: "first", Content: first}); err != nil {
+	if _, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindFollowup, Name: "first", Content: first}); err != nil {
 		t.Fatalf("initial WriteArtifact returned error: %v", err)
 	}
 
@@ -186,7 +187,7 @@ func TestWriteArtifactRollsBackFollowupAppendWhenEventAppendFails(t *testing.T) 
 	eventsBefore := readFile(t, eventsPath)
 	denyFileAppendOrSkip(t, eventsPath)
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindFollowup, Name: "second", Content: []byte("- second\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindFollowup, Name: "second", Content: []byte("- second\n")})
 	if err == nil {
 		t.Fatal("WriteArtifact returned nil error, want append failure")
 	}

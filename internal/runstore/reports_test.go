@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -17,7 +18,7 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 	recordProcessForTest(t, store, run.ID, testAttemptID)
 
-	recorded, event, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	recorded, event, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:        run.ID,
@@ -72,7 +73,7 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 		t.Fatalf("followup refs = %+v, want one followup artifact ref", payload.FollowupRefs)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestRecordAttemptReportFollowupStageFailureLeavesAttemptActive(t *testing.T
 	recordProcessForTest(t, store, run.ID, attemptID)
 	denyStatusMaterializationOrSkip(t, run.Path)
 
-	_, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
@@ -155,7 +156,7 @@ func TestRecordAttemptReportFollowupStageFailureLeavesAttemptActive(t *testing.T
 	})
 	requireErrorContains(t, err, followupsName)
 
-	loaded, loadErr := store.Load(run.ID)
+	loaded, loadErr := store.LoadContext(context.Background(), run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -180,7 +181,7 @@ func TestRecordAttemptReportRequiresReportRunID(t *testing.T) {
 	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 	recordProcessForTest(t, store, run.ID, testAttemptID)
 
-	_, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			StepID:    testWorkflowStatePlan,
@@ -201,7 +202,7 @@ func TestRecordAttemptReportReturnsTargetErrorForStaleAttempt(t *testing.T) {
 	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 	recordProcessForTest(t, store, run.ID, testAttemptID)
 
-	_, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
@@ -229,7 +230,7 @@ func TestRecordAttemptReportRejectsStartingAttempt(t *testing.T) {
 	run := createManualRun(t, store, "record-starting-report-run")
 	startAttemptForTest(t, store, run.ID, testAttemptID)
 
-	_, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
@@ -245,7 +246,7 @@ func TestRecordAttemptReportRejectsStartingAttempt(t *testing.T) {
 	})
 	requireErrorContains(t, err, "state", "starting", "want active")
 
-	loaded, loadErr := store.Load(run.ID)
+	loaded, loadErr := store.LoadContext(context.Background(), run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -271,7 +272,7 @@ func TestRecordAttemptInvalidReportCreatesNoReportArtifact(t *testing.T) {
 	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 	recordProcessForTest(t, store, run.ID, testAttemptID)
 
-	recorded, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	recorded, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateInvalidReport,
 		Report: Report{
 			RunID:     run.ID,
@@ -291,7 +292,7 @@ func TestRecordAttemptInvalidReportCreatesNoReportArtifact(t *testing.T) {
 		t.Fatalf("report refs = %+v/%+v, want none for invalid report", recorded.ReportRef, recorded.Report)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -310,7 +311,7 @@ func TestRecordAttemptReportWritesReportArtifactAtomically(t *testing.T) {
 	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 	recordProcessForTest(t, store, run.ID, testAttemptID)
 
-	recorded, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	recorded, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
@@ -359,7 +360,7 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 	linkPromptAndLogForTest(t, store, run.ID, attemptID)
 	recordProcessForTest(t, store, run.ID, attemptID)
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindReport,
 		Name:    "existing-report",
 		Content: []byte("# Existing\n"),
@@ -369,7 +370,7 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
 
-	_, _, err = store.RecordAttemptReport(run.ID, RecordReportRequest{
+	_, _, err = store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
@@ -384,7 +385,7 @@ func TestRecordAttemptReportRejectsCallerSuppliedReportRef(t *testing.T) {
 	})
 	requireErrorContains(t, err, "report_ref", "cannot be supplied")
 
-	loaded, loadErr := store.Load(run.ID)
+	loaded, loadErr := store.LoadContext(context.Background(), run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -417,7 +418,7 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 	linkPromptAndLogForTest(t, store, run.ID, testAttemptID)
 	recordProcessForTest(t, store, run.ID, testAttemptID)
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -446,7 +447,7 @@ func TestRecordAttemptReportReusesSameContentOrphanReportArtifact(t *testing.T) 
 		t.Fatalf("write orphan report: %v", err)
 	}
 
-	recorded, _, err := store.RecordAttemptReport(run.ID, RecordReportRequest{
+	recorded, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, RecordReportRequest{
 		State: AttemptStateReported,
 		Report: Report{
 			RunID:     run.ID,
@@ -482,7 +483,7 @@ func TestRecordIgnoredReportDoesNotMutateActiveAttempt(t *testing.T) {
 	run := createManualRun(t, store, "ignored-report-run")
 	startAttemptForTest(t, store, run.ID, testAttemptID)
 
-	event, err := store.RecordIgnoredReport(run.ID, IgnoreReportRequest{
+	event, err := store.RecordIgnoredReportContext(context.Background(), run.ID, IgnoreReportRequest{
 		RunID:     run.ID,
 		StepID:    testWorkflowStatePlan,
 		AgentID:   testAgentPlanner,
@@ -499,7 +500,7 @@ func TestRecordIgnoredReportDoesNotMutateActiveAttempt(t *testing.T) {
 		t.Fatalf("event type = %q, want %q", event.Type, eventReportIgnored)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -513,7 +514,7 @@ func TestRecordIgnoredReportRejectsMismatchedRunID(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "ignored-report-mismatch-run")
 
-	_, err := store.RecordIgnoredReport(run.ID, IgnoreReportRequest{
+	_, err := store.RecordIgnoredReportContext(context.Background(), run.ID, IgnoreReportRequest{
 		RunID:     testOtherRunID,
 		StepID:    testWorkflowStatePlan,
 		AgentID:   testAgentPlanner,
@@ -546,7 +547,7 @@ func TestLoadRejectsIgnoredReportRunIDMismatch(t *testing.T) {
 	})
 	writeRunEvents(t, run, events)
 
-	_, err = store.Load(run.ID)
+	_, err = store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "report ignored run_id", testOtherRunID, "does not match")
 }
 

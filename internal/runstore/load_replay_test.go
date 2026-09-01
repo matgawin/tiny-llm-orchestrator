@@ -2,6 +2,7 @@ package runstore
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,7 +14,7 @@ func TestLoadReportsMalformedStateWithArtifactPath(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "broken-run")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -22,7 +23,7 @@ func TestLoadReportsMalformedStateWithArtifactPath(t *testing.T) {
 		t.Fatalf("remove artifact: %v", err)
 	}
 
-	_, err = store.Load(run.ID)
+	_, err = store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, ref.Path)
 }
 
@@ -37,7 +38,7 @@ func TestLoadRejectsBootstrapFIFO(t *testing.T) {
 
 	makeFIFO(t, eventsPath)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "regular file")
 }
 
@@ -48,7 +49,7 @@ func TestLoadRejectsRunDirectorySymlink(t *testing.T) {
 	realRunPath := filepath.Join(root, "outside-run")
 	relocatePathBehindSymlink(t, run.Path, realRunPath)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "symlink")
 }
 
@@ -69,7 +70,7 @@ func TestLoadRejectsMissingBootstrapFiles(t *testing.T) {
 				t.Fatalf("remove %s: %v", tc.remove, err)
 			}
 
-			_, err := store.Load(run.ID)
+			_, err := store.LoadContext(context.Background(), run.ID)
 			requireErrorContains(t, err, tc.wantContext)
 		})
 	}
@@ -95,7 +96,7 @@ func TestLoadRejectsBootstrapFileSymlinks(t *testing.T) {
 
 			replacePathWithSymlink(t, path, outside)
 
-			_, err := store.Load(run.ID)
+			_, err := store.LoadContext(context.Background(), run.ID)
 			requireErrorContains(t, err, "symlink")
 		})
 	}
@@ -109,7 +110,7 @@ func TestLoadRejectsHalfCreatedRunDirectory(t *testing.T) {
 		t.Fatalf("mkdir half-created run: %v", err)
 	}
 
-	_, err := store.Load("half-created")
+	_, err := store.LoadContext(context.Background(), "half-created")
 	requireErrorContains(t, err, "layout")
 }
 
@@ -130,7 +131,7 @@ func TestLoadRejectsMissingInitialRunLayout(t *testing.T) {
 				t.Fatalf("remove %s: %v", tc.remove, err)
 			}
 
-			_, err := store.Load(run.ID)
+			_, err := store.LoadContext(context.Background(), run.ID)
 			requireErrorContains(t, err, tc.wantContext)
 		})
 	}
@@ -184,7 +185,7 @@ func TestLoadRejectsMalformedArtifactFileShapes(t *testing.T) {
 			run, _, artifactPath := createRunWithReportArtifact(t, store, "artifact-"+tc.name)
 			tc.corrupt(t, run, artifactPath)
 
-			_, err := store.Load(run.ID)
+			_, err := store.LoadContext(context.Background(), run.ID)
 			requireErrorContains(t, err, tc.want)
 		})
 	}
@@ -204,7 +205,7 @@ func TestLoadRejectsSymlinkedArtifactParent(t *testing.T) {
 		t.Fatalf("write outside artifact: %v", err)
 	}
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "symlink")
 }
 
@@ -216,7 +217,7 @@ func TestLoadReportsMalformedEventLine(t *testing.T) {
 		t.Fatalf("write bad events: %v", err)
 	}
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "events.jsonl", "line 1")
 }
 
@@ -228,7 +229,7 @@ func TestLoadRejectsEmptyEventLog(t *testing.T) {
 		t.Fatalf("truncate events: %v", err)
 	}
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "no events")
 }
 
@@ -239,7 +240,7 @@ func TestLoadRejectsMissingEventPayload(t *testing.T) {
 	events[0].Payload = nil
 	writeRunEvents(t, run, events)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "payload")
 }
 
@@ -254,7 +255,7 @@ func TestLoadRejectsEventLogWithoutTrailingNewline(t *testing.T) {
 		t.Fatalf("write events without trailing newline: %v", err)
 	}
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "trailing newline")
 }
 
@@ -273,7 +274,7 @@ func TestLoadReadsLargeEventPayload(t *testing.T) {
 		t.Fatalf("AppendEvent returned error: %v", err)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestLoadRejectsMissingRunCreatedEvent(t *testing.T) {
 	events[0].Type = eventWorkflowStepSelected
 	writeRunEvents(t, run, events)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "run.created")
 }
 
@@ -305,7 +306,7 @@ func TestLoadRejectsRunCreatedWorkflowMismatch(t *testing.T) {
 	events[0].Payload = json.RawMessage(`{"workflow":"other","task_slug":""}`)
 	writeRunEvents(t, run, events)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "workflow")
 }
 
@@ -318,7 +319,7 @@ func TestLoadRejectsDuplicateRunCreatedEvent(t *testing.T) {
 	duplicate.Time = duplicate.Time.Add(time.Second)
 	writeRunEvents(t, run, append(events, duplicate))
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "duplicate", eventRunCreated)
 }
 
@@ -326,7 +327,7 @@ func TestLoadReplaysStatusStateWhenMaterializedStatusIsStale(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
 	run := createManualRun(t, store, "status-mismatch")
-	if _, _, err := store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
@@ -334,7 +335,7 @@ func TestLoadReplaysStatusStateWhenMaterializedStatusIsStale(t *testing.T) {
 	status.State = stateRunning
 	writeRunStatus(t, run, status)
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -348,7 +349,7 @@ func TestLoadReplaysArtifactEventWhenMaterializedStatusIsStale(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-ref")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -357,7 +358,7 @@ func TestLoadReplaysArtifactEventWhenMaterializedStatusIsStale(t *testing.T) {
 	status.Artifacts = nil
 	writeRunStatus(t, run, status)
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -377,7 +378,7 @@ func TestLoadUsesArtifactEventPayloadName(t *testing.T) {
 		payload.Artifact.Name = "other"
 	})
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -441,7 +442,7 @@ func TestLoadRejectsMalformedArtifactPayloadRefs(t *testing.T) {
 				tc.mutate(payload)
 			})
 
-			_, err := store.Load(run.ID)
+			_, err := store.LoadContext(context.Background(), run.ID)
 			requireErrorContains(t, err, tc.want(ref)...)
 		})
 	}
@@ -463,7 +464,7 @@ func TestLoadRejectsNestedRepeatableArtifactPath(t *testing.T) {
 		payload.Artifact.Path = nestedPath
 	})
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "does not match kind")
 }
 
@@ -474,7 +475,7 @@ func TestLoadRejectsMissingStatusTimestamps(t *testing.T) {
 	status.CreatedAt = time.Time{}
 	writeRunStatus(t, run, status)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "created_at")
 }
 
@@ -485,7 +486,7 @@ func TestLoadRejectsMissingEventTime(t *testing.T) {
 	events[0].Time = time.Time{}
 	writeRunEvents(t, run, events)
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "time")
 }
 
@@ -495,7 +496,7 @@ func TestLoadRejectsUnsupportedArtifactKind(t *testing.T) {
 		payload.Artifact.Kind = ArtifactKind("unknown")
 	})
 
-	_, err := store.Load(run.ID)
+	_, err := store.LoadContext(context.Background(), run.ID)
 	requireErrorContains(t, err, "unsupported artifact kind", ref.Path)
 }
 
@@ -503,7 +504,7 @@ func TestLoadIgnoresStatusRefMissingArtifactEvent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "missing-artifact-event")
 
-	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte(testReportContent)})
 	if err != nil {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
@@ -521,7 +522,7 @@ func TestLoadIgnoresStatusRefMissingArtifactEvent(t *testing.T) {
 	status.LastSequence = 1
 	writeRunStatus(t, run, status)
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -533,6 +534,6 @@ func TestLoadIgnoresStatusRefMissingArtifactEvent(t *testing.T) {
 
 func TestLoadRejectsUnsafeRunID(t *testing.T) {
 	store := openStore(t, t.TempDir())
-	_, err := store.Load("../escape")
+	_, err := store.LoadContext(context.Background(), "../escape")
 	requireErrorContains(t, err, "path separators")
 }

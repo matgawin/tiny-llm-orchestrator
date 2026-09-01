@@ -123,7 +123,7 @@ func TestWorkerLaunchNextRoutesValidReportWithoutPendingOutcome(t *testing.T) {
 		t.Fatalf("stderr = %q, want terminal transition", stderrText)
 	}
 
-	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -145,7 +145,7 @@ func TestWorkerLaunchNextAcceptsWorkerReportBeforeExit(t *testing.T) {
 	output := executeCLICommand(t, []string{commandWorker, cliCommandLaunchNext, result.runID})
 	assertCLIOutputContainsAll(t, output, []string{"result: done/ready"})
 
-	loaded, err := openCLIStore(t, root).Load(result.runID)
+	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardMissingMarker(t *testing.
 		"missing ORC_SANDBOX=1",
 	})
 
-	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -406,7 +406,7 @@ func TestExecuteWorkerLaunchNextRefusesWhenSandboxGuardRootMismatches(t *testing
 		"start the orchestrator with `orc sandbox run`",
 	})
 
-	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}

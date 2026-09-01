@@ -2,6 +2,7 @@ package runstore
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -31,7 +32,7 @@ func TestWriteArtifactPersistsSupportedArtifactsAndLoadsRefs(t *testing.T) {
 	var reportRef ArtifactRef
 
 	for _, artifact := range artifacts {
-		ref, err := store.WriteArtifact(run.ID, artifact)
+		ref, err := store.WriteArtifactContext(context.Background(), run.ID, artifact)
 		if err != nil {
 			t.Fatalf("WriteArtifact(%s) returned error: %v", artifact.Kind, err)
 		}
@@ -44,7 +45,7 @@ func TestWriteArtifactPersistsSupportedArtifactsAndLoadsRefs(t *testing.T) {
 		assertLatestArtifactWrite(t, run, artifact, ref)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestWriteArtifactIfStateRequiresMatchingState(t *testing.T) {
 		Content: []byte("Summary\n"),
 	}
 
-	_, err := store.WriteArtifactIfState(run.ID, readyForHumanState, summary)
+	_, err := store.WriteArtifactIfStateContext(context.Background(), run.ID, readyForHumanState, summary)
 	requireErrorContains(t, err, "state is", stateRunning)
 
 	var stateErr *StateMismatchError
@@ -85,7 +86,7 @@ func TestWriteArtifactIfStateRequiresMatchingState(t *testing.T) {
 		t.Fatalf("state mismatch = %+v, want run/state precondition details", stateErr)
 	}
 
-	loaded, loadErr := store.Load(run.ID)
+	loaded, loadErr := store.LoadContext(context.Background(), run.ID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -94,11 +95,11 @@ func TestWriteArtifactIfStateRequiresMatchingState(t *testing.T) {
 		t.Fatalf("artifacts = %+v, want none after rejected state-guarded write", loaded.Status.Artifacts)
 	}
 
-	if _, _, err := store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
-	ref, err := store.WriteArtifactIfState(run.ID, readyForHumanState, summary)
+	ref, err := store.WriteArtifactIfStateContext(context.Background(), run.ID, readyForHumanState, summary)
 	if err != nil {
 		t.Fatalf("WriteArtifactIfState returned error: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestReadArtifactReadsRecordedArtifact(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "read-artifact")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindPrompt,
 		Name:    testWorkflowStatePlan,
 		Content: []byte("Prompt\n"),
@@ -121,7 +122,7 @@ func TestReadArtifactReadsRecordedArtifact(t *testing.T) {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
 
-	content, err := store.ReadArtifact(run.ID, ref)
+	content, err := store.ReadArtifactContext(context.Background(), run.ID, ref)
 	if err != nil {
 		t.Fatalf("ReadArtifact returned error: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestOpenArtifactAppendWritesRecordedArtifact(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run, ref := createRunWithActiveLog(t, store, "append-artifact")
 
-	file, err := store.OpenArtifactAppend(run.ID, ref)
+	file, err := store.OpenArtifactAppendContext(context.Background(), run.ID, ref)
 	if err != nil {
 		t.Fatalf("OpenArtifactAppend returned error: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestOpenArtifactAppendWritesRecordedArtifact(t *testing.T) {
 		t.Fatalf("close artifact: %v", err)
 	}
 
-	content, err := store.ReadArtifact(run.ID, ref)
+	content, err := store.ReadArtifactContext(context.Background(), run.ID, ref)
 	if err != nil {
 		t.Fatalf("ReadArtifact returned error: %v", err)
 	}
@@ -165,7 +166,7 @@ func createRunWithActiveLog(t *testing.T, store *Store, runID string) (*Run, Art
 	run := createManualRun(t, store, runID)
 	startAttemptForTest(t, store, run.ID, testAttemptID)
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindLog,
 		Name:    testPlanAttemptID,
 		Content: []byte("first\n"),
@@ -174,7 +175,7 @@ func createRunWithActiveLog(t *testing.T, store *Store, runID string) (*Run, Art
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLog(run.ID, AttemptLogRequest{AttemptID: testAttemptID, LogRef: ref}); err != nil {
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), run.ID, AttemptLogRequest{AttemptID: testAttemptID, LogRef: ref}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
@@ -194,7 +195,7 @@ func TestOpenArtifactAppendRejectsSymlinkArtifact(t *testing.T) {
 		t.Fatalf("create artifact symlink: %v", err)
 	}
 
-	file, err := store.OpenArtifactAppend(run.ID, ref)
+	file, err := store.OpenArtifactAppendContext(context.Background(), run.ID, ref)
 	if file != nil {
 		_ = file.Close()
 	}
@@ -206,7 +207,7 @@ func TestOpenArtifactAppendRejectsNonLogArtifact(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "append-artifact-non-log")
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{
 		Kind:    KindPrompt,
 		Name:    testWorkflowStatePlan,
 		Content: []byte("Prompt\n"),
@@ -215,7 +216,7 @@ func TestOpenArtifactAppendRejectsNonLogArtifact(t *testing.T) {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
 
-	file, err := store.OpenArtifactAppend(run.ID, ref)
+	file, err := store.OpenArtifactAppendContext(context.Background(), run.ID, ref)
 	if file != nil {
 		_ = file.Close()
 	}
@@ -227,7 +228,7 @@ func TestOpenArtifactAppendRejectsTerminalAttemptLog(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
 	run, ref := createRunWithActiveLog(t, store, "append-terminal-log")
-	if _, _, err := store.FinishAttempt(run.ID, FinishAttemptRequest{
+	if _, _, err := store.FinishAttemptContext(context.Background(), run.ID, FinishAttemptRequest{
 		AttemptID: testAttemptID,
 		State:     AttemptStateProcessError,
 		Status:    attemptStatusFailed,
@@ -237,7 +238,7 @@ func TestOpenArtifactAppendRejectsTerminalAttemptLog(t *testing.T) {
 		t.Fatalf("FinishAttempt returned error: %v", err)
 	}
 
-	file, err := store.OpenArtifactAppend(run.ID, ref)
+	file, err := store.OpenArtifactAppendContext(context.Background(), run.ID, ref)
 	if file != nil {
 		_ = file.Close()
 	}
@@ -261,7 +262,7 @@ func TestOpenArtifactAppendRejectsFIFOArtifact(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		file, err := store.OpenArtifactAppend(run.ID, ref)
+		file, err := store.OpenArtifactAppendContext(context.Background(), run.ID, ref)
 		if file != nil {
 			_ = file.Close()
 		}
@@ -281,7 +282,7 @@ func TestReadArtifactRejectsUnrecordedRefs(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "unrecorded-artifact")
 
-	_, err := store.ReadArtifact(run.ID, ArtifactRef{
+	_, err := store.ReadArtifactContext(context.Background(), run.ID, ArtifactRef{
 		Kind:          KindReport,
 		Path:          "reports/000002-plan.md",
 		Name:          testWorkflowStatePlan,
@@ -294,7 +295,7 @@ func TestReadArtifactRejectsMalformedRefs(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "malformed-artifact-ref")
 
-	_, err := store.ReadArtifact(run.ID, ArtifactRef{
+	_, err := store.ReadArtifactContext(context.Background(), run.ID, ArtifactRef{
 		Kind:          KindReport,
 		Path:          testPromptPlanPath,
 		Name:          testWorkflowStatePlan,
@@ -349,7 +350,7 @@ func TestWriteArtifactRejectsDuplicateTaskSingletons(t *testing.T) {
 			store := openStore(t, t.TempDir())
 			run := createManualRun(t, store, "duplicate-task-"+tc.name)
 
-			ref, err := store.WriteArtifact(run.ID, Artifact{Kind: tc.kind, Name: tc.name, Content: tc.content})
+			ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: tc.kind, Name: tc.name, Content: tc.content})
 			if err != nil {
 				t.Fatalf("first WriteArtifact returned error: %v", err)
 			}
@@ -358,7 +359,7 @@ func TestWriteArtifactRejectsDuplicateTaskSingletons(t *testing.T) {
 				t.Fatalf("artifact path = %q, want %q", ref.Path, tc.path)
 			}
 
-			_, err = store.WriteArtifact(run.ID, Artifact{Kind: tc.kind, Name: tc.name, Content: []byte("second\n")})
+			_, err = store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: tc.kind, Name: tc.name, Content: []byte("second\n")})
 			requireErrorContains(t, err, "already been written")
 
 			if got := readFile(t, filepath.Join(run.Path, filepath.FromSlash(tc.path))); !bytes.Equal(got, tc.content) {
@@ -383,7 +384,7 @@ func TestWriteArtifactRejectsPreexistingUnreferencedArtifactFile(t *testing.T) {
 		t.Fatalf("write preexisting artifact: %v", err)
 	}
 
-	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("new artifact\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("new artifact\n")})
 	requireErrorContains(t, err, "already exists")
 
 	if got := readFile(t, path); !bytes.Equal(got, original) {
@@ -401,7 +402,7 @@ func TestWriteArtifactReturnsCommittedRefWhenStatusMaterializationFails(t *testi
 	run := createManualRun(t, store, "artifact-status-failure")
 	denyStatusMaterializationOrSkip(t, run.Path)
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	requireStatusMaterializationError(t, err, run.Path)
 
 	if ref.Path != "reports/000002-plan.md" || ref.EventSequence != 2 {
@@ -424,7 +425,7 @@ func TestWriteArtifactRejectsPreexistingArtifactFIFO(t *testing.T) {
 	path := filepath.Join(run.Path, "reports", "000002-plan.md")
 	makeFIFO(t, path)
 
-	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	requireErrorContains(t, err, "regular file")
 }
 
@@ -449,14 +450,14 @@ func TestWriteAPIsRejectRunDirectorySymlink(t *testing.T) {
 		{
 			name: "UpdateStatus",
 			call: func() error {
-				_, _, err := store.UpdateStatus(run.ID, StatusUpdate{State: readyForHumanState})
+				_, _, err := store.UpdateStatusContext(context.Background(), run.ID, StatusUpdate{State: readyForHumanState})
 				return err
 			},
 		},
 		{
 			name: "WriteArtifact",
 			call: func() error {
-				_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+				_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 				return err
 			},
 		},
@@ -477,7 +478,7 @@ func TestWriteArtifactRejectsMissingInitialParentDirectory(t *testing.T) {
 		t.Fatalf("remove reports dir: %v", err)
 	}
 
-	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	requireErrorContains(t, err, "layout", "reports")
 }
 
@@ -487,7 +488,7 @@ func TestWriteArtifactRejectsSymlinkedArtifactParent(t *testing.T) {
 	reportsDir := filepath.Join(run.Path, "reports")
 	outsideDir := outsideDirSymlink(t, run.Path, reportsDir, "outside-reports")
 
-	_, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	_, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	requireErrorContains(t, err, "symlink")
 
 	if _, statErr := os.Stat(filepath.Join(outsideDir, "000002-plan.md")); !os.IsNotExist(statErr) {
@@ -501,7 +502,7 @@ func TestWriteArtifactRollsBackCommittedArtifactWhenEventAppendFails(t *testing.
 	eventsPath := runEventsPath(run)
 	denyFileAppendOrSkip(t, eventsPath)
 
-	ref, err := store.WriteArtifact(run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
+	ref, err := store.WriteArtifactContext(context.Background(), run.ID, Artifact{Kind: KindReport, Name: testWorkflowStatePlan, Content: []byte("report\n")})
 	if err == nil {
 		t.Fatal("WriteArtifact returned nil error, want append failure")
 	}

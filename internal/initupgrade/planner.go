@@ -13,7 +13,6 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/initconfig"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -35,7 +34,7 @@ func Plan(root string) (*Result, error) {
 
 func planWithOptions(root string, opts planOptions) (*Result, error) {
 	if root == "" {
-		return nil, stableerr.New("project root is required")
+		return nil, errors.New("project root is required")
 	}
 
 	absRoot, err := filepath.Abs(root)
@@ -119,7 +118,7 @@ func (p *planner) plan() error {
 
 func (p *planner) readConfig() (configFile, error) {
 	if conflict := p.schemaPathConflict(configPath); conflict != "" {
-		return configFile{}, stableerr.New(conflict)
+		return configFile{}, errors.New(conflict)
 	}
 
 	content, err := p.read(configPath)
@@ -512,7 +511,7 @@ func (p *planner) hasConflict(path, code string) bool {
 
 func (p *planner) read(path string) ([]byte, error) {
 	if isRunsPath(path) {
-		return nil, stableerr.Errorf("%s is excluded from setup upgrade planning", path)
+		return nil, fmt.Errorf("%s is excluded from setup upgrade planning", path)
 	}
 
 	content, err := os.ReadFile(filepath.Join(p.root, filepath.FromSlash(path))) // #nosec G304 -- planner reads project-local paths selected by explicit migrations.

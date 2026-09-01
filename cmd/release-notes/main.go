@@ -12,7 +12,6 @@ import (
 	"unicode"
 
 	"tiny-llm-orchestrator/orc/internal/releasenotes"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func main() {
@@ -32,7 +31,7 @@ func run(args []string) error {
 	}
 
 	if flags.NArg() != 1 {
-		return stableerr.New("usage: release-notes [--repository-url URL] <previous_tag..selected_commit>")
+		return errors.New("usage: release-notes [--repository-url URL] <previous_tag..selected_commit>")
 	}
 
 	commits, err := gitLog(flags.Arg(0))
@@ -56,7 +55,7 @@ func gitLog(revisionRange string) ([]releasenotes.Commit, error) {
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return nil, stableerr.Errorf("git log failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+			return nil, fmt.Errorf("git log failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
 
 		return nil, fmt.Errorf("git log failed: %w", err)
@@ -67,16 +66,16 @@ func gitLog(revisionRange string) ([]releasenotes.Commit, error) {
 
 func validateRevisionRange(revisionRange string) error {
 	if revisionRange == "" {
-		return stableerr.New("revision range must not be empty")
+		return errors.New("revision range must not be empty")
 	}
 
 	if strings.HasPrefix(revisionRange, "-") {
-		return stableerr.Errorf("revision range must not start with an option prefix: %q", revisionRange)
+		return fmt.Errorf("revision range must not start with an option prefix: %q", revisionRange)
 	}
 
 	for _, r := range revisionRange {
 		if unicode.IsSpace(r) || unicode.IsControl(r) {
-			return stableerr.Errorf("revision range contains unsupported whitespace or control character: %q", revisionRange)
+			return fmt.Errorf("revision range contains unsupported whitespace or control character: %q", revisionRange)
 		}
 	}
 

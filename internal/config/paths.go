@@ -1,12 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -42,16 +41,16 @@ func readConfigFile(realOrcDir, path string) ([]byte, error) {
 
 func resolveOrcRelativePath(orcDir, realOrcDir, relPath string) (string, error) {
 	if relPath == "" {
-		return "", stableerr.New("path is required")
+		return "", errors.New("path is required")
 	}
 
 	if filepath.IsAbs(relPath) {
-		return "", stableerr.New("path must be relative to .orc")
+		return "", errors.New("path must be relative to .orc")
 	}
 
 	clean := filepath.Clean(relPath)
 	if invalidBaseRelativePath(clean) {
-		return "", stableerr.New("path must not escape .orc")
+		return "", errors.New("path must not escape .orc")
 	}
 
 	path := filepath.Join(orcDir, clean)
@@ -76,7 +75,7 @@ func validateResolvedUnderDir(realDir, path string) error {
 	}
 
 	if invalidBaseRelativePath(rel) {
-		return stableerr.New("path must not escape .orc")
+		return errors.New("path must not escape .orc")
 	}
 
 	return nil

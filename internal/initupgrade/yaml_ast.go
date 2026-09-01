@@ -1,11 +1,10 @@
 package initupgrade
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
@@ -48,7 +47,7 @@ func parseYAMLASTDocument(content []byte) (*yamlASTDocument, error) {
 
 	root, ok := file.Docs[0].Body.(*ast.MappingNode)
 	if !ok {
-		return nil, stableerr.New("YAML document is not a mapping")
+		return nil, errors.New("YAML document is not a mapping")
 	}
 
 	doc.root = root
@@ -146,7 +145,7 @@ func (d *yamlASTDocument) Visit(pattern YAMLPath, visit func(yamlMapVisit) error
 
 func (d *yamlASTDocument) Add(path YAMLPath, value string) error {
 	if path.Empty() {
-		return stableerr.New("YAML path is required")
+		return errors.New("YAML path is required")
 	}
 
 	parentPath := yamlPath(path.segments[:len(path.segments)-1]...)
@@ -158,7 +157,7 @@ func (d *yamlASTDocument) Add(path YAMLPath, value string) error {
 	}
 
 	if mappingValue(parent, key) != nil {
-		return stableerr.Errorf("%s already exists", path.String())
+		return fmt.Errorf("%s already exists", path.String())
 	}
 
 	node, err := newMappingValueNode(key, value, nodeColumn(parentPath))
@@ -185,12 +184,12 @@ func (d *yamlASTDocument) Add(path YAMLPath, value string) error {
 func (d *yamlASTDocument) Set(path YAMLPath, value string) error {
 	target, ok := d.find(path)
 	if !ok {
-		return stableerr.Errorf("%s is missing", path.String())
+		return fmt.Errorf("%s is missing", path.String())
 	}
 
 	key, ok := astMapKey(target)
 	if !ok {
-		return stableerr.Errorf("%s has a non-scalar YAML key", path.String())
+		return fmt.Errorf("%s has a non-scalar YAML key", path.String())
 	}
 
 	node, err := newSetValueNode(key, value, target.Key.GetToken().Position.Column, target.Value.GetToken().Position.Column)
@@ -218,7 +217,7 @@ func (d *yamlASTDocument) Set(path YAMLPath, value string) error {
 
 func (d *yamlASTDocument) Remove(path YAMLPath) error {
 	if path.Empty() {
-		return stableerr.New("YAML path is required")
+		return errors.New("YAML path is required")
 	}
 
 	parentPath := yamlPath(path.segments[:len(path.segments)-1]...)
@@ -226,12 +225,12 @@ func (d *yamlASTDocument) Remove(path YAMLPath) error {
 
 	parent, ok := d.Map(parentPath)
 	if !ok {
-		return stableerr.Errorf("%s is missing", path.String())
+		return fmt.Errorf("%s is missing", path.String())
 	}
 
 	idx := mappingValueIndex(parent, key)
 	if idx < 0 {
-		return stableerr.Errorf("%s is missing", path.String())
+		return fmt.Errorf("%s is missing", path.String())
 	}
 
 	if comment := parent.Values[idx].GetComment(); comment != nil {
@@ -245,7 +244,7 @@ func (d *yamlASTDocument) Remove(path YAMLPath) error {
 
 func (d *yamlASTDocument) Render() ([]byte, error) {
 	if d.file == nil || len(d.file.Docs) == 0 {
-		return nil, stableerr.New("YAML document is missing")
+		return nil, errors.New("YAML document is missing")
 	}
 
 	out := []byte(d.file.String())
@@ -298,7 +297,7 @@ func (d *yamlASTDocument) ensureMap(path YAMLPath) (*ast.MappingNode, error) {
 
 		child, ok := value.Value.(*ast.MappingNode)
 		if !ok {
-			return nil, stableerr.Errorf("%s is not a YAML mapping", yamlPath(path.segments[:idx+1]...).String())
+			return nil, fmt.Errorf("%s is not a YAML mapping", yamlPath(path.segments[:idx+1]...).String())
 		}
 
 		mapping = child
@@ -412,7 +411,7 @@ func parseSingleMappingValue(content []byte) (*ast.MappingValueNode, error) {
 	}
 
 	if len(doc.root.Values) != 1 {
-		return nil, stableerr.New("YAML edit value must parse as one mapping entry")
+		return nil, errors.New("YAML edit value must parse as one mapping entry")
 	}
 
 	return doc.root.Values[0], nil

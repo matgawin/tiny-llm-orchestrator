@@ -29,7 +29,7 @@ func TestRecordPersistsSummaryForReadyRun(t *testing.T) {
 		t.Fatalf("summary kind = %q, want %q", result.SummaryRef.Kind, runstore.KindSummary)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRecordPersistsSummaryForReadyRun(t *testing.T) {
 		t.Fatalf("status artifact path = %q, want %q", loaded.Status.Artifacts[0].Path, result.SummaryRef.Path)
 	}
 
-	content, err := store.ReadArtifact(run.ID, result.SummaryRef)
+	content, err := store.ReadArtifactContext(context.Background(), run.ID, result.SummaryRef)
 	if err != nil {
 		t.Fatalf("ReadArtifact returned error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestRecordDoesNotRequireCurrentWorkflowConfig(t *testing.T) {
 	root := t.TempDir()
 	store := openSummaryStore(t, root)
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    "retired-workflow-summary",
 		Workflow: "retired-workflow",
 	})
@@ -64,7 +64,7 @@ func TestRecordDoesNotRequireCurrentWorkflowConfig(t *testing.T) {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: workflow.RunStatusReadyForHuman}); err != nil {
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, runstore.StatusUpdate{State: workflow.RunStatusReadyForHuman}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestRecordRejectsRunsThatAreNotReadyForHuman(t *testing.T) {
 
 			run := createSummaryRun(t, store, "not-ready-"+state)
 			if state != workflow.RunStatusRunning {
-				if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: state}); err != nil {
+				if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, runstore.StatusUpdate{State: state}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			}
@@ -105,7 +105,7 @@ func TestRecordRejectsRunsThatAreNotReadyForHuman(t *testing.T) {
 				t.Fatalf("error = %q, want clear ready_for_human rejection", err.Error())
 			}
 
-			loaded, loadErr := store.Load(run.ID)
+			loaded, loadErr := store.LoadContext(context.Background(), run.ID)
 			if loadErr != nil {
 				t.Fatalf("Load returned error: %v", loadErr)
 			}
@@ -143,7 +143,7 @@ func createReadySummaryRun(t *testing.T, store *runstore.Store, runID string) *r
 	t.Helper()
 
 	run := createSummaryRun(t, store, runID)
-	if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: workflow.RunStatusReadyForHuman}); err != nil {
+	if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, runstore.StatusUpdate{State: workflow.RunStatusReadyForHuman}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func createReadySummaryRun(t *testing.T, store *runstore.Store, runID string) *r
 func createSummaryRun(t *testing.T, store *runstore.Store, runID string) *runstore.Run {
 	t.Helper()
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    runID,
 		Workflow: "implementation",
 	})

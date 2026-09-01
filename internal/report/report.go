@@ -17,7 +17,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // Options describes an orc report request.
@@ -45,7 +44,7 @@ func Submit(ctx context.Context, opts Options) (Result, error) {
 
 func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, error) {
 	if ctx == nil {
-		return Result{}, stableerr.New("context is required")
+		return Result{}, errors.New("context is required")
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -53,7 +52,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 	}
 
 	if opts.Root == "" {
-		return Result{}, stableerr.New("project root is required")
+		return Result{}, errors.New("project root is required")
 	}
 
 	payload, reportFile, schemaErrs, err := loadPayload(opts)
@@ -62,7 +61,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 	}
 
 	if payload.RunID == "" {
-		return Result{}, stableerr.New("run id is required")
+		return Result{}, errors.New("run id is required")
 	}
 
 	store, err := runstore.Open(opts.Root)
@@ -142,7 +141,7 @@ func recordInvalidReport(ctx context.Context, store *runstore.Store, report runs
 		State:  runstore.AttemptStateInvalidReport,
 		Time:   at,
 	})
-	err := stableerr.New(strings.Join(validationErrs, "; "))
+	err := errors.New(strings.Join(validationErrs, "; "))
 
 	if recordErr != nil {
 		if result, ignoreErr, ignored := recordTargetRaceResult(ctx, store, report, at, recordErr); ignored {
@@ -205,7 +204,7 @@ func loadWorkflowConfig(run *runstore.Run) (config.Workflow, error) {
 
 	workflowConfig, ok := snapshot.Project.Workflows[run.Status.Workflow]
 	if !ok {
-		return config.Workflow{}, stableerr.Errorf("workflow %q from run %q is not configured", run.Status.Workflow, run.ID)
+		return config.Workflow{}, fmt.Errorf("workflow %q from run %q is not configured", run.Status.Workflow, run.ID)
 	}
 
 	return workflowConfig, nil
@@ -247,11 +246,11 @@ func loadPayload(opts Options) (runstore.Report, string, []string, error) {
 	if opts.JSONFile == "" {
 		report := opts.Report
 		if report.ReportRef != nil {
-			return runstore.Report{}, "", nil, stableerr.New("report_ref cannot be supplied by callers")
+			return runstore.Report{}, "", nil, errors.New("report_ref cannot be supplied by callers")
 		}
 
 		if report.ReportFile != "" {
-			return runstore.Report{}, "", nil, stableerr.New("report_file cannot be supplied by flags; use --report-file")
+			return runstore.Report{}, "", nil, errors.New("report_file cannot be supplied by flags; use --report-file")
 		}
 
 		return report, opts.ReportFile, nil, nil
@@ -419,27 +418,27 @@ func hasFlagPayload(opts Options) bool {
 
 func validateCurrentTarget(active *runstore.Attempt, report runstore.Report) error {
 	if active == nil {
-		return stableerr.New("run has no active attempt")
+		return errors.New("run has no active attempt")
 	}
 
 	if active.State != runstore.AttemptStateActive {
-		return stableerr.Errorf("active attempt %q is %q, want active", active.AttemptID, active.State)
+		return fmt.Errorf("active attempt %q is %q, want active", active.AttemptID, active.State)
 	}
 
 	missing := identityMissing(report)
 	if len(missing) > 0 {
-		return stableerr.Errorf("report identity is incomplete: missing %s", strings.Join(missing, ", "))
+		return fmt.Errorf("report identity is incomplete: missing %s", strings.Join(missing, ", "))
 	}
 
 	switch {
 	case report.RunID != active.RunID:
-		return stableerr.Errorf("report run_id %q does not match active attempt run_id %q", report.RunID, active.RunID)
+		return fmt.Errorf("report run_id %q does not match active attempt run_id %q", report.RunID, active.RunID)
 	case report.StepID != active.StepID:
-		return stableerr.Errorf("report step_id %q does not match active attempt step_id %q", report.StepID, active.StepID)
+		return fmt.Errorf("report step_id %q does not match active attempt step_id %q", report.StepID, active.StepID)
 	case report.AgentID != active.AgentID:
-		return stableerr.Errorf("report agent_id %q does not match active attempt agent_id %q", report.AgentID, active.AgentID)
+		return fmt.Errorf("report agent_id %q does not match active attempt agent_id %q", report.AgentID, active.AgentID)
 	case report.AttemptID != active.AttemptID:
-		return stableerr.Errorf("report attempt_id %q does not match active attempt attempt_id %q", report.AttemptID, active.AttemptID)
+		return fmt.Errorf("report attempt_id %q does not match active attempt attempt_id %q", report.AttemptID, active.AttemptID)
 	default:
 		return nil
 	}
@@ -540,7 +539,7 @@ func invalidReport(report runstore.Report, validationErrs []string) runstore.Rep
 
 func readRegularFile(path string) ([]byte, error) {
 	if path == "" {
-		return nil, stableerr.New("path is required")
+		return nil, errors.New("path is required")
 	}
 
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) // #nosec G304 -- caller-provided report path is intentionally read after symlink refusal.
@@ -558,7 +557,7 @@ func readRegularFile(path string) ([]byte, error) {
 	}
 
 	if !info.Mode().IsRegular() {
-		return nil, stableerr.Errorf("%s is not a regular file", path)
+		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 
 	content, err := io.ReadAll(file)

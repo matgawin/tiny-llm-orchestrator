@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"tiny-llm-orchestrator/orc/internal/sandbox"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func newSandboxCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
@@ -44,7 +43,7 @@ func newSandboxRunCommand(stdin io.Reader, stdout, stderr io.Writer) *cobra.Comm
 				return fmt.Errorf("new sandbox run command: %w", err)
 			}
 
-			return stableerr.Errorf("unexpected sandbox run argument: %s", args[0])
+			return fmt.Errorf("unexpected sandbox run argument: %s", args[0])
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executeSandboxRun(stdin, stdout, stderr)

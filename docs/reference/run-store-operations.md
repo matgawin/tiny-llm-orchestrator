@@ -18,7 +18,7 @@ append API contract for durable run state under `.orc/runs`.
 
 V1 serializes status-backed writes per run inside the Run Store. Higher-level
 orchestration still owns domain coordination, such as deciding whether a
-concurrent command should be allowed to mutate the same run.
+concurrent command can mutate the same run.
 Run creation also takes a runs-directory publication lock while reserving and
 publishing the final run directory, so public readers do not observe a
 half-published run layout.
@@ -32,7 +32,7 @@ content.
 
 V1 writes `schema_version: 1` and does not implement schema migrations. The
 only metadata backfill is `.lock` creation for legacy run directories that
-predate per-run locking; public reads and writes may create that lock file
+predate per-run locking. Public reads and writes can create that lock file
 before accessing run state.
 
 V1 treats persisted content as caller-owned. Redaction and size limits belong to
@@ -48,7 +48,7 @@ callers or future policy layers, not the run-store package.
 - Status refresh failure: returns `StatusMaterializationError` with the
   committed event.
 
-`UpdateStatus`:
+`UpdateStatusContext`:
 
 - Order: append `status.updated`, then refresh `status.json`.
 - Non-running state updates are rejected while an attempt is active.
@@ -57,7 +57,7 @@ callers or future policy layers, not the run-store package.
 - Status refresh failure: returns `StatusMaterializationError` with the
   committed status and event.
 
-`WriteArtifact`:
+`WriteArtifactContext`:
 
 - Order: commit the artifact file, append `artifact.written`, then refresh
   `status.json`.
@@ -66,26 +66,26 @@ callers or future policy layers, not the run-store package.
   launcher opens the recorded artifact through the run store and appends
   stdout/stderr to that file while the worker runs.
 - Ambiguous append: returns the candidate artifact reference and keeps the
-  artifact because the event may be durable.
+  artifact because the event can be durable.
 - Status refresh failure: returns `StatusMaterializationError` with the
   committed artifact reference.
 
-If a `WriteArtifact` event append definitely fails before a line can be
+If a `WriteArtifactContext` event append definitely fails before a line can be
 appended, the store attempts to roll back the artifact file. Retrying after a
 successful event append or status materialization failure is not idempotent
 unless the caller adds its own idempotency key in a future event contract.
 
-`WriteInitialConfigSnapshot`:
+`WriteInitialConfigSnapshotContext`:
 
 - Order: write `config/000001/resolved.json`, write
   `config/000001/manifest.json`, then atomically replace
   `config/current.json`.
 - The initial snapshot files are not run artifacts and do not append events.
 - `current.json` is a regular file with `schema_version`, numeric `version`,
-  and six-digit `version_dir`; symlinks are rejected by the same filesystem
-  safety checks as other run-store paths.
+  and six-digit `version_dir`. The same filesystem safety checks reject
+  symlinks as other run-store paths.
 
-`RefreshConfigSnapshot`:
+`RefreshConfigSnapshotContext`:
 
 - Order: validate the locked run state, write the next
   `config/<version>/resolved.json`, write `config/<version>/manifest.json`,
@@ -105,54 +105,59 @@ unless the caller adds its own idempotency key in a future event contract.
   `orc run refresh-config <run-id>`. There is no silent live reload and no
   `--force` override in v1.
 
-Attempt lifecycle APIs follow the same status-backed write failure contract:
-ambiguous append and status refresh failures return the candidate attempt/event
-when the event may have committed, and callers should reload before retrying.
-`RecordAttemptReport` for a valid `reported` attempt is the exception to pure
-append-then-status ordering: it commits the canonical report artifact before
-appending `attempt.reported`, as described in
+Attempt lifecycle `*Context` APIs follow the same status-backed write failure
+contract. Ambiguous append and status refresh failures return the candidate
+attempt/event after possible event commit. Callers must reload before retrying.
+`RecordAttemptReportContext` for a valid `reported` attempt is the exception to
+pure append-then-status ordering. It commits the canonical report artifact
+before appending `attempt.reported`, as described in
 [Artifacts](run-store-status-artifacts.md#artifacts).
 
 ### API Families
 
-- `AppendEvent`, `UpdateStatus`, `WriteArtifact`, `StartAttempt`,
-  `StartAttemptContext`, `RecordAttemptPrompt`, `RecordAttemptLog`,
-  `RecordAttemptProcess`, `RecordAttemptProcessContext`, `FinishAttempt`,
-  `RecoverAttempt`, `RecordAttemptReport`, `RecordAttemptWarning`, and
-  `RecordIgnoredReport` take a run-level lock, append their event, then refresh
-  `status.json`, except for the canonical report commit-order case described in
-  [Artifacts](run-store-status-artifacts.md#artifacts).
-- `WriteInitialConfigSnapshot` takes the run-level lock and commits the current
-  pointer after the version directory files are durable.
-- `RefreshConfigSnapshot` takes the run-level lock while validating
+- `AppendEvent`, `UpdateStatusContext`, `WriteArtifactContext`,
+  `WriteArtifactFromFileContext`, `WriteArtifactIfStateContext`,
+  `StartAttemptContext`, `RecordAttemptPromptContext`,
+  `RecordAttemptLogContext`, `RecordAttemptProcessContext`,
+  `FinishAttemptContext`, `RecoverAttemptContext`,
+  `RecordAttemptReportContext`, `RecordAttemptWarningContext`, and
+  `RecordIgnoredReportContext` take a run-level lock, append their event, then
+  refresh `status.json`, except for the canonical report commit-order case
+  described in [Artifacts](run-store-status-artifacts.md#artifacts).
+- `WriteInitialConfigSnapshotContext` takes the run-level lock and commits the
+  current pointer after the version directory files are durable.
+- `RefreshConfigSnapshotContext` takes the run-level lock while validating
   compatibility, committing the next version, updating `current.json`, and
   appending `config_snapshot_refreshed`.
-- `Load`, `ReadArtifact`, and `OpenArtifactAppend` also take the run-level lock.
-  For legacy runs that predate `.lock`, these APIs create the missing lock file
-  as metadata-only backfill before replaying state, reading artifact content, or
-  opening a recorded artifact for append.
+- `LoadContext`, `ReadArtifactContext`, and `OpenArtifactAppendContext` also
+  take the run-level lock. For legacy runs that predate `.lock`, these APIs
+  create the missing lock file as metadata-only backfill before replaying state,
+  reading artifact content, or opening a recorded artifact for append.
+- All `*Context` APIs require a non-nil `context.Context`.
 
 ## Attempt Lifecycle Preconditions
 
-- `StartAttemptContext` returns the context error without appending an
-  `attempt.started` event if cancellation wins before the attempt commits,
-  including while waiting for the same-process run lock.
-- `StartAttempt` only accepts runs whose latest state is `running`; replay
-  rejects `attempt.started` events after a terminal or human-waiting state.
-- `StartAttempt` rejects attempt ids already present in attempt history, even
-  when the previous attempt is terminal.
-- `FinishAttempt` and `RecoverAttempt` only accept terminal attempt states:
-  `missing_report`, `process_error`, or `timed_out`.
+- If cancellation wins before the attempt commits, `StartAttemptContext` returns
+  the context error without appending an `attempt.started` event. This includes
+  cancellation while waiting for the same-process run lock.
+- `StartAttemptContext` only accepts runs whose latest state is `running`.
+  Replay rejects `attempt.started` events after a terminal or human-waiting
+  state.
+- `StartAttemptContext` rejects attempt ids already present in attempt history.
+  A previous terminal attempt does not change this rule.
+- `FinishAttemptContext` and `RecoverAttemptContext` only accept terminal
+  attempt states: `missing_report`, `process_error`, or `timed_out`.
 - Terminal attempts must use the v1 launcher outcome tuple for their state:
   `failed/missing_report`, `failed/process_error`, or `failed/timeout`.
-- `RecordAttemptReport` accepts report terminal states `reported` and
+- `RecordAttemptReportContext` accepts report terminal states `reported` and
   `invalid_report` for the current `active` attempt. `invalid_report` must use
-  `failed/invalid_report`. Callers cannot supply `report_ref`; for valid
-  `reported` attempts, `RecordAttemptReport` assigns a canonical Markdown
-  report artifact even when the report has only structured fields. Invalid and
-  ignored reports do not receive canonical report artifacts.
+  `failed/invalid_report`. Callers cannot supply `report_ref`. For valid
+  `reported` attempts, `RecordAttemptReportContext` assigns a canonical
+  Markdown report artifact. This also applies to reports that have only
+  structured fields. Invalid and ignored reports do not receive canonical report
+  artifacts.
 - `missing_report` and `timed_out` terminal states require prior
-  `attempt.process_started`; pre-process terminalization is limited to
+  `attempt.process_started`. Pre-process terminalization is limited to
   `process_error`.
 - Retrying attempt writes is not idempotent unless the caller first reloads and
   observes the current active attempt or terminal attempt history.
@@ -163,10 +168,10 @@ appending `attempt.reported`, as described in
 
 ## Log Append API
 
-- `OpenArtifactAppend` only opens recorded `log` artifacts and rejects
+- `OpenArtifactAppendContext` only opens recorded `log` artifacts and rejects
   symlinks, directories, and other non-regular files before returning an append
   handle.
-- It only opens the current active attempt's linked log; terminal or unrelated
+- It only opens the current active attempt's linked log. Terminal or unrelated
   attempt logs are immutable through this API.
 
 Malformed or incomplete event state is not repaired during load. Load errors

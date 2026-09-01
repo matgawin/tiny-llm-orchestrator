@@ -196,7 +196,7 @@ func TestRecordPostRunWritesSnapshotArtifact(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	run, err := store.Create(runstore.CreateRunRequest{RunID: "post-run", Workflow: "implementation"})
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "post-run", Workflow: "implementation"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}

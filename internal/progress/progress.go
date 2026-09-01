@@ -19,10 +19,6 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
-
-	"golang.org/x/time/rate"
 )
 
 const (
@@ -90,7 +86,7 @@ func NewListener() (*Listener, error) {
 
 func NewListenerContext(ctx context.Context) (*Listener, error) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		return nil, stableerr.Errorf("progress sockets are unsupported on %s", runtime.GOOS)
+		return nil, fmt.Errorf("progress sockets are unsupported on %s", runtime.GOOS)
 	}
 
 	dir, err := os.MkdirTemp("", "orc-progress-*")
@@ -188,30 +184,30 @@ func (l *Listener) Accepted() <-chan AcceptedMessage {
 
 func (l *Listener) Register(reg Registration) error {
 	if l == nil {
-		return stableerr.New("listener is nil")
+		return errors.New("listener is nil")
 	}
 
 	if reg.RunID == "" {
-		return stableerr.New("run id is required")
+		return errors.New("run id is required")
 	}
 
 	if reg.StepID == "" {
-		return stableerr.New("step id is required")
+		return errors.New("step id is required")
 	}
 
 	if reg.AttemptID == "" {
-		return stableerr.New("attempt id is required")
+		return errors.New("attempt id is required")
 	}
 
 	if reg.Token == "" {
-		return stableerr.New("token is required")
+		return errors.New("token is required")
 	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	if l.closed {
-		return stableerr.New("listener is closed")
+		return errors.New("listener is closed")
 	}
 
 	l.registration = reg
@@ -399,11 +395,11 @@ func sanitizeMessage(raw string) (string, error) {
 
 	msg := strings.TrimSpace(b.String())
 	if msg == "" {
-		return "", stableerr.New("progress message is empty after sanitization")
+		return "", errors.New("progress message is empty after sanitization")
 	}
 
 	if len([]byte(msg)) > maxMessageBytes {
-		return "", stableerr.Errorf("progress message exceeds %d bytes after sanitization", maxMessageBytes)
+		return "", fmt.Errorf("progress message exceeds %d bytes after sanitization", maxMessageBytes)
 	}
 
 	return msg, nil
@@ -441,19 +437,31 @@ func consumeEscape(s string) int {
 }
 
 type progressLimiter struct {
-	limiter *rate.Limiter
+	tokens int
+	last   time.Time
 }
 
 func newProgressLimiter() progressLimiter {
-	return progressLimiter{
-		limiter: rate.NewLimiter(rate.Limit(1), progressBurstLimit),
-	}
+	return progressLimiter{tokens: progressBurstLimit}
 }
 
-func (l progressLimiter) allow(now time.Time) bool {
-	if l.limiter == nil {
+func (l *progressLimiter) allow(now time.Time) bool {
+	if l.tokens == 0 && l.last.IsZero() {
 		return false
 	}
 
-	return l.limiter.AllowN(now, 1)
+	if l.last.IsZero() {
+		l.last = now
+	} else if elapsed := int(now.Sub(l.last) / time.Second); elapsed > 0 {
+		l.tokens = min(progressBurstLimit, l.tokens+elapsed)
+		l.last = l.last.Add(time.Duration(elapsed) * time.Second)
+	}
+
+	if l.tokens == 0 {
+		return false
+	}
+
+	l.tokens--
+
+	return true
 }

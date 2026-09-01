@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 type stagedArtifact struct {
@@ -30,7 +28,7 @@ func stageArtifact(path string, artifact Artifact) (stagedArtifact, error) {
 	}
 
 	if existed && artifact.Kind != KindFollowup {
-		return stagedArtifact{}, stableerr.Errorf("artifact %s already exists", filepath.Base(path))
+		return stagedArtifact{}, fmt.Errorf("artifact %s already exists", filepath.Base(path))
 	}
 
 	content := artifact.Content
@@ -74,7 +72,7 @@ func stageArtifact(path string, artifact Artifact) (stagedArtifact, error) {
 
 func stageArtifactFromFile(path string, artifact Artifact, sourcePath string) (stagedArtifact, error) {
 	if artifact.Kind == KindFollowup {
-		return stagedArtifact{}, stableerr.Errorf("artifact kind %q cannot be written from file", artifact.Kind)
+		return stagedArtifact{}, fmt.Errorf("artifact kind %q cannot be written from file", artifact.Kind)
 	}
 
 	if err := validateArtifactFile(path); err != nil {
@@ -86,7 +84,7 @@ func stageArtifactFromFile(path string, artifact Artifact, sourcePath string) (s
 	}
 
 	if _, err := os.Lstat(path); err == nil {
-		return stagedArtifact{}, stableerr.Errorf("artifact %s already exists", filepath.Base(path))
+		return stagedArtifact{}, fmt.Errorf("artifact %s already exists", filepath.Base(path))
 	} else if !os.IsNotExist(err) {
 		return stagedArtifact{}, fmt.Errorf("stage artifact from file: %w", err)
 	}
@@ -267,11 +265,11 @@ func checkArtifactParentDir(runDir, relPath string, createMissing bool) error {
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
-			return stableerr.Errorf("artifact parent %s is a symlink", displayPath)
+			return fmt.Errorf("artifact parent %s is a symlink", displayPath)
 		}
 
 		if !info.IsDir() {
-			return stableerr.Errorf("artifact parent %s is not a directory", displayPath)
+			return fmt.Errorf("artifact parent %s is not a directory", displayPath)
 		}
 	}
 
@@ -344,11 +342,11 @@ func validateDir(path string) error {
 
 func validateDirInfo(path string, info os.FileInfo) error {
 	if info.Mode()&os.ModeSymlink != 0 {
-		return stableerr.Errorf("%s is a symlink", path)
+		return fmt.Errorf("%s is a symlink", path)
 	}
 
 	if !info.IsDir() {
-		return stableerr.Errorf("%s is not a directory", path)
+		return fmt.Errorf("%s is not a directory", path)
 	}
 
 	return nil
@@ -378,15 +376,15 @@ func validateRegularFile(path, name string) error {
 
 func validateFileInfo(name string, info os.FileInfo) error {
 	if info.Mode()&os.ModeSymlink != 0 {
-		return stableerr.Errorf("%s is a symlink", name)
+		return fmt.Errorf("%s is a symlink", name)
 	}
 
 	if info.IsDir() {
-		return stableerr.Errorf("%s is a directory", name)
+		return fmt.Errorf("%s is a directory", name)
 	}
 
 	if !info.Mode().IsRegular() {
-		return stableerr.Errorf("%s is not a regular file", name)
+		return fmt.Errorf("%s is not a regular file", name)
 	}
 
 	return nil

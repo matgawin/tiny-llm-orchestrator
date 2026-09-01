@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
@@ -29,7 +28,7 @@ type Result struct {
 // Record copies an orchestrator-authored final summary into the run store.
 func Record(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
-		return Result{}, stableerr.New("context is required")
+		return Result{}, errors.New("context is required")
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -37,15 +36,15 @@ func Record(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	if opts.Root == "" {
-		return Result{}, stableerr.New("project root is required")
+		return Result{}, errors.New("project root is required")
 	}
 
 	if opts.RunID == "" {
-		return Result{}, stableerr.New("run id is required")
+		return Result{}, errors.New("run id is required")
 	}
 
 	if opts.File == "" {
-		return Result{}, stableerr.New("summary file is required")
+		return Result{}, errors.New("summary file is required")
 	}
 
 	store, err := runstore.Open(opts.Root)
@@ -65,7 +64,7 @@ func Record(ctx context.Context, opts Options) (Result, error) {
 	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Result{}, stableerr.Errorf("run %q not found", opts.RunID)
+			return Result{}, fmt.Errorf("run %q not found", opts.RunID)
 		}
 
 		var stateErr *runstore.StateMismatchError

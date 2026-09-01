@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"tiny-llm-orchestrator/orc/internal/initconfig"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
 
@@ -97,11 +96,11 @@ func PlanSkippedActions(plan *Result) []SkippedAction {
 // Apply writes the safe actions from a previously generated upgrade plan.
 func Apply(ctx context.Context, plan *Result, opts ApplyOptions) (*ApplyResult, error) {
 	if plan == nil {
-		return nil, stableerr.New("init upgrade plan is required")
+		return nil, errors.New("init upgrade plan is required")
 	}
 
 	if plan.ProjectRoot == "" {
-		return nil, stableerr.New("project root is required")
+		return nil, errors.New("project root is required")
 	}
 
 	root, err := filepath.Abs(plan.ProjectRoot)
@@ -410,7 +409,7 @@ func prepareWritesPartial(root string, actions []Action) ([]preparedWrite, []Con
 
 			writes = append(writes, write)
 		default:
-			return nil, nil, stableerr.Errorf("%s has unsupported init upgrade action kind %q", rel, action.Kind)
+			return nil, nil, fmt.Errorf("%s has unsupported init upgrade action kind %q", rel, action.Kind)
 		}
 	}
 
@@ -665,7 +664,7 @@ func rollbackModifyWrite(write preparedWrite) error {
 	}
 
 	if !bytes.Equal(current, write.next) {
-		return stableerr.Errorf("%s changed before init upgrade rollback; leaving it unchanged", write.relPath)
+		return fmt.Errorf("%s changed before init upgrade rollback; leaving it unchanged", write.relPath)
 	}
 
 	if err := writeExistingAtomic(write.absPath, write.expected); err != nil {
@@ -825,11 +824,11 @@ func changedPathKeys(projectRoot, repositoryRoot string, planPaths []string) (ma
 
 func prepareCreateWrite(root, rel, abs string, action Action) (preparedWrite, error) {
 	if len(action.Edits) > 0 {
-		return preparedWrite{}, stableerr.Errorf("%s create action cannot contain surgical edits", rel)
+		return preparedWrite{}, fmt.Errorf("%s create action cannot contain surgical edits", rel)
 	}
 
 	if _, err := os.Lstat(abs); err == nil {
-		return preparedWrite{}, stableerr.Errorf("%s changed during init upgrade apply; target already exists", rel)
+		return preparedWrite{}, fmt.Errorf("%s changed during init upgrade apply; target already exists", rel)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return preparedWrite{}, fmt.Errorf("inspect %s: %w", rel, err)
 	}
@@ -843,7 +842,7 @@ func prepareCreateWrite(root, rel, abs string, action Action) (preparedWrite, er
 
 func prepareModifyWrite(root, rel, abs string, action Action) (preparedWrite, error) {
 	if action.FileIdentity == nil {
-		return preparedWrite{}, stableerr.Errorf("%s modify action is missing file identity", rel)
+		return preparedWrite{}, fmt.Errorf("%s modify action is missing file identity", rel)
 	}
 
 	if err := validateSafeExistingFile(root, rel); err != nil {
@@ -856,7 +855,7 @@ func prepareModifyWrite(root, rel, abs string, action Action) (preparedWrite, er
 	}
 
 	if !identityMatches(current, *action.FileIdentity) {
-		return preparedWrite{}, stableerr.Errorf("%s changed during init upgrade apply; rerun orc init upgrade", rel)
+		return preparedWrite{}, fmt.Errorf("%s changed during init upgrade apply; rerun orc init upgrade", rel)
 	}
 
 	next, err := applyEditsForPath(rel, current, action.Edits)
@@ -885,7 +884,7 @@ func writePreparedFile(write preparedWrite) error {
 		file, err := os.OpenFile(write.absPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePermPrivate) // #nosec G304 -- path is constrained to a planned project-local target.
 		if err != nil {
 			if errors.Is(err, os.ErrExist) {
-				return stableerr.Errorf("%s changed during init upgrade apply; target already exists", write.relPath)
+				return fmt.Errorf("%s changed during init upgrade apply; target already exists", write.relPath)
 			}
 
 			return fmt.Errorf("create %s: %w", write.relPath, err)
@@ -910,7 +909,7 @@ func writePreparedFile(write preparedWrite) error {
 		}
 
 		if !bytes.Equal(current, write.expected) {
-			return stableerr.Errorf("%s changed during init upgrade apply; rerun orc init upgrade", write.relPath)
+			return fmt.Errorf("%s changed during init upgrade apply; rerun orc init upgrade", write.relPath)
 		}
 
 		if err := writeExistingAtomic(write.absPath, write.next); err != nil {
@@ -947,11 +946,11 @@ func validateSafeParentDirs(root, rel string) error {
 		}
 
 		if info.Mode()&os.ModeSymlink != 0 {
-			return stableerr.Errorf("%s has unsafe symlink parent %s", rel, currentRel)
+			return fmt.Errorf("%s has unsafe symlink parent %s", rel, currentRel)
 		}
 
 		if !info.IsDir() {
-			return stableerr.Errorf("%s has non-directory parent %s", rel, currentRel)
+			return fmt.Errorf("%s has non-directory parent %s", rel, currentRel)
 		}
 	}
 
@@ -971,11 +970,11 @@ func validateSafeExistingFile(root, rel string) error {
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
-		return stableerr.Errorf("%s is an unsafe symlink target", rel)
+		return fmt.Errorf("%s is an unsafe symlink target", rel)
 	}
 
 	if !info.Mode().IsRegular() {
-		return stableerr.Errorf("%s is not a regular file", rel)
+		return fmt.Errorf("%s is not a regular file", rel)
 	}
 
 	return nil
@@ -1022,7 +1021,7 @@ func applyEditsForPath(path string, content []byte, edits []SurgicalEdit) ([]byt
 		}
 
 		if !ok {
-			return nil, stableerr.Errorf("%s is missing YAML frontmatter", path)
+			return nil, fmt.Errorf("%s is missing YAML frontmatter", path)
 		}
 
 		nextFrontmatter, err := applyYAMLEdits(doc, edits)
@@ -1075,7 +1074,7 @@ func splitMarkdownFrontmatter(content []byte) ([]byte, []byte, bool, error) {
 		return []byte(text[firstEnd:start]), []byte(text[end:]), true, nil
 	}
 
-	return nil, nil, true, stableerr.New("YAML frontmatter is missing a closing delimiter")
+	return nil, nil, true, errors.New("YAML frontmatter is missing a closing delimiter")
 }
 
 type offsetLine struct {
@@ -1150,7 +1149,7 @@ func applyEdits(content []byte, edits []SurgicalEdit) ([]byte, error) {
 				err = yamlDoc.Add(edit.Path.Child(edit.Key), edit.Value)
 			}
 		default:
-			err = stableerr.Errorf("unsupported surgical edit kind %q", edit.Kind)
+			err = fmt.Errorf("unsupported surgical edit kind %q", edit.Kind)
 		}
 
 		if err != nil {
@@ -1187,9 +1186,9 @@ func applyYAMLEdits(doc *yamlASTDocument, edits []SurgicalEdit) ([]byte, error) 
 		case EditASTAddYAMLMapEntry:
 			err = doc.Add(edit.Path.Child(edit.Key), edit.Value)
 		case EditAppendLine, EditAppendSection, EditReplaceIfBaseline:
-			return nil, stableerr.Errorf("non-YAML edit kind %q cannot apply to Markdown frontmatter", edit.Kind)
+			return nil, fmt.Errorf("non-YAML edit kind %q cannot apply to Markdown frontmatter", edit.Kind)
 		default:
-			err = stableerr.Errorf("unsupported surgical edit kind %q", edit.Kind)
+			err = fmt.Errorf("unsupported surgical edit kind %q", edit.Kind)
 		}
 
 		if err != nil {
@@ -1240,7 +1239,7 @@ func indentBlock(block string, spaces int) string {
 func cleanPlanPath(path string) (string, error) {
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
 	if clean == "." || clean == "" || strings.HasPrefix(clean, "../") || clean == ".." || filepath.IsAbs(path) {
-		return "", stableerr.Errorf("unsafe init upgrade path %q", path)
+		return "", fmt.Errorf("unsafe init upgrade path %q", path)
 	}
 
 	return clean, nil

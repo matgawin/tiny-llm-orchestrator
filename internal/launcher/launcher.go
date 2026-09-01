@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,10 +14,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
-
-	"go.uber.org/zap"
 )
 
 const (
@@ -52,7 +50,6 @@ type Options struct {
 	Time     time.Time
 	Stdout   io.Writer
 	Progress io.Writer
-	Logger   *zap.Logger
 }
 
 // Result describes the persisted launch outcome.
@@ -69,15 +66,15 @@ type Result struct {
 // LaunchNext launches the workflow-selected worker process for a run.
 func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
-		return Result{}, stableerr.New("context is required")
+		return Result{}, errors.New("context is required")
 	}
 
 	if opts.Root == "" {
-		return Result{}, stableerr.New("project root is required")
+		return Result{}, errors.New("project root is required")
 	}
 
 	if opts.RunID == "" {
-		return Result{}, stableerr.New("run id is required")
+		return Result{}, errors.New("run id is required")
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -184,7 +181,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 
 func handleNonLaunchableDecision(ctx context.Context, opts Options, loaded runcontext.Context, decision workflow.Decision, latestOutcome runstore.Attempt, hasOutcome bool) (Result, bool, error) {
 	if decision.Kind == workflow.DecisionWaitActiveAttempt {
-		result, err := recoverOrRefuseActiveAttempt(ctx, loaded.Store, loaded.Run, loggerOrNop(opts.Logger))
+		result, err := recoverOrRefuseActiveAttempt(ctx, loaded.Store, loaded.Run)
 		if err == nil {
 			printLaunchResult(opts.Stdout, result)
 		}
@@ -206,13 +203,13 @@ func handleNonLaunchableDecision(ctx context.Context, opts Options, loaded runco
 			return Result{}, true, fmt.Errorf("launch next: %w", err)
 		}
 
-		err := stableerr.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
+		err := fmt.Errorf("run %q has no launchable worker; outcome %s/%s transitioned to %s", opts.RunID, latestOutcome.Status, latestOutcome.Result, decision.RunStatus)
 
 		return Result{RunID: opts.RunID, Attempt: latestOutcome}, true, err
 	}
 
 	if decision.Kind != workflow.DecisionSelectStep && decision.Kind != workflow.DecisionRetryStep {
-		return Result{}, true, stableerr.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
+		return Result{}, true, fmt.Errorf("run %q has no launchable worker; decision is %s", opts.RunID, decision.Kind)
 	}
 
 	return Result{}, false, nil
@@ -232,7 +229,7 @@ func handleLaunchLoopHardCap(ctx context.Context, opts Options, loaded runcontex
 		return nil, Result{}, true, fmt.Errorf("launch next: %w", err)
 	}
 
-	err = stableerr.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
+	err = fmt.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
 
 	return nil, Result{RunID: opts.RunID, Attempt: latestOutcome}, true, err
 }

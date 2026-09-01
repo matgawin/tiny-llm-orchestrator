@@ -32,7 +32,7 @@ func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	if _, err := store.WriteArtifact(runID, runstore.Artifact{
+	if _, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    inspectArtifactTask,
 		Content: []byte("# Task\n"),
@@ -198,7 +198,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	if _, err := store.WriteArtifact(runID, runstore.Artifact{
+	if _, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    inspectArtifactTask,
 		Content: []byte("# Task\n"),
@@ -207,7 +207,7 @@ func TestStatusAndSummaryContextShowSkippedStepOnce(t *testing.T) {
 		t.Fatalf("WriteArtifact returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordStepSkip(runID, runstore.RecordStepSkipRequest{
+	if _, _, err := store.RecordStepSkipContext(context.Background(), runID, runstore.RecordStepSkipRequest{
 		StepID: inspectStepPlan,
 		Reason: "not worth another review",
 		Time:   fixedTime().Add(2 * time.Minute),
@@ -259,7 +259,7 @@ func TestStatusAndNextShowActiveAttempt(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          inspectStepPlan,
 		AgentID:         inspectAgentPlanner,
 		AttemptID:       "attempt-active",
@@ -330,7 +330,7 @@ func TestStatusAndNextShowInvalidReportOutcome(t *testing.T) {
 
 	recordLaunchedAttempt(t, store, runID, "attempt-invalid-report")
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateInvalidReport,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -393,7 +393,7 @@ func TestNextRoutesValidReportedOutcome(t *testing.T) {
 
 	recordLaunchedAttempt(t, store, runID, inspectAttemptReported)
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -441,7 +441,7 @@ func TestStatusRoutesValidReportedOutcomeToBlockedForHuman(t *testing.T) {
 
 	recordLaunchedAttempt(t, store, runID, inspectAttemptReported)
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -489,7 +489,7 @@ func TestNextRoutesValidReportedOutcomeToNextStep(t *testing.T) {
 
 	recordLaunchedAttempt(t, store, runID, inspectAttemptReported)
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -534,7 +534,7 @@ func TestNextShowsReportedRetryStepOutcome(t *testing.T) {
 
 	recordLaunchedAttempt(t, store, runID, "attempt-retry")
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -565,7 +565,7 @@ func recordMissingReportAttempt(t *testing.T, store *runstore.Store, runID, atte
 	t.Helper()
 	recordLaunchedAttempt(t, store, runID, attemptID)
 
-	if _, _, err := store.FinishAttempt(runID, runstore.FinishAttemptRequest{
+	if _, _, err := store.FinishAttemptContext(context.Background(), runID, runstore.FinishAttemptRequest{
 		AttemptID: attemptID,
 		State:     runstore.AttemptStateMissingReport,
 		Status:    inspectStatusFailed,
@@ -587,7 +587,7 @@ func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runI
 
 	recordMissingReportAttempt(t, store, runID, firstAttemptID)
 
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:           inspectStepPlan,
 		AgentID:          inspectAgentPlanner,
 		AttemptID:        retryAttemptID,
@@ -603,7 +603,7 @@ func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runI
 
 	recordAttemptPromptLogAndProcess(t, store, runID, inspectStepPlan, retryAttemptID, 3200*time.Millisecond)
 
-	if _, _, err := store.FinishAttempt(runID, runstore.FinishAttemptRequest{
+	if _, _, err := store.FinishAttemptContext(context.Background(), runID, runstore.FinishAttemptRequest{
 		AttemptID: retryAttemptID,
 		State:     runstore.AttemptStateMissingReport,
 		Status:    inspectStatusFailed,
@@ -618,7 +618,7 @@ func recordRetriedMissingReportAttempt(t *testing.T, store *runstore.Store, runI
 func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID, stepID, attemptID string, at time.Duration) {
 	t.Helper()
 
-	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	promptRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    stepID + "-" + attemptID,
 		Content: []byte("prompt\n"),
@@ -628,7 +628,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
 		Time:      fixedTime().Add(at + 100*time.Millisecond),
@@ -636,7 +636,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
-	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	logRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    stepID + "-" + attemptID,
 		Content: []byte("log\n"),
@@ -646,7 +646,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{
 		AttemptID: attemptID,
 		LogRef:    logRef,
 		Time:      fixedTime().Add(at + 300*time.Millisecond),
@@ -654,7 +654,7 @@ func recordAttemptPromptLogAndProcess(t *testing.T, store *runstore.Store, runID
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              12345,
 		ProcessStartTime: "123456789",
@@ -768,7 +768,7 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		Commands:      [][]string{{"jj", "root"}, {"jj", inspectCommandStatus}},
 	}, fixedTime().Add(5*time.Minute))
 
-	if _, _, err := store.UpdateStatus(runID, runstore.StatusUpdate{
+	if _, _, err := store.UpdateStatusContext(context.Background(), runID, runstore.StatusUpdate{
 		State: workflow.RunStatusReadyForHuman,
 		Time:  fixedTime().Add(6 * time.Minute),
 	}); err != nil {
@@ -795,7 +795,7 @@ func recordSummaryContextReport(t *testing.T, store *runstore.Store, runID strin
 		request.ReportContentSet = true
 	}
 
-	if _, _, err := store.RecordAttemptReport(runID, request); err != nil {
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, request); err != nil {
 		t.Fatalf("RecordAttemptReport %s returned error: %v", report.AttemptID, err)
 	}
 }
@@ -885,7 +885,7 @@ func TestSummaryContextUsesLatestVCSSnapshotForPhase(t *testing.T) {
 
 func TestSummaryContextIgnoresUnrelatedSnapshotWithVCSSubstring(t *testing.T) {
 	fixture := newSummaryContextFixture(t, workflow.RunStatusRunning, "# Task\n")
-	if _, err := fixture.store.WriteArtifact(fixture.runID, runstore.Artifact{
+	if _, err := fixture.store.WriteArtifactContext(context.Background(), fixture.runID, runstore.Artifact{
 		Kind:    runstore.KindSnapshot,
 		Name:    "not-vcs-data",
 		Content: []byte("{not-json"),
@@ -932,7 +932,7 @@ func TestSummaryContextQuotesReportScalars(t *testing.T) {
 
 	recordLaunchedAttempt(t, fixture.store, fixture.runID, "attempt-report")
 
-	if _, _, err := fixture.store.RecordAttemptReport(fixture.runID, runstore.RecordReportRequest{
+	if _, _, err := fixture.store.RecordAttemptReportContext(context.Background(), fixture.runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:        fixture.runID,
@@ -956,7 +956,7 @@ func TestSummaryContextQuotesReportScalars(t *testing.T) {
 		t.Fatalf("RecordAttemptReport returned error: %v", err)
 	}
 
-	if _, _, err := fixture.store.UpdateStatus(fixture.runID, runstore.StatusUpdate{
+	if _, _, err := fixture.store.UpdateStatusContext(context.Background(), fixture.runID, runstore.StatusUpdate{
 		State: workflow.RunStatusReadyForHuman,
 		Time:  fixedTime().Add(3 * time.Minute),
 	}); err != nil {
@@ -996,7 +996,7 @@ func TestSummaryContextBlockedRunIncludesBlockedReportReason(t *testing.T) {
 	fixture := newSummaryContextFixture(t, workflow.RunStatusRunning, "# Blocked task\n")
 	recordLaunchedAttempt(t, fixture.store, fixture.runID, "attempt-blocked")
 
-	if _, _, err := fixture.store.RecordAttemptReport(fixture.runID, runstore.RecordReportRequest{
+	if _, _, err := fixture.store.RecordAttemptReportContext(context.Background(), fixture.runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     fixture.runID,
@@ -1029,7 +1029,7 @@ func recordLaunchedAttempt(t *testing.T, store *runstore.Store, runID, attemptID
 func recordLaunchedStepAttempt(t *testing.T, store *runstore.Store, runID, stepID, agentID, attemptID string) {
 	t.Helper()
 
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          stepID,
 		AgentID:         agentID,
 		AttemptID:       attemptID,
@@ -1046,7 +1046,7 @@ func recordLaunchedStepAttempt(t *testing.T, store *runstore.Store, runID, stepI
 func writeSummaryTaskContext(t *testing.T, store *runstore.Store, runID, content string) {
 	t.Helper()
 
-	if _, err := store.WriteArtifact(runID, runstore.Artifact{
+	if _, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    inspectArtifactTask,
 		Content: []byte(content),
@@ -1226,7 +1226,7 @@ func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) st
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    "inspect-run",
 		Workflow: "implementation",
 		Time:     fixedTime(),
@@ -1238,7 +1238,7 @@ func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) st
 	writeInspectConfigSnapshot(t, root, store, run.ID)
 
 	if artifact != nil {
-		if _, err := store.WriteArtifact(run.ID, *artifact); err != nil {
+		if _, err := store.WriteArtifactContext(context.Background(), run.ID, *artifact); err != nil {
 			t.Fatalf("WriteArtifact returned error: %v", err)
 		}
 	}
@@ -1249,7 +1249,7 @@ func createRun(t *testing.T, root, state string, artifact *runstore.Artifact) st
 			at = fixedTime().Add(2 * time.Minute)
 		}
 
-		if _, _, err := store.UpdateStatus(run.ID, runstore.StatusUpdate{State: state, Time: at}); err != nil {
+		if _, _, err := store.UpdateStatusContext(context.Background(), run.ID, runstore.StatusUpdate{State: state, Time: at}); err != nil {
 			t.Fatalf("UpdateStatus returned error: %v", err)
 		}
 	}
@@ -1270,7 +1270,7 @@ func writeInspectConfigSnapshot(t *testing.T, root string, store *runstore.Store
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
 
-	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+	if err := store.WriteInitialConfigSnapshotContext(context.Background(), runID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
 }

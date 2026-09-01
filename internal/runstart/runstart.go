@@ -17,7 +17,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
 
@@ -96,11 +95,11 @@ type resolvedTask struct {
 // Start resolves task context, creates a run, and persists task artifacts.
 func Start(ctx context.Context, opts Options) (Result, error) {
 	if opts.Root == "" {
-		return Result{}, stableerr.New("project root is required")
+		return Result{}, errors.New("project root is required")
 	}
 
 	if opts.Workflow == "" {
-		return Result{}, stableerr.New("workflow is required")
+		return Result{}, errors.New("workflow is required")
 	}
 
 	project, err := config.Load(opts.Root)
@@ -110,7 +109,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 
 	workflow, ok := project.Workflows[opts.Workflow]
 	if !ok {
-		return Result{}, stableerr.Errorf("workflow %q is not configured", opts.Workflow)
+		return Result{}, fmt.Errorf("workflow %q is not configured", opts.Workflow)
 	}
 
 	if opts.Env == nil {
@@ -197,11 +196,11 @@ func inspectPreRunVCS(ctx context.Context, workflow config.Workflow, opts Option
 	}
 
 	if snapshot.Kind == vcs.KindNone && workflow.VCS.EffectiveNoVCS() == config.VCSNoVCSBlock {
-		return vcs.Snapshot{}, stableerr.New("workflow requires supported VCS but no supported VCS was detected")
+		return vcs.Snapshot{}, errors.New("workflow requires supported VCS but no supported VCS was detected")
 	}
 
 	if snapshot.Dirty && workflow.VCS.EffectiveDirtyStart() == config.VCSDirtyStartBlock {
-		return vcs.Snapshot{}, stableerr.Errorf("working copy is dirty; workflow %q blocks dirty starts", workflow.Name)
+		return vcs.Snapshot{}, fmt.Errorf("working copy is dirty; workflow %q blocks dirty starts", workflow.Name)
 	}
 
 	return snapshot, nil
@@ -240,7 +239,7 @@ func resolveTask(ctx context.Context, workflow config.Workflow, opts Options) (r
 	case opts.TaskStdin:
 		return resolveStdinTask(opts)
 	default:
-		return resolvedTask{}, stableerr.New("noninteractive run start requires --bead, --task-file, --task, or --task-stdin")
+		return resolvedTask{}, errors.New("noninteractive run start requires --bead, --task-file, --task, or --task-stdin")
 	}
 }
 
@@ -255,11 +254,11 @@ func validateSources(opts Options) error {
 	}
 
 	if count > 1 {
-		return stableerr.Errorf("%s are mutually exclusive", allowedTaskSourceList(sources))
+		return fmt.Errorf("%s are mutually exclusive", allowedTaskSourceList(sources))
 	}
 
 	if opts.FallbackTaskFile != "" && opts.BeadID == "" {
-		return stableerr.New("--fallback-task-file requires --bead")
+		return errors.New("--fallback-task-file requires --bead")
 	}
 
 	return nil
@@ -302,18 +301,18 @@ func validateWorkflowPolicy(workflow config.Workflow, opts Options) error {
 
 	switch {
 	case beads == taskContextBeadsDisabled && opts.BeadID != "":
-		return stableerr.Errorf("workflow %q disables bead task context", workflow.Name)
+		return fmt.Errorf("workflow %q disables bead task context", workflow.Name)
 	case beads == taskContextBeadsRequired && opts.BeadID == "":
-		return stableerr.Errorf("workflow %q requires bead task context", workflow.Name)
+		return fmt.Errorf("workflow %q requires bead task context", workflow.Name)
 	}
 
 	if !markdownAllowed {
 		if opts.TaskFile != "" || opts.TaskText != "" || opts.TaskStdin {
-			return stableerr.Errorf("workflow %q disables Markdown task context", workflow.Name)
+			return fmt.Errorf("workflow %q disables Markdown task context", workflow.Name)
 		}
 
 		if opts.FallbackTaskFile != "" {
-			return stableerr.Errorf("workflow %q disables Markdown fallback task context", workflow.Name)
+			return fmt.Errorf("workflow %q disables Markdown fallback task context", workflow.Name)
 		}
 	}
 
@@ -398,7 +397,7 @@ func runBeadCommand(ctx context.Context, dir string, command, env []string) ([]b
 			message = err.Error()
 		}
 
-		return nil, stableerr.New(message)
+		return nil, errors.New(message)
 	}
 
 	return output, nil
@@ -406,7 +405,7 @@ func runBeadCommand(ctx context.Context, dir string, command, env []string) ([]b
 
 func resolveTaskFile(path, sourceType string) (resolvedTask, error) {
 	if path == "" {
-		return resolvedTask{}, stableerr.New("task file path is required")
+		return resolvedTask{}, errors.New("task file path is required")
 	}
 
 	content, err := os.ReadFile(path) // #nosec G304 -- caller-provided task file is the explicit source.
@@ -419,7 +418,7 @@ func resolveTaskFile(path, sourceType string) (resolvedTask, error) {
 
 func resolveStdinTask(opts Options) (resolvedTask, error) {
 	if opts.Stdin == nil {
-		return resolvedTask{}, stableerr.New("--task-stdin requires stdin")
+		return resolvedTask{}, errors.New("--task-stdin requires stdin")
 	}
 
 	content, err := io.ReadAll(opts.Stdin)

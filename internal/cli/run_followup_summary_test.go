@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func TestExecuteRunAddFollowupAppendsFollowup(t *testing.T) {
 		"Mention the follow-up recorder.",
 	})
 
-	loaded, err := openCLIStore(t, root).Load(result.runID)
+	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestRunRecordSummaryOnBeadBackedRunDoesNotCallBD(t *testing.T) {
 	writeCLIProject(t, root, "optional", true)
 
 	result := startCLIBeadBackedRunThenBlockBD(t, root)
-	if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
+	if _, _, err := openCLIStore(t, root).UpdateStatusContext(context.Background(), result.runID, runstore.StatusUpdate{State: cliStateReadyForHuman}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 
@@ -140,7 +141,7 @@ func TestRunRecordSummaryRejectsNotReadyRuns(t *testing.T) {
 
 			result := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
 			if state != "running" {
-				if _, _, err := openCLIStore(t, root).UpdateStatus(result.runID, runstore.StatusUpdate{State: state}); err != nil {
+				if _, _, err := openCLIStore(t, root).UpdateStatusContext(context.Background(), result.runID, runstore.StatusUpdate{State: state}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			}

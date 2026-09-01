@@ -1,10 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -32,13 +31,13 @@ func loadAgent(realOrcDir, path string) (Agent, error) {
 	body = strings.TrimSpace(body)
 	switch {
 	case meta.ID == "":
-		return Agent{}, stableerr.New("frontmatter id is required")
+		return Agent{}, errors.New("frontmatter id is required")
 	case meta.Role == "":
-		return Agent{}, stableerr.New("frontmatter role is required")
+		return Agent{}, errors.New("frontmatter role is required")
 	case meta.Description == "":
-		return Agent{}, stableerr.New("frontmatter description is required")
+		return Agent{}, errors.New("frontmatter description is required")
 	case body == "":
-		return Agent{}, stableerr.New("descriptor body is required")
+		return Agent{}, errors.New("descriptor body is required")
 	}
 
 	return Agent{
@@ -53,14 +52,14 @@ func loadAgent(realOrcDir, path string) (Agent, error) {
 func splitFrontmatter(content string) (string, string, error) {
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(normalized, "---\n") {
-		return "", "", stableerr.New("frontmatter must start with ---")
+		return "", "", errors.New("frontmatter must start with ---")
 	}
 
 	rest := strings.TrimPrefix(normalized, "---\n")
 
 	before, after, ok := strings.Cut(rest, "\n---\n")
 	if !ok {
-		return "", "", stableerr.New("frontmatter must end with ---")
+		return "", "", errors.New("frontmatter must end with ---")
 	}
 
 	return before, after, nil

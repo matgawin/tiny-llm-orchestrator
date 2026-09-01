@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,7 +19,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/promptrender"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -31,7 +31,7 @@ type launchOutcome struct {
 func seedLauncherAttempt(t *testing.T, store *runstore.Store, runID, attemptID string, timeout time.Duration, startedAt time.Time) runstore.Attempt {
 	t.Helper()
 
-	attempt, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	attempt, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          launcherPlanStep,
 		AgentID:         launcherAgentPlanner,
 		AttemptID:       attemptID,
@@ -49,7 +49,7 @@ func seedLauncherAttempt(t *testing.T, store *runstore.Store, runID, attemptID s
 func seedProcessedLauncherAttempt(t *testing.T, store *runstore.Store, runID, attemptID, stepID, agentID string) runstore.Attempt {
 	t.Helper()
 
-	attempt, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	attempt, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          stepID,
 		AgentID:         agentID,
 		AttemptID:       attemptID,
@@ -63,7 +63,7 @@ func seedProcessedLauncherAttempt(t *testing.T, store *runstore.Store, runID, at
 
 	linkLauncherPromptAndLog(t, store, runID, attempt.AttemptID)
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attempt.AttemptID,
 		PID:              os.Getpid(),
 		ProcessStartTime: currentProcessStartTime(t),
@@ -122,7 +122,7 @@ func createCommandLauncherRun(t *testing.T, opts commandWorkflowOptions) (string
 	writeCommandLauncherProject(t, root, opts)
 	store := openLauncherStore(t, root)
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "launcher-run",
 		Workflow:     launcherWorkflowImplementation,
 		InitialState: "check",
@@ -143,7 +143,7 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	writeLauncherProject(t, root, timeout, opts)
 	store := openLauncherStore(t, root)
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "launcher-run",
 		Workflow:     launcherWorkflowImplementation,
 		InitialState: launcherPlanStep,
@@ -156,7 +156,7 @@ func createLauncherRunWithOptions(t *testing.T, timeout string, opts launcherRun
 	writeLauncherConfigSnapshot(t, root, store, run.ID)
 
 	if opts.TaskContext {
-		if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
+		if _, err := store.WriteArtifactContext(context.Background(), run.ID, runstore.Artifact{
 			Kind:    runstore.KindTaskContext,
 			Name:    launcherTaskArtifactName,
 			Content: []byte("# Task\n\nLaunch a worker.\n"),
@@ -175,7 +175,7 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 	writeLoopCapLauncherProject(t, root, defaultCaps, workflowCaps)
 	store := openLauncherStore(t, root)
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "loop-cap-run",
 		Workflow:     launcherWorkflowImplementation,
 		InitialState: launcherPlanStep,
@@ -187,7 +187,7 @@ func createLoopCapLauncherRun(t *testing.T, defaultCaps, workflowCaps string) (s
 
 	writeLauncherConfigSnapshot(t, root, store, run.ID)
 
-	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
+	if _, err := store.WriteArtifactContext(context.Background(), run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    launcherTaskArtifactName,
 		Content: []byte("# Task\n\nBreak the workflow loop.\n"),
@@ -212,7 +212,7 @@ func writeLauncherConfigSnapshot(t *testing.T, root string, store *runstore.Stor
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
 
-	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+	if err := store.WriteInitialConfigSnapshotContext(context.Background(), runID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
 }
@@ -305,11 +305,11 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		}
 	}
 
-	if _, _, err := store.StartAttempt(runID, req); err != nil {
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, req); err != nil {
 		t.Fatalf("StartAttempt %s returned error: %v", attemptID, err)
 	}
 
-	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	promptRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    launcherPlanStep,
 		Content: []byte("prompt\n"),
@@ -319,7 +319,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		t.Fatalf("WriteArtifact prompt %s returned error: %v", attemptID, err)
 	}
 
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
 		Time:      fixedLauncherTime().Add(300 * time.Millisecond),
@@ -327,7 +327,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		t.Fatalf("RecordAttemptPrompt %s returned error: %v", attemptID, err)
 	}
 
-	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	logRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    launcherPlanStep,
 		Content: []byte("log\n"),
@@ -337,7 +337,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		t.Fatalf("WriteArtifact log %s returned error: %v", attemptID, err)
 	}
 
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{
 		AttemptID: attemptID,
 		LogRef:    logRef,
 		Time:      fixedLauncherTime().Add(400 * time.Millisecond),
@@ -345,7 +345,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		t.Fatalf("RecordAttemptLog %s returned error: %v", attemptID, err)
 	}
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              12345,
 		ProcessStartTime: "123456789",
@@ -354,7 +354,7 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		t.Fatalf("RecordAttemptProcess %s returned error: %v", attemptID, err)
 	}
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -542,7 +542,7 @@ func linkLauncherPromptAndLogNamed(t *testing.T, store *runstore.Store, runID, a
 	t.Helper()
 	_ = recordLauncherPromptNamed(t, store, runID, attemptID, name)
 
-	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	logRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    name,
 		Content: []byte("log\n"),
@@ -552,7 +552,7 @@ func linkLauncherPromptAndLogNamed(t *testing.T, store *runstore.Store, runID, a
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{
 		AttemptID: attemptID,
 		LogRef:    logRef,
 		Time:      fixedLauncherTime(),
@@ -571,7 +571,7 @@ func recordLauncherPromptNamed(t *testing.T, store *runstore.Store, runID, attem
 
 	prompt := []byte("prompt\n")
 
-	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	promptRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    name,
 		Content: prompt,
@@ -581,7 +581,7 @@ func recordLauncherPromptNamed(t *testing.T, store *runstore.Store, runID, attem
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
 		Time:      fixedLauncherTime(),
@@ -600,7 +600,7 @@ func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runc
 		t.Fatalf("loadLaunchContext returned error: %v", err)
 	}
 
-	attempt, _, err := loaded.Store.StartAttempt(runID, runstore.StartAttemptRequest{
+	attempt, _, err := loaded.Store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          launcherPlanStep,
 		AgentID:         launcherAgentPlanner,
 		AttemptID:       attemptID,
@@ -612,7 +612,7 @@ func prepareRunProcessAttempt(t *testing.T, root, runID, attemptID string) (runc
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	loaded.Run, err = loaded.Store.Load(runID)
+	loaded.Run, err = loaded.Store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -677,7 +677,7 @@ func scheduleReadyReportWhenActiveAfter(t *testing.T, store *runstore.Store, run
 	go func() {
 		deadline := time.Now().Add(time.Second)
 		for time.Now().Before(deadline) {
-			run, err := store.Load(runID)
+			run, err := store.LoadContext(context.Background(), runID)
 			if err != nil {
 				done <- err
 				return
@@ -697,7 +697,7 @@ func scheduleReadyReportWhenActiveAfter(t *testing.T, store *runstore.Store, run
 			time.Sleep(5 * time.Millisecond)
 		}
 
-		done <- stableerr.New("attempt did not become active")
+		done <- errors.New("attempt did not become active")
 	}()
 
 	return func() {
@@ -710,7 +710,7 @@ func scheduleReadyReportWhenActiveAfter(t *testing.T, store *runstore.Store, run
 }
 
 func recordReadyLauncherReport(store *runstore.Store, run *runstore.Run, attemptID string) error {
-	_, _, err := store.RecordAttemptReport(run.ID, runstore.RecordReportRequest{
+	_, _, err := store.RecordAttemptReportContext(context.Background(), run.ID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     run.ID,
@@ -821,7 +821,7 @@ func recordProcessForLauncherTest(t *testing.T, store *runstore.Store, runID, at
 func holdLauncherRunLock(t *testing.T, store *runstore.Store, runID string) (<-chan struct{}, chan<- struct{}, <-chan error) {
 	t.Helper()
 
-	run, err := store.Load(runID)
+	run, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -910,7 +910,7 @@ func waitForLauncherRunLockWaiter(t *testing.T, waiting <-chan struct{}) {
 func loadLauncherRun(t *testing.T, root, runID string) *runstore.Run {
 	t.Helper()
 
-	run, err := openLauncherStore(t, root).Load(runID)
+	run, err := openLauncherStore(t, root).LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -921,7 +921,7 @@ func loadLauncherRun(t *testing.T, root, runID string) *runstore.Run {
 func readLauncherArtifact(t *testing.T, root, runID string, ref runstore.ArtifactRef) []byte {
 	t.Helper()
 
-	content, err := openLauncherStore(t, root).ReadArtifact(runID, ref)
+	content, err := openLauncherStore(t, root).ReadArtifactContext(context.Background(), runID, ref)
 	if err != nil {
 		t.Fatalf("ReadArtifact returned error: %v", err)
 	}

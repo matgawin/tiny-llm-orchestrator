@@ -512,7 +512,7 @@ func openCLIStore(t *testing.T, root string) *runstore.Store {
 func loadCLIRun(t *testing.T, root, runID string) *runstore.Run {
 	t.Helper()
 
-	loaded, err := openCLIStore(t, root).Load(runID)
+	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -524,7 +524,7 @@ func blockCLIWorkflowLoopHardCap(t *testing.T, root, runID, state string, curren
 	t.Helper()
 
 	store := openCLIStore(t, root)
-	if _, _, err := store.BlockWorkflowLoopHardCap(runID, runstore.WorkflowLoopHardCap{
+	if _, _, err := store.BlockWorkflowLoopHardCapContext(context.Background(), runID, runstore.WorkflowLoopHardCap{
 		Workflow:         cliWorkflowImplementation,
 		BlockedState:     state,
 		CurrentCount:     current,
@@ -671,7 +671,7 @@ func currentAttemptJSONReport(runID, extraFields string) string {
 func assertCLILatestAttemptState(t *testing.T, root, runID, state string) runstore.Attempt {
 	t.Helper()
 
-	loaded, loadErr := openCLIStore(t, root).Load(runID)
+	loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -693,7 +693,7 @@ func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, 
 	t.Helper()
 
 	store := openCLIStore(t, root)
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          stepID,
 		AgentID:         agentID,
 		AttemptID:       attemptID,
@@ -704,7 +704,7 @@ func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, 
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	promptRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    "plan-" + attemptID,
 		Content: []byte("prompt\n"),
@@ -714,7 +714,7 @@ func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, 
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{
 		AttemptID: attemptID,
 		PromptRef: promptRef,
 		Time:      time.Date(2026, 5, 4, 12, 0, 2, 0, time.UTC),
@@ -722,7 +722,7 @@ func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, 
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
-	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	logRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    "plan-" + attemptID,
 		Content: []byte("log\n"),
@@ -732,7 +732,7 @@ func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, 
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{
 		AttemptID: attemptID,
 		LogRef:    logRef,
 		Time:      time.Date(2026, 5, 4, 12, 0, 4, 0, time.UTC),
@@ -740,7 +740,7 @@ func startCLIActiveAttemptForStep(t *testing.T, root, runID, attemptID, stepID, 
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              12345,
 		ProcessStartTime: "123456789",
@@ -754,7 +754,7 @@ func recordCLIReportedAttempt(t *testing.T, root, runID, attemptID, stepID, agen
 	t.Helper()
 	startCLIActiveAttemptForStep(t, root, runID, attemptID, stepID, agentID)
 
-	if _, _, err := openCLIStore(t, root).RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := openCLIStore(t, root).RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		Report: runstore.Report{
 			RunID:     runID,
 			StepID:    stepID,
@@ -775,7 +775,7 @@ func startCLIStartingAttempt(t *testing.T, root, runID, attemptID string) {
 	t.Helper()
 
 	store := openCLIStore(t, root)
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          cliStepPlan,
 		AgentID:         cliAgentPlanner,
 		AttemptID:       attemptID,
@@ -1077,14 +1077,14 @@ func latestCLIArtifactContent(t *testing.T, root, runID string, kind runstore.Ar
 	t.Helper()
 	store := openCLIStore(t, root)
 
-	run, err := store.Load(runID)
+	run, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
 	ref := latestCLIArtifactRef(t, run, kind)
 
-	content, err := store.ReadArtifact(runID, ref)
+	content, err := store.ReadArtifactContext(context.Background(), runID, ref)
 	if err != nil {
 		t.Fatalf("ReadArtifact returned error: %v", err)
 	}

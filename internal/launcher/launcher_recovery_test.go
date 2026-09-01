@@ -11,16 +11,13 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
-
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestLaunchNextRefusesFreshPIDLessStartingAttempt(t *testing.T) {
 	root, runID := createLauncherRun(t, "200ms")
 
 	store := openLauncherStore(t, root)
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          launcherPlanStep,
 		AgentID:         launcherAgentPlanner,
 		AttemptID:       "starting-attempt",
@@ -49,14 +46,11 @@ func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 
 	var stdout bytes.Buffer
 
-	core, recorded := observer.New(zap.DebugLevel)
-
 	result, err := LaunchNext(context.Background(), Options{
 		Root:    root,
 		RunID:   runID,
 		Command: []string{launcherShell, launcherShellFlag, launcherCommandCat},
 		Stdout:  &stdout,
-		Logger:  zap.New(core),
 	})
 	if err != nil {
 		t.Fatalf("LaunchNext returned error: %v", err)
@@ -73,17 +67,6 @@ func TestLaunchNextRecoversStalePIDLessStartingAttempt(t *testing.T) {
 	if strings.Contains(stdout.String(), "recovered active attempt") {
 		t.Fatalf("stdout = %q, want no diagnostic log message", stdout.String())
 	}
-
-	entry := singleObservedLog(t, recorded, "recovered active attempt")
-	assertObservedFields(t, entry, map[string]string{
-		"run_id":           runID,
-		"step_id":          launcherPlanStep,
-		"agent_id":         launcherAgentPlanner,
-		"attempt_id":       result.Attempt.AttemptID,
-		"recovered_state":  runstore.AttemptStateProcessError,
-		"recovered_result": resultProcessError,
-		"exit_state":       exitStateUnknown,
-	})
 }
 
 func TestLaunchNextRecoveryPreservesExistingLogRef(t *testing.T) {
@@ -91,7 +74,7 @@ func TestLaunchNextRecoveryPreservesExistingLogRef(t *testing.T) {
 	store := openLauncherStore(t, root)
 	started := seedLauncherAttempt(t, store, runID, "stale-logged-attempt", 20*time.Millisecond, time.Now().Add(-time.Second).UTC())
 
-	logRef, err := store.WriteArtifact(runID, runstore.Artifact{
+	logRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindLog,
 		Name:    "plan-stale-logged-attempt",
 		Content: []byte("partial log\n"),
@@ -101,7 +84,7 @@ func TestLaunchNextRecoveryPreservesExistingLogRef(t *testing.T) {
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{
 		AttemptID: started.AttemptID,
 		LogRef:    logRef,
 		Time:      fixedLauncherTime(),
@@ -125,7 +108,7 @@ func TestLaunchNextRefusesLiveActiveAttempt(t *testing.T) {
 	attempt := seedLauncherAttempt(t, store, runID, "active-attempt", 200*time.Millisecond, time.Now().UTC())
 	linkLauncherPromptAndLog(t, store, runID, attempt.AttemptID)
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attempt.AttemptID,
 		PID:              os.Getpid(),
 		ProcessStartTime: currentProcessStartTime(t),
@@ -146,7 +129,7 @@ func TestLaunchNextRecoversWhenPIDIdentityDoesNotMatch(t *testing.T) {
 	attempt := seedLauncherAttempt(t, store, runID, "reused-pid-attempt", 200*time.Millisecond, fixedLauncherTime())
 	linkLauncherPromptAndLog(t, store, runID, attempt.AttemptID)
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attempt.AttemptID,
 		PID:              os.Getpid(),
 		ProcessStartTime: "1",
@@ -171,7 +154,7 @@ func TestLauncherStoreRejectsMissingPIDIdentity(t *testing.T) {
 	attempt := seedLauncherAttempt(t, store, runID, "missing-identity-attempt", 200*time.Millisecond, fixedLauncherTime())
 	linkLauncherPromptAndLog(t, store, runID, attempt.AttemptID)
 
-	_, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	_, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID: attempt.AttemptID,
 		PID:       os.Getpid(),
 		Time:      fixedLauncherTime(),
@@ -204,7 +187,7 @@ func TestLaunchNextRecoversExpiredLiveAttemptAsTimeout(t *testing.T) {
 		t.Fatalf("processStartIdentity returned error: %v", err)
 	}
 
-	active, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	active, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attempt.AttemptID,
 		PID:              cmd.Process.Pid,
 		ProcessStartTime: processStartTime,
@@ -253,32 +236,5 @@ func TestLaunchNextRecoversUnverifiableActiveAttempt(t *testing.T) {
 	loaded := loadLauncherRun(t, root, runID)
 	if loaded.Status.ActiveAttempt != nil {
 		t.Fatalf("active attempt = %+v, want recovered terminal attempt", loaded.Status.ActiveAttempt)
-	}
-}
-
-func singleObservedLog(t *testing.T, recorded *observer.ObservedLogs, message string) observer.LoggedEntry {
-	t.Helper()
-
-	entries := recorded.FilterMessage(message).All()
-	if len(entries) != 1 {
-		t.Fatalf("observed logs for %q = %d, want 1: %+v", message, len(entries), entries)
-	}
-
-	return entries[0]
-}
-
-func assertObservedFields(t *testing.T, entry observer.LoggedEntry, want map[string]string) {
-	t.Helper()
-
-	fields := entry.ContextMap()
-	for key, value := range want {
-		got, ok := fields[key]
-		if !ok {
-			t.Fatalf("observed log missing field %q in %+v", key, fields)
-		}
-
-		if got != value {
-			t.Fatalf("observed log field %q = %#v, want %q", key, got, value)
-		}
 	}
 }

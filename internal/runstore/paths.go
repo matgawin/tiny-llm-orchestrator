@@ -3,13 +3,12 @@ package runstore
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -67,7 +66,7 @@ func randomHex(bytes int) (string, error) {
 func requiredSlugPart(value string) (string, error) {
 	slug := slugPart(value, "")
 	if slug == "" {
-		return "", stableerr.New("must contain at least one ASCII letter or digit")
+		return "", errors.New("must contain at least one ASCII letter or digit")
 	}
 
 	return slug, nil
@@ -116,15 +115,15 @@ func slugPart(value, fallback string) string {
 func validateRunID(id string) error {
 	switch {
 	case id == "":
-		return stableerr.New("run id is required")
+		return errors.New("run id is required")
 	case id == "." || id == "..":
-		return stableerr.New("run id must be a filesystem-safe name")
+		return errors.New("run id must be a filesystem-safe name")
 	case strings.ContainsAny(id, `/\`):
-		return stableerr.New("run id must not contain path separators")
+		return errors.New("run id must not contain path separators")
 	case filepath.Clean(id) != id:
-		return stableerr.New("run id must be clean")
+		return errors.New("run id must be clean")
 	case !safeRunIDPattern.MatchString(id):
-		return stableerr.New("run id may contain only letters, digits, dot, underscore, and dash")
+		return errors.New("run id may contain only letters, digits, dot, underscore, and dash")
 	default:
 		return nil
 	}
@@ -132,22 +131,22 @@ func validateRunID(id string) error {
 
 func validateRelativeArtifactPath(path string) error {
 	if path == "" {
-		return stableerr.New("artifact path is required")
+		return errors.New("artifact path is required")
 	}
 
 	if strings.Contains(path, `\`) {
-		return stableerr.Errorf("artifact path %q must use slash separators", path)
+		return fmt.Errorf("artifact path %q must use slash separators", path)
 	}
 
 	nativePath := filepath.FromSlash(path)
 
 	clean := filepath.Clean(nativePath)
 	if filepath.ToSlash(clean) != path {
-		return stableerr.Errorf("artifact path %q must be clean", path)
+		return fmt.Errorf("artifact path %q must be clean", path)
 	}
 
 	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
-		return stableerr.Errorf("artifact path %q must stay under run directory", path)
+		return fmt.Errorf("artifact path %q must stay under run directory", path)
 	}
 
 	return nil
@@ -156,7 +155,7 @@ func validateRelativeArtifactPath(path string) error {
 func artifactPath(kind ArtifactKind, name string, sequence int) (string, error) {
 	spec, ok := artifactSpec(kind)
 	if !ok {
-		return "", stableerr.Errorf("unsupported artifact kind %q", kind)
+		return "", fmt.Errorf("unsupported artifact kind %q", kind)
 	}
 
 	if spec.fixedPath != "" {

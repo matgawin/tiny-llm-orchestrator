@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func TestExecuteReportFlagsPersistsCurrentAttemptReport(t *testing.T) {
 	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
 	store := openCLIStore(t, root)
 
-	loaded, err := store.Load(result.runID)
+	loaded, err := store.LoadContext(context.Background(), result.runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestExecuteReportFlagsPersistsStructuredOnlyCanonicalReport(t *testing.T) {
 	})
 	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
 
-	loaded, err := openCLIStore(t, root).Load(result.runID)
+	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -280,7 +281,7 @@ func TestExecuteReportBadReportFileTerminalizesInvalidReport(t *testing.T) {
 				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantError)
 			}
 
-			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 			if loadErr != nil {
 				t.Fatalf("Load returned error: %v", loadErr)
 			}
@@ -329,7 +330,7 @@ func TestExecuteReportRejectsReservedSystemOutcomes(t *testing.T) {
 				t.Fatalf("stderr = %q, want reserved system outcome error", stderr.String())
 			}
 
-			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 			if loadErr != nil {
 				t.Fatalf("Load returned error: %v", loadErr)
 			}
@@ -373,7 +374,7 @@ func TestExecuteReportInvalidCurrentAttemptTerminalizesInvalidReport(t *testing.
 		t.Fatalf("stderr = %q, want disallowed result", stderr.String())
 	}
 
-	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -415,7 +416,7 @@ func TestExecuteReportWrongAttemptRecordsIgnoredBeforeConfigLoad(t *testing.T) {
 		t.Fatalf("stderr = %q, want ignored report before config load", stderr.String())
 	}
 
-	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -481,7 +482,7 @@ func TestExecuteReportShapeInvalidCurrentAttemptDoesNotLoadConfig(t *testing.T) 
 				t.Fatalf("stderr = %q, want no config load failure", stderr.String())
 			}
 
-			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 			if loadErr != nil {
 				t.Fatalf("Load returned error: %v", loadErr)
 			}
@@ -564,7 +565,7 @@ func TestExecuteReportMissingRequiredFieldTerminalizesInvalidReport(t *testing.T
 				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.want)
 			}
 
-			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 			if loadErr != nil {
 				t.Fatalf("Load returned error: %v", loadErr)
 			}
@@ -643,7 +644,7 @@ func TestExecuteReportJSONFilePersistsReport(t *testing.T) {
 	output := executeCLICommand(t, []string{commandReport, "--json-file=" + jsonPath})
 	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
 
-	loaded, err := openCLIStore(t, root).Load(result.runID)
+	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -693,7 +694,7 @@ func TestExecuteReportJSONFileCopiesMarkdownDetail(t *testing.T) {
 	output := executeCLICommand(t, []string{commandReport, cliFlagJSONFile, jsonPath})
 	assertCLIOutputContainsAll(t, output, []string{"recorded report for run " + result.runID, cliAttempt001})
 
-	loaded, err := openCLIStore(t, root).Load(result.runID)
+	loaded, err := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -831,7 +832,7 @@ func TestExecuteReportWrongAttemptRecordsIgnoredEvent(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 
-	loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+	loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 	if loadErr != nil {
 		t.Fatalf("Load returned error: %v", loadErr)
 	}
@@ -894,7 +895,7 @@ func TestExecuteReportWrongStepAgentAndStartingAttemptRecordIgnoredEvent(t *test
 				t.Fatal("Execute returned nil error, want ignored report error")
 			}
 
-			loaded, loadErr := openCLIStore(t, root).Load(result.runID)
+			loaded, loadErr := openCLIStore(t, root).LoadContext(context.Background(), result.runID)
 			if loadErr != nil {
 				t.Fatalf("Load returned error: %v", loadErr)
 			}

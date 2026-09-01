@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 )
@@ -238,7 +237,7 @@ func TestCleanupStartedRunRemovesRunDirectory(t *testing.T) {
 		t.Fatalf("create partial run dir: %v", err)
 	}
 
-	cause := stableerr.New("artifact write failed")
+	cause := errors.New("artifact write failed")
 
 	err := cleanupStartedRun(runPath, cause)
 	if !errors.Is(err, cause) {
@@ -255,7 +254,7 @@ func TestCleanupStartedRunReportsCleanupFailure(t *testing.T) {
 	writeRunStartFile(t, parentFile, "content\n")
 	runPath := filepath.Join(parentFile, "partial-run")
 
-	err := cleanupStartedRun(runPath, stableerr.New("artifact write failed"))
+	err := cleanupStartedRun(runPath, errors.New("artifact write failed"))
 	if err == nil {
 		t.Fatal("cleanupStartedRun returned nil error, want cleanup failure")
 	}
@@ -275,7 +274,7 @@ func TestConfigSnapshotWriteFailureCleanupRemovesStartedRun(t *testing.T) {
 		t.Fatalf("open run store: %v", err)
 	}
 
-	run, err := store.Create(runstore.CreateRunRequest{RunID: "snapshot-cleanup-run", Workflow: runstartWorkflowImplementation})
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "snapshot-cleanup-run", Workflow: runstartWorkflowImplementation})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -293,7 +292,7 @@ func TestConfigSnapshotWriteFailureCleanupRemovesStartedRun(t *testing.T) {
 		t.Fatalf("symlink config dir: %v", err)
 	}
 
-	writeErr := store.WriteInitialConfigSnapshot(run.ID, runstore.ConfigSnapshot{
+	writeErr := store.WriteInitialConfigSnapshotContext(context.Background(), run.ID, runstore.ConfigSnapshot{
 		Version:  1,
 		Resolved: []byte("{\"schema_version\":1}\n"),
 		Manifest: []byte("{\"schema_version\":1}\n"),
@@ -533,7 +532,7 @@ func assertLoadedRunHasTaskArtifacts(t *testing.T, root, runID string) {
 		t.Fatalf("open run store: %v", err)
 	}
 
-	run, err := store.Load(runID)
+	run, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("load run %s: %v", runID, err)
 	}

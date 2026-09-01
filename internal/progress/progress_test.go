@@ -19,6 +19,8 @@ var validRegistration = Registration{
 	Token:     "token-001",
 }
 
+const testProgressMessageWorking = "working"
+
 func TestListenerAcceptsValidTokenBearingPayload(t *testing.T) {
 	l := newRegisteredListener(t, validRegistration)
 
@@ -328,7 +330,7 @@ func TestSendUsesSocketProtocol(t *testing.T) {
 }
 
 func TestSendUnavailableSocket(t *testing.T) {
-	_, err := Send("", requestWithMessage("working"))
+	_, err := Send("", requestWithMessage(testProgressMessageWorking))
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("Send error = %v, want ErrUnavailable", err)
 	}

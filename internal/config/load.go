@@ -1,10 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -13,7 +12,7 @@ import (
 // workflows, and all referenced agent descriptors from projectRoot.
 func Load(projectRoot string) (*Project, error) {
 	if projectRoot == "" {
-		return nil, stableerr.New("project root is required")
+		return nil, errors.New("project root is required")
 	}
 
 	absRoot, err := filepath.Abs(projectRoot)
@@ -83,7 +82,7 @@ func loadRuntimes(orcDir, realOrcDir string, refs map[string]string) (map[string
 		}
 
 		if runtime.ID != id {
-			return nil, stableerr.Errorf("runtime %q file %q: id %q does not match runtime map key", id, relPath, runtime.ID)
+			return nil, fmt.Errorf("runtime %q file %q: id %q does not match runtime map key", id, relPath, runtime.ID)
 		}
 
 		runtimes[id] = runtime
@@ -106,7 +105,7 @@ func loadAgents(orcDir, realOrcDir string, refs map[string]string) (map[string]A
 		}
 
 		if agent.ID != id {
-			return nil, stableerr.Errorf("agent map key %q does not match descriptor id %q", id, agent.ID)
+			return nil, fmt.Errorf("agent map key %q does not match descriptor id %q", id, agent.ID)
 		}
 
 		agents[id] = agent
@@ -129,7 +128,7 @@ func loadWorkflows(orcDir, realOrcDir string, defaults LoopCapsConfig, workflowR
 		}
 
 		if workflow.Name != name {
-			return nil, stableerr.Errorf("workflow map key %q does not match workflow name %q", name, workflow.Name)
+			return nil, fmt.Errorf("workflow map key %q does not match workflow name %q", name, workflow.Name)
 		}
 
 		if err := validateWorkflow(workflow, agents, runtimes); err != nil {
@@ -213,7 +212,7 @@ func decodeWorkflowSteps(rawSteps yaml.MapSlice, path string) (map[string]Step, 
 		}
 
 		if _, exists := steps[stepID]; exists {
-			return nil, nil, stableerr.Errorf("parse %s: duplicate step %q", path, stepID)
+			return nil, nil, fmt.Errorf("parse %s: duplicate step %q", path, stepID)
 		}
 
 		content, err := yaml.Marshal(item.Value)

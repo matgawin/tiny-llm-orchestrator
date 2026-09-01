@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -36,7 +35,7 @@ func resolveRepoRelativeDir(root, rel string) (string, error) {
 	}
 
 	if !info.IsDir() {
-		return "", stableerr.Errorf("cwd %q is not a directory", rel)
+		return "", fmt.Errorf("cwd %q is not a directory", rel)
 	}
 
 	return path, nil
@@ -54,11 +53,11 @@ func resolveRepoRelativeExecutable(root, rel string) (string, error) {
 	}
 
 	if info.IsDir() {
-		return "", stableerr.Errorf("script %q is a directory", rel)
+		return "", fmt.Errorf("script %q is a directory", rel)
 	}
 
 	if info.Mode()&0o111 == 0 {
-		return "", stableerr.Errorf("script %q is not executable", rel)
+		return "", fmt.Errorf("script %q is not executable", rel)
 	}
 
 	return path, nil
@@ -66,12 +65,12 @@ func resolveRepoRelativeExecutable(root, rel string) (string, error) {
 
 func resolveRepoRelative(root, rel string) (string, error) {
 	if filepath.IsAbs(rel) {
-		return "", stableerr.Errorf("path %q must be repo-relative", rel)
+		return "", fmt.Errorf("path %q must be repo-relative", rel)
 	}
 
 	clean := filepath.Clean(rel)
 	if clean != rel || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", stableerr.Errorf("path %q must be clean and stay under repository root", rel)
+		return "", fmt.Errorf("path %q must be clean and stay under repository root", rel)
 	}
 
 	rootReal, err := filepath.EvalSymlinks(root)
@@ -92,7 +91,7 @@ func resolveRepoRelative(root, rel string) (string, error) {
 	}
 
 	if relToRoot == "." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) || relToRoot == ".." || filepath.IsAbs(relToRoot) {
-		return "", stableerr.Errorf("path %q escapes repository root", rel)
+		return "", fmt.Errorf("path %q escapes repository root", rel)
 	}
 
 	return realPath, nil
@@ -198,11 +197,11 @@ func resolveWorkerExecutable(name string, env []string, cwd string) (string, err
 		}
 
 		if info.IsDir() {
-			return "", stableerr.Errorf("%s is a directory", execPath)
+			return "", fmt.Errorf("%s is a directory", execPath)
 		}
 
 		if info.Mode()&0o111 == 0 {
-			return "", stableerr.Errorf("%s is not executable", execPath)
+			return "", fmt.Errorf("%s is not executable", execPath)
 		}
 
 		return execPath, nil
@@ -289,7 +288,7 @@ func readExecHelperToken(reader io.Reader) (string, error) {
 	}
 
 	if n != len(buf) || buf[len(buf)-1] != '\n' {
-		return "", stableerr.New("invalid exec helper token")
+		return "", errors.New("invalid exec helper token")
 	}
 
 	return string(buf[:len(buf)-1]), nil

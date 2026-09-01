@@ -1,16 +1,15 @@
 package runstore
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // Open returns a run store rooted at projectRoot.
 func Open(projectRoot string) (*Store, error) {
 	if projectRoot == "" {
-		return nil, stableerr.New("project root is required")
+		return nil, errors.New("project root is required")
 	}
 
 	root, err := filepath.Abs(projectRoot)

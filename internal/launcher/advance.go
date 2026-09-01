@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -10,10 +11,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
-
-	"go.uber.org/zap"
 )
 
 const DefaultAdvanceMaxSteps = 20
@@ -45,7 +43,6 @@ type AdvanceOptions struct {
 	Time     time.Time
 	Stdout   io.Writer
 	Progress io.Writer
-	Logger   *zap.Logger
 	MaxSteps int
 	Once     bool
 }
@@ -75,7 +72,7 @@ type AdvanceAttempt struct {
 // stop condition is reached.
 func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 	if ctx == nil {
-		return advanceError(opts.RunID, "", "", StopReasonError, 1, stableerr.New("context is required"))
+		return advanceError(opts.RunID, "", "", StopReasonError, 1, errors.New("context is required"))
 	}
 
 	if opts.MaxSteps == 0 {
@@ -83,15 +80,15 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 	}
 
 	if opts.MaxSteps < 1 {
-		return advanceError(opts.RunID, "", "", StopReasonError, 1, stableerr.Errorf("max steps must be positive, got %d", opts.MaxSteps))
+		return advanceError(opts.RunID, "", "", StopReasonError, 1, fmt.Errorf("max steps must be positive, got %d", opts.MaxSteps))
 	}
 
 	if opts.Root == "" {
-		return advanceError(opts.RunID, "", "", StopReasonError, 1, stableerr.New("project root is required"))
+		return advanceError(opts.RunID, "", "", StopReasonError, 1, errors.New("project root is required"))
 	}
 
 	if opts.RunID == "" {
-		return advanceError("", "", "", StopReasonError, 1, stableerr.New("run id is required"))
+		return advanceError("", "", "", StopReasonError, 1, errors.New("run id is required"))
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -115,10 +112,10 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 			result.StopReason = StopReasonActiveAttemptExists
 			result.ExitCode = 1
 
-			return result, stableerr.Errorf("run %q has an active attempt", opts.RunID)
+			return result, fmt.Errorf("run %q has an active attempt", opts.RunID)
 		case workflow.DecisionSelectStep, workflow.DecisionRetryStep:
 		default:
-			err := stableerr.Errorf("run %q has unsupported workflow decision %q", opts.RunID, eval.decision.Kind)
+			err := fmt.Errorf("run %q has unsupported workflow decision %q", opts.RunID, eval.decision.Kind)
 			return result.withError(StopReasonError, 1, err), err
 		}
 
@@ -239,7 +236,7 @@ func stopAdvanceForWorkerOutcome(ctx context.Context, opts AdvanceOptions, resul
 			return result.withError(StopReasonError, 1, err), true, err
 		}
 
-		stopErr := stableerr.Errorf("worker attempt %s failed with %s/%s", attempt.AttemptID, attempt.Status, attempt.Result)
+		stopErr := fmt.Errorf("worker attempt %s failed with %s/%s", attempt.AttemptID, attempt.Status, attempt.Result)
 		result.FinalStatus = eval.status.State
 		result.FinalDecision = string(eval.decision.Kind)
 
@@ -348,7 +345,6 @@ func launchOptions(opts AdvanceOptions) Options {
 		Time:     opts.Time,
 		Stdout:   opts.Stdout,
 		Progress: opts.Progress,
-		Logger:   opts.Logger,
 	}
 }
 

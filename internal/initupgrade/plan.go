@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 // ActionKind classifies a planned write candidate.
@@ -122,8 +120,6 @@ func (e *SurgicalEdit) UnmarshalJSON(data []byte) error {
 
 // YAMLPath identifies a YAML map path as structured segments. Dot strings are
 // accepted only at process boundaries such as JSON, tests, and display.
-//
-//nolint:recvcheck // JSON unmarshalling requires a pointer receiver.
 type YAMLPath struct {
 	segments []string
 }
@@ -148,7 +144,7 @@ func yamlPathFromDot(path string) (YAMLPath, error) {
 
 	segments := strings.Split(path, ".")
 	if slices.Contains(segments, "") {
-		return YAMLPath{}, stableerr.Errorf("invalid YAML path %q", path)
+		return YAMLPath{}, fmt.Errorf("invalid YAML path %q", path)
 	}
 
 	return YAMLPath{segments: segments}, nil

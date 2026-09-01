@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,12 +11,12 @@ import (
 func TestWriteInitialConfigSnapshotPersistsVersionedFilesAndCurrentPointer(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "config-snapshot-run", Workflow: testWorkflowName})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-snapshot-run", Workflow: testWorkflowName})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	err = store.WriteInitialConfigSnapshot(run.ID, ConfigSnapshot{
+	err = store.WriteInitialConfigSnapshotContext(context.Background(), run.ID, ConfigSnapshot{
 		Version:  1,
 		Resolved: []byte("{\"schema_version\":1,\"project\":{}}\n"),
 		Manifest: []byte("{\"schema_version\":1,\"version\":1,\"version_dir\":\"000001\"}\n"),
@@ -51,7 +52,7 @@ func TestWriteInitialConfigSnapshotRejectsSymlinkedConfigDir(t *testing.T) {
 	root := t.TempDir()
 	store := openStore(t, root)
 
-	run, err := store.Create(CreateRunRequest{RunID: "config-symlink-run", Workflow: testWorkflowName})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-symlink-run", Workflow: testWorkflowName})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestWriteInitialConfigSnapshotRejectsSymlinkedConfigDir(t *testing.T) {
 
 	symlinkPath(t, filepath.Join(run.Path, "config"), outside)
 
-	err = store.WriteInitialConfigSnapshot(run.ID, ConfigSnapshot{
+	err = store.WriteInitialConfigSnapshotContext(context.Background(), run.ID, ConfigSnapshot{
 		Version:  1,
 		Resolved: []byte("{\"schema_version\":1}\n"),
 		Manifest: []byte("{\"schema_version\":1}\n"),
@@ -78,7 +79,7 @@ func TestWriteInitialConfigSnapshotRejectsSymlinkedConfigDir(t *testing.T) {
 func TestWriteInitialConfigSnapshotRejectsExistingCurrent(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "config-existing-current-run", Workflow: testWorkflowName})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-existing-current-run", Workflow: testWorkflowName})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestWriteInitialConfigSnapshotRejectsExistingCurrent(t *testing.T) {
 		t.Fatalf("write current: %v", err)
 	}
 
-	err = store.WriteInitialConfigSnapshot(run.ID, ConfigSnapshot{
+	err = store.WriteInitialConfigSnapshotContext(context.Background(), run.ID, ConfigSnapshot{
 		Version:  1,
 		Resolved: []byte("{\"schema_version\":1}\n"),
 		Manifest: []byte("{\"schema_version\":1}\n"),

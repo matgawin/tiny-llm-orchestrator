@@ -3,6 +3,7 @@ package runconfigrefresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -13,7 +14,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/vcs"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -49,15 +49,15 @@ type Result struct {
 // Refresh loads live .orc config, validates compatibility, and publishes the next run snapshot.
 func Refresh(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
-		return Result{}, stableerr.New("context is required")
+		return Result{}, errors.New("context is required")
 	}
 
 	if opts.Root == "" {
-		return Result{}, stableerr.New("project root is required")
+		return Result{}, errors.New("project root is required")
 	}
 
 	if opts.RunID == "" {
-		return Result{}, stableerr.New("run id is required")
+		return Result{}, errors.New("run id is required")
 	}
 
 	source := opts.Source
@@ -109,7 +109,7 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 		Time:                  opts.Time,
 	}, func(lockedRun *runstore.Run, lockedCurrent runstore.CurrentConfigSnapshot) error {
 		if lockedCurrent.Version != current.Version || lockedCurrent.VersionDir != current.VersionDir {
-			return stableerr.Errorf("run %q config snapshot changed from %s to %s during refresh; retry refresh-config", opts.RunID, current.VersionDir, lockedCurrent.VersionDir)
+			return fmt.Errorf("run %q config snapshot changed from %s to %s during refresh; retry refresh-config", opts.RunID, current.VersionDir, lockedCurrent.VersionDir)
 		}
 
 		lockedOld, err := configsnapshot.LoadCurrent(lockedRun)
@@ -144,21 +144,21 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 
 func validateCompatibility(run *runstore.Run, oldProject, newProject *config.Project) error {
 	if run.Status.ActiveAttempt != nil {
-		return stableerr.Errorf("run %q has active attempt %q; cannot refresh config", run.ID, run.Status.ActiveAttempt.AttemptID)
+		return fmt.Errorf("run %q has active attempt %q; cannot refresh config", run.ID, run.Status.ActiveAttempt.AttemptID)
 	}
 
 	oldWorkflow, ok := oldProject.Workflows[run.Status.Workflow]
 	if !ok {
-		return stableerr.Errorf("run %q old snapshot workflow %q is missing", run.ID, run.Status.Workflow)
+		return fmt.Errorf("run %q old snapshot workflow %q is missing", run.ID, run.Status.Workflow)
 	}
 
 	newWorkflow, ok := newProject.Workflows[run.Status.Workflow]
 	if !ok {
-		return stableerr.Errorf("run %q live .orc config is missing workflow %q", run.ID, run.Status.Workflow)
+		return fmt.Errorf("run %q live .orc config is missing workflow %q", run.ID, run.Status.Workflow)
 	}
 
 	if oldWorkflow.Name != newWorkflow.Name {
-		return stableerr.Errorf("run %q workflow name changed from %q to %q", run.ID, oldWorkflow.Name, newWorkflow.Name)
+		return fmt.Errorf("run %q workflow name changed from %q to %q", run.ID, oldWorkflow.Name, newWorkflow.Name)
 	}
 
 	if err := validateReferencedSteps(run.Status, newWorkflow); err != nil {
@@ -204,7 +204,7 @@ func validatePendingAllowedPairs(state workflow.RunState, oldWorkflow, newWorkfl
 	for _, status := range sortedKeys(oldStep.AllowedResults) {
 		for _, result := range oldStep.AllowedResults[status] {
 			if !slices.Contains(newStep.AllowedResults[status], result) {
-				return stableerr.Errorf("allowed result pair %q is no longer declared for selected step %q", status+"/"+result, selectedStep)
+				return fmt.Errorf("allowed result pair %q is no longer declared for selected step %q", status+"/"+result, selectedStep)
 			}
 		}
 	}
@@ -212,11 +212,11 @@ func validatePendingAllowedPairs(state workflow.RunState, oldWorkflow, newWorkfl
 	for pair := range state.Retry.Counts {
 		status, result, ok := strings.Cut(pair, "/")
 		if !ok || status == "" || result == "" {
-			return stableerr.Errorf("retry lineage pair %q is invalid", pair)
+			return fmt.Errorf("retry lineage pair %q is invalid", pair)
 		}
 
 		if !slices.Contains(newStep.AllowedResults[status], result) {
-			return stableerr.Errorf("retry lineage pair %q is not declared in allowed_results for selected step %q", pair, selectedStep)
+			return fmt.Errorf("retry lineage pair %q is not declared in allowed_results for selected step %q", pair, selectedStep)
 		}
 	}
 
@@ -290,7 +290,7 @@ func validateReferencedSteps(status runstore.Status, workflowConfig config.Workf
 
 	for _, stepID := range sortedKeys(steps) {
 		if _, ok := workflowConfig.Steps[stepID]; !ok {
-			return stableerr.Errorf("%s %q is not declared in live workflow", steps[stepID], stepID)
+			return fmt.Errorf("%s %q is not declared in live workflow", steps[stepID], stepID)
 		}
 	}
 

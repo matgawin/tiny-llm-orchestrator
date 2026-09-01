@@ -1,6 +1,7 @@
 package runcontext
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ steps:
       done/ready: ready_for_human
 `)
 
-	loaded, err := Load(root, run.ID)
+	loaded, err := LoadContext(context.Background(), root, run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestLoadMissingSnapshotCurrentFailsWithRunAndPath(t *testing.T) {
 	store := openContextStore(t, root)
 	run := createContextRun(t, store, "missing-current-run")
 
-	_, err := Load(root, run.ID)
+	_, err := LoadContext(context.Background(), root, run.ID)
 	if err == nil {
 		t.Fatal("Load returned nil error, want missing snapshot error")
 	}
@@ -91,7 +92,7 @@ func openContextStore(t *testing.T, root string) *runstore.Store {
 func createContextRun(t *testing.T, store *runstore.Store, runID string) *runstore.Run {
 	t.Helper()
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:    runID,
 		Workflow: "implementation",
 		Time:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
@@ -116,7 +117,7 @@ func writeContextConfigSnapshot(t *testing.T, root string, store *runstore.Store
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
 
-	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+	if err := store.WriteInitialConfigSnapshotContext(context.Background(), runID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
 }

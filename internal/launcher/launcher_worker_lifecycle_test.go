@@ -44,7 +44,7 @@ func TestWorkerRunnerUsesTerminalReportInsteadOfSynthesizedFinish(t *testing.T) 
 	linkLauncherPromptAndLogNamed(t, loaded.Store, runID, attempt.AttemptID, launcherPlanStep)
 	recordProcessForLauncherTest(t, loaded.Store, runID, attempt.AttemptID)
 
-	reported, _, err := loaded.Store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	reported, _, err := loaded.Store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -124,7 +124,7 @@ func TestRunProcessZeroExitNonReaderWithLargePromptRecordsMissingReport(t *testi
 	loaded, attempt := prepareRunProcessAttempt(t, root, runID, "large-prompt-non-reader")
 	prompt := bytes.Repeat([]byte("x"), 2*1024*1024)
 
-	promptRef, err := loaded.Store.WriteArtifact(runID, runstore.Artifact{
+	promptRef, err := loaded.Store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    "plan-large-prompt-non-reader",
 		Content: prompt,
@@ -134,7 +134,7 @@ func TestRunProcessZeroExitNonReaderWithLargePromptRecordsMissingReport(t *testi
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
 
-	if _, _, err := loaded.Store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+	if _, _, err := loaded.Store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{
 		AttemptID: attempt.AttemptID,
 		PromptRef: promptRef,
 		Time:      fixedLauncherTime(),
@@ -556,7 +556,7 @@ func TestRunProcessCancellationWhileProcessMetadataBlockedDoesNotReleaseWorkerEx
 	root, runID := createLauncherRun(t, "5s")
 	loaded, attempt := prepareRunProcessAttempt(t, root, runID, "cancel-during-metadata")
 
-	promptRef, err := loaded.Store.WriteArtifact(runID, runstore.Artifact{
+	promptRef, err := loaded.Store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindPrompt,
 		Name:    "plan-cancel-during-metadata",
 		Content: []byte("prompt\n"),
@@ -566,7 +566,7 @@ func TestRunProcessCancellationWhileProcessMetadataBlockedDoesNotReleaseWorkerEx
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
 
-	if _, _, err := loaded.Store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{
+	if _, _, err := loaded.Store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{
 		AttemptID: attempt.AttemptID,
 		PromptRef: promptRef,
 		Time:      fixedLauncherTime(),

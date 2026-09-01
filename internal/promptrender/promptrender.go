@@ -4,6 +4,7 @@ package promptrender
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -15,7 +16,6 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
@@ -59,7 +59,7 @@ type renderContext struct {
 // as a prompt artifact through the Run Store.
 func Render(ctx context.Context, opts Options) (Result, error) {
 	if ctx == nil {
-		return Result{}, stableerr.New("context is required")
+		return Result{}, errors.New("context is required")
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -118,15 +118,15 @@ func resultFromArtifact(runPath string, ref runstore.ArtifactRef, content []byte
 func validateOptions(opts Options) error {
 	switch {
 	case opts.Root == "":
-		return stableerr.New("project root is required")
+		return errors.New("project root is required")
 	case opts.RunID == "":
-		return stableerr.New("run id is required")
+		return errors.New("run id is required")
 	case opts.StepID == "":
-		return stableerr.New("step id is required")
+		return errors.New("step id is required")
 	case opts.AgentID == "":
-		return stableerr.New("agent id is required")
+		return errors.New("agent id is required")
 	case opts.AttemptID == "":
-		return stableerr.New("attempt id is required")
+		return errors.New("attempt id is required")
 	default:
 		return nil
 	}
@@ -144,25 +144,25 @@ func loadRenderContext(ctx context.Context, opts Options) (renderContext, error)
 	}
 
 	if decision.Kind != workflow.DecisionSelectStep {
-		return renderContext{}, stableerr.Errorf("run %q has no selected runnable step; decision is %s", loaded.Run.ID, decision.Kind)
+		return renderContext{}, fmt.Errorf("run %q has no selected runnable step; decision is %s", loaded.Run.ID, decision.Kind)
 	}
 
 	if !opts.AllowUnselectedStep && opts.StepID != decision.Step {
-		return renderContext{}, stableerr.Errorf("step %q is not selected for run %q; selected step is %q", opts.StepID, loaded.Run.ID, decision.Step)
+		return renderContext{}, fmt.Errorf("step %q is not selected for run %q; selected step is %q", opts.StepID, loaded.Run.ID, decision.Step)
 	}
 
 	step, ok := loaded.Workflow.Steps[opts.StepID]
 	if !ok {
-		return renderContext{}, stableerr.Errorf("step %q is not declared in workflow %q", opts.StepID, loaded.Workflow.Name)
+		return renderContext{}, fmt.Errorf("step %q is not declared in workflow %q", opts.StepID, loaded.Workflow.Name)
 	}
 
 	if step.Agent != opts.AgentID {
-		return renderContext{}, stableerr.Errorf("step %q uses agent %q, not %q", opts.StepID, step.Agent, opts.AgentID)
+		return renderContext{}, fmt.Errorf("step %q uses agent %q, not %q", opts.StepID, step.Agent, opts.AgentID)
 	}
 
 	agent, ok := loaded.Project.Agents[opts.AgentID]
 	if !ok {
-		return renderContext{}, stableerr.Errorf("agent %q is not configured", opts.AgentID)
+		return renderContext{}, fmt.Errorf("agent %q is not configured", opts.AgentID)
 	}
 
 	return renderContext{
@@ -368,7 +368,7 @@ func taskContextContent(ctx context.Context, renderCtx renderContext) (string, e
 		return string(content), nil
 	}
 
-	return "", stableerr.Errorf("run %q has no task context artifact", renderCtx.run.ID)
+	return "", fmt.Errorf("run %q has no task context artifact", renderCtx.run.ID)
 }
 
 type reportContext struct {
@@ -424,7 +424,7 @@ func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]report
 		}
 
 		if attempt.Report.ReportRef == nil || attempt.Report.ReportRef.Path == "" {
-			return nil, stableerr.Errorf("run %q attempt %q step %q missing report_ref", renderCtx.run.ID, attempt.AttemptID, attempt.StepID)
+			return nil, fmt.Errorf("run %q attempt %q step %q missing report_ref", renderCtx.run.ID, attempt.AttemptID, attempt.StepID)
 		}
 
 		content, err := renderCtx.store.ReadArtifactContext(ctx, renderCtx.run.ID, *attempt.Report.ReportRef)

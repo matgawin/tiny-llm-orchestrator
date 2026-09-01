@@ -9,8 +9,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 var (
@@ -79,7 +77,7 @@ func observeRunLockWait(lockName string) {
 
 func (s *Store) lockRunsDir(ctx context.Context) (func(), error) {
 	if ctx == nil {
-		return nil, stableerr.New("context is required")
+		return nil, errors.New("context is required")
 	}
 
 	if err := validateRunsDir(s.orcDir, s.runsDir); err != nil {
@@ -136,7 +134,7 @@ func (s *Store) withRunLock(runID string, fn func() error) error {
 
 func (s *Store) withRunLockContext(ctx context.Context, runID string, fn func() error) error {
 	if ctx == nil {
-		return stableerr.New("context is required")
+		return errors.New("context is required")
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -168,7 +166,7 @@ func (s *Store) withRunLockContext(ctx context.Context, runID string, fn func() 
 
 	localLock, ok := localLockValue.(*contextRunLock)
 	if !ok {
-		return stableerr.Errorf("run %q lock has unexpected type %T", runID, localLockValue)
+		return fmt.Errorf("run %q lock has unexpected type %T", runID, localLockValue)
 	}
 
 	if err := localLock.lock(ctx, runID); err != nil {
@@ -193,7 +191,7 @@ func (s *Store) withRunLockContext(ctx context.Context, runID string, fn func() 
 	if info, err := file.Stat(); err != nil {
 		return fmt.Errorf("with run lock context: %w", err)
 	} else if !info.Mode().IsRegular() {
-		return stableerr.Errorf("run %q lock is not a regular file", runID)
+		return fmt.Errorf("run %q lock is not a regular file", runID)
 	}
 
 	fd := int(file.Fd()) // #nosec G115 -- file descriptors fit int on supported Linux targets.

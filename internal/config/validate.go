@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -34,23 +32,23 @@ var sandboxEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 	if cfg.Version != schemaVersion {
-		return stableerr.Errorf("config version = %d, want %d", cfg.Version, schemaVersion)
+		return fmt.Errorf("config version = %d, want %d", cfg.Version, schemaVersion)
 	}
 
 	if cfg.SetupVersion < 0 {
-		return stableerr.Errorf("setup_version = %d, want >= 0", cfg.SetupVersion)
+		return fmt.Errorf("setup_version = %d, want >= 0", cfg.SetupVersion)
 	}
 
 	if cfg.SetupVersion > CurrentSetupVersion {
-		return stableerr.Errorf("setup_version = %d, want <= %d", cfg.SetupVersion, CurrentSetupVersion)
+		return fmt.Errorf("setup_version = %d, want <= %d", cfg.SetupVersion, CurrentSetupVersion)
 	}
 
 	if len(cfg.Workflows) == 0 {
-		return stableerr.New("config must declare at least one workflow")
+		return errors.New("config must declare at least one workflow")
 	}
 
 	if len(cfg.Agents) == 0 {
-		return stableerr.New("config must declare at least one agent")
+		return errors.New("config must declare at least one agent")
 	}
 
 	for id, relPath := range cfg.Runtimes {
@@ -59,20 +57,20 @@ func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 		}
 
 		if relPath == "" {
-			return stableerr.Errorf("runtime %q path is required", id)
+			return fmt.Errorf("runtime %q path is required", id)
 		}
 
 		clean := filepath.Clean(relPath)
 		if filepath.IsAbs(relPath) {
-			return stableerr.Errorf("runtime %q path %q: path must be relative to .orc", id, relPath)
+			return fmt.Errorf("runtime %q path %q: path must be relative to .orc", id, relPath)
 		}
 
 		if invalidBaseRelativePath(clean) {
-			return stableerr.Errorf("runtime %q path %q: path must not escape .orc", id, relPath)
+			return fmt.Errorf("runtime %q path %q: path must not escape .orc", id, relPath)
 		}
 
 		if !strings.HasPrefix(clean, "runtimes"+string(filepath.Separator)) {
-			return stableerr.Errorf("runtime %q path %q must be under runtimes/", id, relPath)
+			return fmt.Errorf("runtime %q path %q must be under runtimes/", id, relPath)
 		}
 	}
 
@@ -82,7 +80,7 @@ func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 
 	for name, ref := range cfg.Workflows {
 		if ref.Path == "" {
-			return stableerr.Errorf("workflow %q path is required", name)
+			return fmt.Errorf("workflow %q path is required", name)
 		}
 
 		if err := validateLoopCapsConfig(fmt.Sprintf("workflows.%s.loop_caps", name), ref.LoopCaps); err != nil {
@@ -106,12 +104,12 @@ func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 
 func validateSandboxConfig(projectRoot string, sandbox *SandboxConfig) error {
 	if len(sandbox.Command.Argv) == 0 {
-		return stableerr.New("sandbox.command.argv must declare at least one argument")
+		return errors.New("sandbox.command.argv must declare at least one argument")
 	}
 
 	for i, arg := range sandbox.Command.Argv {
 		if arg == "" {
-			return stableerr.Errorf("sandbox.command.argv[%d] is empty", i)
+			return fmt.Errorf("sandbox.command.argv[%d] is empty", i)
 		}
 	}
 
@@ -169,7 +167,7 @@ func validateSandboxHomeConfig(home SandboxHomeConfig) error {
 		return nil
 	}
 
-	return stableerr.Errorf("sandbox.home.mode %q is invalid; allowed: synthetic, host_path", home.Mode)
+	return fmt.Errorf("sandbox.home.mode %q is invalid; allowed: synthetic, host_path", home.Mode)
 }
 
 func validateSandboxPathConfig(path SandboxPathConfig) error {
@@ -177,22 +175,22 @@ func validateSandboxPathConfig(path SandboxPathConfig) error {
 		return nil
 	}
 
-	return stableerr.Errorf("sandbox.path.mode %q is invalid; allowed: none, host_entries", path.Mode)
+	return fmt.Errorf("sandbox.path.mode %q is invalid; allowed: none, host_entries", path.Mode)
 }
 
 func validateSandboxProtectedPaths(paths []SandboxProtectedPath) error {
 	for i, protected := range paths {
 		name := fmt.Sprintf("sandbox.protected_paths[%d]", i)
 		if protected.decodeError != "" {
-			return stableerr.Errorf("%s %s", name, protected.decodeError)
+			return fmt.Errorf("%s %s", name, protected.decodeError)
 		}
 
 		if protected.hasUnknownKeys() {
-			return stableerr.Errorf("%s contains unsupported key(s): %s", name, protected.unknownKeyList())
+			return fmt.Errorf("%s contains unsupported key(s): %s", name, protected.unknownKeyList())
 		}
 
 		if protected.HostHomeSet == protected.AbsoluteSet {
-			return stableerr.Errorf("%s must set exactly one of host_home or absolute", name)
+			return fmt.Errorf("%s must set exactly one of host_home or absolute", name)
 		}
 
 		if protected.HostHomeSet {
@@ -213,7 +211,7 @@ func validateSandboxProtectedPaths(paths []SandboxProtectedPath) error {
 
 func validateSandboxProtectedHostHome(name, value string) error {
 	if value == "" {
-		return stableerr.Errorf("%s is empty", name)
+		return fmt.Errorf("%s is empty", name)
 	}
 
 	if err := validateNoShellTildeOrEnvExpansion(name, value); err != nil {
@@ -221,12 +219,12 @@ func validateSandboxProtectedHostHome(name, value string) error {
 	}
 
 	if filepath.IsAbs(value) {
-		return stableerr.Errorf("%s %q must be relative", name, value)
+		return fmt.Errorf("%s %q must be relative", name, value)
 	}
 
 	clean := filepath.Clean(value)
 	if clean != value || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return stableerr.Errorf("%s %q must be a clean relative descendant path", name, value)
+		return fmt.Errorf("%s %q must be a clean relative descendant path", name, value)
 	}
 
 	return nil
@@ -234,7 +232,7 @@ func validateSandboxProtectedHostHome(name, value string) error {
 
 func validateSandboxProtectedAbsolute(name, value string) error {
 	if value == "" {
-		return stableerr.Errorf("%s is empty", name)
+		return fmt.Errorf("%s is empty", name)
 	}
 
 	if err := validateNoShellTildeOrEnvExpansion(name, value); err != nil {
@@ -242,16 +240,16 @@ func validateSandboxProtectedAbsolute(name, value string) error {
 	}
 
 	if !filepath.IsAbs(value) {
-		return stableerr.Errorf("%s %q must be absolute", name, value)
+		return fmt.Errorf("%s %q must be absolute", name, value)
 	}
 
 	clean := filepath.Clean(value)
 	if clean != value {
-		return stableerr.Errorf("%s %q must be clean", name, value)
+		return fmt.Errorf("%s %q must be clean", name, value)
 	}
 
 	if clean == string(filepath.Separator) {
-		return stableerr.Errorf("%s %q must not be root", name, value)
+		return fmt.Errorf("%s %q must not be root", name, value)
 	}
 
 	return nil
@@ -259,7 +257,7 @@ func validateSandboxProtectedAbsolute(name, value string) error {
 
 func validateNoShellTildeOrEnvExpansion(name, value string) error {
 	if strings.HasPrefix(value, "~") || strings.ContainsAny(value, "$`") {
-		return stableerr.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
 	}
 
 	return nil
@@ -267,16 +265,16 @@ func validateNoShellTildeOrEnvExpansion(name, value string) error {
 
 func validateSandboxCWD(projectRoot, cwd string) error {
 	if filepath.IsAbs(cwd) {
-		return stableerr.Errorf("sandbox.cwd %q must be repo-relative", cwd)
+		return fmt.Errorf("sandbox.cwd %q must be repo-relative", cwd)
 	}
 
 	clean := filepath.Clean(cwd)
 	if cwd != "" && clean != cwd {
-		return stableerr.Errorf("sandbox.cwd %q must be clean and stay under repository root", cwd)
+		return fmt.Errorf("sandbox.cwd %q must be clean and stay under repository root", cwd)
 	}
 
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return stableerr.Errorf("sandbox.cwd %q must be clean and stay under repository root", cwd)
+		return fmt.Errorf("sandbox.cwd %q must be clean and stay under repository root", cwd)
 	}
 
 	path := filepath.Join(projectRoot, clean)
@@ -296,7 +294,7 @@ func validateSandboxCWD(projectRoot, cwd string) error {
 	}
 
 	if !info.IsDir() {
-		return stableerr.Errorf("sandbox.cwd %q must be a directory", cwd)
+		return fmt.Errorf("sandbox.cwd %q must be a directory", cwd)
 	}
 
 	return nil
@@ -332,7 +330,7 @@ func validatePresetMountMode(name, mode string, allowAuto bool) error {
 		allowed = "auto, ro, rw"
 	}
 
-	return stableerr.Errorf("%s %q is invalid; allowed: %s", name, mode, allowed)
+	return fmt.Errorf("%s %q is invalid; allowed: %s", name, mode, allowed)
 }
 
 func validateSandboxEnvConfig(env SandboxEnvConfig) error {
@@ -353,11 +351,11 @@ func validateSandboxEnvConfig(env SandboxEnvConfig) error {
 
 func validateSandboxEnvName(name string) error {
 	if name == "" {
-		return stableerr.New("environment variable name is empty")
+		return errors.New("environment variable name is empty")
 	}
 
 	if !sandboxEnvNamePattern.MatchString(name) {
-		return stableerr.Errorf("environment variable name %q is invalid", name)
+		return fmt.Errorf("environment variable name %q is invalid", name)
 	}
 
 	return nil
@@ -366,11 +364,11 @@ func validateSandboxEnvName(name string) error {
 func validateSandboxMount(projectRoot, homeMode string, index int, mount SandboxMount) error {
 	name := fmt.Sprintf("sandbox.mounts[%d]", index)
 	if mount.Host == "" {
-		return stableerr.Errorf("%s.host is required", name)
+		return fmt.Errorf("%s.host is required", name)
 	}
 
 	if mount.Target == "" {
-		return stableerr.Errorf("%s.target is required", name)
+		return fmt.Errorf("%s.target is required", name)
 	}
 
 	if err := validateSandboxMountTarget(projectRoot, homeMode, mount.Target); err != nil {
@@ -378,13 +376,13 @@ func validateSandboxMount(projectRoot, homeMode string, index int, mount Sandbox
 	}
 
 	if mount.Mode != sandboxMountModeRO && mount.Mode != sandboxMountModeRW {
-		return stableerr.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
+		return fmt.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
 	}
 
 	if mount.Mode == sandboxMountModeRW && !filepath.IsAbs(mount.Host) {
 		clean := filepath.Clean(mount.Host)
 		if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return stableerr.Errorf("%s.host %q must not traverse outside repository root for writable mounts", name, mount.Host)
+			return fmt.Errorf("%s.host %q must not traverse outside repository root for writable mounts", name, mount.Host)
 		}
 	}
 
@@ -400,14 +398,14 @@ func validateSandboxMount(projectRoot, homeMode string, index int, mount Sandbox
 		}
 
 		if errors.Is(err, os.ErrNotExist) {
-			return stableerr.Errorf("%s.host %q does not exist", name, mount.Host)
+			return fmt.Errorf("%s.host %q does not exist", name, mount.Host)
 		}
 
 		return fmt.Errorf("%s.host %q: %w", name, mount.Host, err)
 	}
 
 	if info == nil {
-		return stableerr.Errorf("%s.host %q does not exist", name, mount.Host)
+		return fmt.Errorf("%s.host %q does not exist", name, mount.Host)
 	}
 
 	if mount.Mode != sandboxMountModeRW || filepath.IsAbs(mount.Host) {
@@ -420,7 +418,7 @@ func validateSandboxMount(projectRoot, homeMode string, index int, mount Sandbox
 	}
 
 	if err := validateResolvedUnderRoot(realRoot, realPath); err != nil {
-		return stableerr.Errorf("%s.host %q must not escape repository root for writable mounts", name, mount.Host)
+		return fmt.Errorf("%s.host %q must not escape repository root for writable mounts", name, mount.Host)
 	}
 
 	return nil
@@ -428,35 +426,35 @@ func validateSandboxMount(projectRoot, homeMode string, index int, mount Sandbox
 
 func validateSandboxMountTarget(projectRoot, homeMode, target string) error {
 	if !filepath.IsAbs(target) {
-		return stableerr.New("must be an absolute sandbox path")
+		return errors.New("must be an absolute sandbox path")
 	}
 
 	clean := filepath.Clean(target)
 	if clean != target {
-		return stableerr.New("must be clean")
+		return errors.New("must be clean")
 	}
 
 	if clean == "/" {
-		return stableerr.New("must not target sandbox root")
+		return errors.New("must not target sandbox root")
 	}
 
 	if filepath.IsAbs(projectRoot) {
 		root := filepath.Clean(projectRoot)
 		if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) || isStrictPathAncestor(clean, root) {
-			return stableerr.New("must not override the repository mount")
+			return errors.New("must not override the repository mount")
 		}
 	}
 
 	if clean == "/home" || (homeMode == SandboxHomeModeSynthetic && clean == sandboxSyntheticHome) {
-		return stableerr.Errorf("must not override critical sandbox path %s", clean)
+		return fmt.Errorf("must not override critical sandbox path %s", clean)
 	}
 
 	if homeMode == SandboxHomeModeSynthetic && strings.HasPrefix(clean, "/home/") && !strings.HasPrefix(clean, sandboxSyntheticHome+string(filepath.Separator)) {
-		return stableerr.New("must not override critical sandbox path /home")
+		return errors.New("must not override critical sandbox path /home")
 	}
 
 	if critical, ok := ProtectedSandboxTargetConflict(clean); ok {
-		return stableerr.Errorf("must not override critical sandbox path %s", critical)
+		return fmt.Errorf("must not override critical sandbox path %s", critical)
 	}
 
 	return nil
@@ -515,7 +513,7 @@ func validateResolvedUnderRoot(realRoot, realPath string) error {
 	}
 
 	if rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return stableerr.New("path must not escape repository root")
+		return errors.New("path must not escape repository root")
 	}
 
 	return nil
@@ -544,15 +542,15 @@ func validateWorkflow(workflow Workflow, agents map[string]Agent, runtimes map[s
 
 func validateWorkflowShape(workflow Workflow) error {
 	if workflow.Name == "" {
-		return stableerr.New("name is required")
+		return errors.New("name is required")
 	}
 
 	if workflow.Start == "" {
-		return stableerr.New("start is required")
+		return errors.New("start is required")
 	}
 
 	if workflow.Execution.Mode != executionModeSequential {
-		return stableerr.Errorf("unsupported execution mode %q; allowed: %s", workflow.Execution.Mode, executionModeSequential)
+		return fmt.Errorf("unsupported execution mode %q; allowed: %s", workflow.Execution.Mode, executionModeSequential)
 	}
 
 	if err := validateTaskContext(workflow.TaskContext); err != nil {
@@ -568,11 +566,11 @@ func validateWorkflowShape(workflow Workflow) error {
 	}
 
 	if len(workflow.Steps) == 0 {
-		return stableerr.New("steps are required")
+		return errors.New("steps are required")
 	}
 
 	if _, ok := workflow.Steps[workflow.Start]; !ok {
-		return stableerr.Errorf("start step %q is not declared", workflow.Start)
+		return fmt.Errorf("start step %q is not declared", workflow.Start)
 	}
 
 	return nil
@@ -584,7 +582,7 @@ func validateStep(stepName string, step Step, workflow Workflow, steps map[strin
 	}
 
 	if len(step.AllowedResults) == 0 {
-		return nil, stableerr.Errorf("step %q allowed_results are required", stepName)
+		return nil, fmt.Errorf("step %q allowed_results are required", stepName)
 	}
 
 	stepPairs, err := validateAllowedResults(stepName, step.AllowedResults)
@@ -609,22 +607,22 @@ func validateSkipContract(stepName string, step Step, stepPairs resultPairSet) e
 	_, declaresTransitionSkip := step.On[SystemSkipPair]
 	if step.Skippable {
 		if !declaresAllowedSkip {
-			return stableerr.Errorf("step %q is skippable but must declare allowed_results.%s including %s", stepName, SystemSkipStatus, SystemSkipResult)
+			return fmt.Errorf("step %q is skippable but must declare allowed_results.%s including %s", stepName, SystemSkipStatus, SystemSkipResult)
 		}
 
 		if !declaresTransitionSkip {
-			return stableerr.Errorf("step %q is skippable but must declare an explicit on transition for %s", stepName, SystemSkipPair)
+			return fmt.Errorf("step %q is skippable but must declare an explicit on transition for %s", stepName, SystemSkipPair)
 		}
 
 		return nil
 	}
 
 	if declaresAllowedSkip {
-		return stableerr.Errorf("step %q declares reserved system outcome %s but is not skippable", stepName, SystemSkipPair)
+		return fmt.Errorf("step %q declares reserved system outcome %s but is not skippable", stepName, SystemSkipPair)
 	}
 
 	if declaresTransitionSkip {
-		return stableerr.Errorf("step %q declares reserved system transition %s but is not skippable", stepName, SystemSkipPair)
+		return fmt.Errorf("step %q declares reserved system transition %s but is not skippable", stepName, SystemSkipPair)
 	}
 
 	return nil
@@ -633,7 +631,7 @@ func validateSkipContract(stepName string, step Step, stepPairs resultPairSet) e
 func validateStepKind(stepName string, step Step, workflow Workflow, agents map[string]Agent, runtimes map[string]Runtime) error {
 	kind := step.EffectiveKind()
 	if step.Script.Body != "" {
-		return stableerr.Errorf("step %q script.body is not supported in v1", stepName)
+		return fmt.Errorf("step %q script.body is not supported in v1", stepName)
 	}
 
 	switch kind {
@@ -650,7 +648,7 @@ func validateStepKind(stepName string, step Step, workflow Workflow, agents map[
 			return err
 		}
 	default:
-		return stableerr.Errorf("step %q has unsupported kind %q; allowed: agent, command, script", stepName, step.Kind)
+		return fmt.Errorf("step %q has unsupported kind %q; allowed: agent, command, script", stepName, step.Kind)
 	}
 
 	return validateStepCWD(stepName, step)
@@ -666,19 +664,19 @@ func validateStepCWD(stepName string, step Step) error {
 
 func validateAgentStepKind(stepName string, step Step, workflow Workflow, agents map[string]Agent, runtimes map[string]Runtime) error {
 	if step.Agent == "" {
-		return stableerr.Errorf("step %q agent is required", stepName)
+		return fmt.Errorf("step %q agent is required", stepName)
 	}
 
 	if len(step.Command.Argv) > 0 {
-		return stableerr.Errorf("step %q kind agent must not set command", stepName)
+		return fmt.Errorf("step %q kind agent must not set command", stepName)
 	}
 
 	if step.Script.Path != "" || len(step.Script.Args) > 0 {
-		return stableerr.Errorf("step %q kind agent must not set script", stepName)
+		return fmt.Errorf("step %q kind agent must not set script", stepName)
 	}
 
 	if _, ok := agents[step.Agent]; !ok {
-		return stableerr.Errorf("step %q references missing agent %q", stepName, step.Agent)
+		return fmt.Errorf("step %q references missing agent %q", stepName, step.Agent)
 	}
 
 	if err := validateAgentStepRuntime(stepName, step, workflow, runtimes); err != nil {
@@ -690,7 +688,7 @@ func validateAgentStepKind(stepName string, step Step, workflow Workflow, agents
 
 func validateCommandStepKind(stepName string, step Step) error {
 	if step.Agent != "" {
-		return stableerr.Errorf("step %q kind command must not set agent", stepName)
+		return fmt.Errorf("step %q kind command must not set agent", stepName)
 	}
 
 	if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindCommand); err != nil {
@@ -698,17 +696,17 @@ func validateCommandStepKind(stepName string, step Step) error {
 	}
 
 	if len(step.Command.Argv) == 0 {
-		return stableerr.Errorf("step %q command.argv must declare at least one argument", stepName)
+		return fmt.Errorf("step %q command.argv must declare at least one argument", stepName)
 	}
 
 	for i, arg := range step.Command.Argv {
 		if arg == "" {
-			return stableerr.Errorf("step %q command.argv[%d] is empty", stepName, i)
+			return fmt.Errorf("step %q command.argv[%d] is empty", stepName, i)
 		}
 	}
 
 	if step.Script.Path != "" || len(step.Script.Args) > 0 {
-		return stableerr.Errorf("step %q kind command must not set script", stepName)
+		return fmt.Errorf("step %q kind command must not set script", stepName)
 	}
 
 	return nil
@@ -716,7 +714,7 @@ func validateCommandStepKind(stepName string, step Step) error {
 
 func validateScriptStepKind(stepName string, step Step) error {
 	if step.Agent != "" {
-		return stableerr.Errorf("step %q kind script must not set agent", stepName)
+		return fmt.Errorf("step %q kind script must not set agent", stepName)
 	}
 
 	if err := validateDeterministicStepRuntimeFields(stepName, step, StepKindScript); err != nil {
@@ -724,11 +722,11 @@ func validateScriptStepKind(stepName string, step Step) error {
 	}
 
 	if len(step.Command.Argv) > 0 {
-		return stableerr.Errorf("step %q kind script must not set command", stepName)
+		return fmt.Errorf("step %q kind script must not set command", stepName)
 	}
 
 	if step.Script.Path == "" {
-		return stableerr.Errorf("step %q script.path is required", stepName)
+		return fmt.Errorf("step %q script.path is required", stepName)
 	}
 
 	if err := validateRepoRelativePath("step "+stepName+" script.path", step.Script.Path); err != nil {
@@ -737,7 +735,7 @@ func validateScriptStepKind(stepName string, step Step) error {
 
 	for i, arg := range step.Script.Args {
 		if arg == "" {
-			return stableerr.Errorf("step %q script.args[%d] is empty", stepName, i)
+			return fmt.Errorf("step %q script.args[%d] is empty", stepName, i)
 		}
 	}
 
@@ -747,12 +745,12 @@ func validateScriptStepKind(stepName string, step Step) error {
 func validateAgentStepRuntime(stepName string, step Step, workflow Workflow, runtimes map[string]Runtime) error {
 	runtimeID := workflow.EffectiveRuntime(step)
 	if runtimeID == "" {
-		return stableerr.Errorf("step %q runtime is required for agent steps", stepName)
+		return fmt.Errorf("step %q runtime is required for agent steps", stepName)
 	}
 
 	runtime, ok := runtimes[runtimeID]
 	if !ok {
-		return stableerr.Errorf("step %q references missing runtime %q", stepName, runtimeID)
+		return fmt.Errorf("step %q references missing runtime %q", stepName, runtimeID)
 	}
 
 	if err := validateAgentStepModel(stepName, step, workflow, runtime, runtimeID); err != nil {
@@ -817,31 +815,31 @@ type stepSelectionValidation struct {
 
 func validateAgentStepSelection(v stepSelectionValidation) error {
 	if v.stepValue != "" && !v.supported {
-		return stableerr.Errorf("step %q %s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
+		return fmt.Errorf("step %q %s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
 	}
 
 	if v.defaultValue != "" && !v.supported {
-		return stableerr.Errorf("step %q defaults.%s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
+		return fmt.Errorf("step %q defaults.%s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
 	}
 
 	if v.stepValue != "" && !selectionAllows(v.allowed, v.stepValue) {
-		return stableerr.Errorf("step %q %s %q is not allowed by runtime %q %s", v.stepName, v.name, v.stepValue, v.runtimeID, v.allowedName)
+		return fmt.Errorf("step %q %s %q is not allowed by runtime %q %s", v.stepName, v.name, v.stepValue, v.runtimeID, v.allowedName)
 	}
 
 	if v.defaultValue != "" && !selectionAllows(v.allowed, v.defaultValue) {
-		return stableerr.Errorf("step %q defaults.%s %q is not allowed by runtime %q %s", v.stepName, v.name, v.defaultValue, v.runtimeID, v.allowedName)
+		return fmt.Errorf("step %q defaults.%s %q is not allowed by runtime %q %s", v.stepName, v.name, v.defaultValue, v.runtimeID, v.allowedName)
 	}
 
 	if v.resolvedValue != "" && !v.supported {
-		return stableerr.Errorf("step %q resolved %s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
+		return fmt.Errorf("step %q resolved %s requires runtime %q %s=true", v.stepName, v.name, v.runtimeID, v.supportedName)
 	}
 
 	if v.resolvedValue != "" && !selectionAllows(v.allowed, v.resolvedValue) {
-		return stableerr.Errorf("step %q resolved %s %q is not allowed by runtime %q %s", v.stepName, v.name, v.resolvedValue, v.runtimeID, v.allowedName)
+		return fmt.Errorf("step %q resolved %s %q is not allowed by runtime %q %s", v.stepName, v.name, v.resolvedValue, v.runtimeID, v.allowedName)
 	}
 
 	if v.resolvedValue == "" && v.required {
-		return stableerr.Errorf("step %q runtime %q requires %s", v.stepName, v.runtimeID, v.requiredName)
+		return fmt.Errorf("step %q runtime %q requires %s", v.stepName, v.runtimeID, v.requiredName)
 	}
 
 	return nil
@@ -856,7 +854,7 @@ func validateAgentStepRuntimeDirs(stepName string, step Step, workflow Workflow,
 	}
 
 	if len(runtimeDirs) > 0 && !runtime.Directories.Supported {
-		return stableerr.Errorf("step %q runtime_dirs require runtime %q directories.supported=true", stepName, runtimeID)
+		return fmt.Errorf("step %q runtime_dirs require runtime %q directories.supported=true", stepName, runtimeID)
 	}
 
 	return nil
@@ -869,13 +867,13 @@ func selectionAllows(allowed []string, value string) bool {
 func validateDeterministicStepRuntimeFields(stepName string, step Step, kind string) error {
 	switch {
 	case step.Runtime != "":
-		return stableerr.Errorf("step %q kind %s must not set runtime", stepName, kind)
+		return fmt.Errorf("step %q kind %s must not set runtime", stepName, kind)
 	case step.Model != "":
-		return stableerr.Errorf("step %q kind %s must not set model", stepName, kind)
+		return fmt.Errorf("step %q kind %s must not set model", stepName, kind)
 	case step.Reasoning != "":
-		return stableerr.Errorf("step %q kind %s must not set reasoning", stepName, kind)
+		return fmt.Errorf("step %q kind %s must not set reasoning", stepName, kind)
 	case len(step.RuntimeDirs) > 0:
-		return stableerr.Errorf("step %q kind %s must not set runtime_dirs", stepName, kind)
+		return fmt.Errorf("step %q kind %s must not set runtime_dirs", stepName, kind)
 	default:
 		return nil
 	}
@@ -883,16 +881,16 @@ func validateDeterministicStepRuntimeFields(stepName string, step Step, kind str
 
 func validateRepoRelativePath(name, value string) error {
 	if value == "" {
-		return stableerr.Errorf("%s is required", name)
+		return fmt.Errorf("%s is required", name)
 	}
 
 	if filepath.IsAbs(value) {
-		return stableerr.Errorf("%s %q must be repo-relative", name, value)
+		return fmt.Errorf("%s %q must be repo-relative", name, value)
 	}
 
 	clean := filepath.Clean(value)
 	if clean != value || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return stableerr.Errorf("%s %q must be clean and stay under repository root", name, value)
+		return fmt.Errorf("%s %q must be clean and stay under repository root", name, value)
 	}
 
 	return nil
@@ -903,16 +901,16 @@ func validateAllowedResults(stepName string, allowedResults map[string][]string)
 
 	for status, results := range allowedResults {
 		if _, ok := allowedReportStatuses[status]; !ok {
-			return nil, stableerr.Errorf("step %q has invalid status %q; allowed: %s", stepName, status, formatStringSet(allowedReportStatuses))
+			return nil, fmt.Errorf("step %q has invalid status %q; allowed: %s", stepName, status, formatStringSet(allowedReportStatuses))
 		}
 
 		if len(results) == 0 {
-			return nil, stableerr.Errorf("step %q status %q must declare at least one result", stepName, status)
+			return nil, fmt.Errorf("step %q status %q must declare at least one result", stepName, status)
 		}
 
 		for _, result := range results {
 			if result == "" {
-				return nil, stableerr.Errorf("step %q status %q has empty result", stepName, status)
+				return nil, fmt.Errorf("step %q status %q has empty result", stepName, status)
 			}
 
 			stepPairs[resultPairKey(status, result)] = struct{}{}
@@ -924,25 +922,25 @@ func validateAllowedResults(stepName string, allowedResults map[string][]string)
 
 func validateTransitions(stepName string, transitions map[string]string, stepPairs resultPairSet, steps map[string]Step) error {
 	if len(transitions) == 0 {
-		return stableerr.Errorf("step %q on transitions are required", stepName)
+		return fmt.Errorf("step %q on transitions are required", stepName)
 	}
 
 	for pair, target := range transitions {
 		if _, ok := stepPairs[pair]; !ok {
-			return stableerr.Errorf("step %q transition %q is not declared in allowed_results; allowed pairs: %s", stepName, pair, formatStringSet(stepPairs))
+			return fmt.Errorf("step %q transition %q is not declared in allowed_results; allowed pairs: %s", stepName, pair, formatStringSet(stepPairs))
 		}
 
 		_, stepTarget := steps[target]
 
 		_, terminalTarget := allowedTerminalStates[target]
 		if !stepTarget && !terminalTarget {
-			return stableerr.Errorf("step %q transition %q targets unknown step or terminal state %q", stepName, pair, target)
+			return fmt.Errorf("step %q transition %q targets unknown step or terminal state %q", stepName, pair, target)
 		}
 	}
 
 	for pair := range stepPairs {
 		if _, ok := transitions[pair]; !ok {
-			return stableerr.Errorf("step %q allowed result %q has no deterministic on transition; allowed pairs: %s", stepName, pair, formatStringSet(stepPairs))
+			return fmt.Errorf("step %q allowed result %q has no deterministic on transition; allowed pairs: %s", stepName, pair, formatStringSet(stepPairs))
 		}
 	}
 
@@ -952,11 +950,11 @@ func validateTransitions(stepName string, transitions map[string]string, stepPai
 func validateRetries(retries map[string]int, declaredPairs resultPairSet) error {
 	for key, retryCount := range retries {
 		if retryCount < 0 {
-			return stableerr.Errorf("retry key %q has negative retry count %d; retry counts must be >= 0", key, retryCount)
+			return fmt.Errorf("retry key %q has negative retry count %d; retry counts must be >= 0", key, retryCount)
 		}
 
 		if _, ok := declaredPairs[key]; !ok {
-			return stableerr.Errorf("retry key %q is not declared in workflow allowed_results; allowed pairs: %s", key, formatStringSet(declaredPairs))
+			return fmt.Errorf("retry key %q is not declared in workflow allowed_results; allowed pairs: %s", key, formatStringSet(declaredPairs))
 		}
 	}
 
@@ -965,11 +963,11 @@ func validateRetries(retries map[string]int, declaredPairs resultPairSet) error 
 
 func validateTaskContext(taskContext TaskContext) error {
 	if _, ok := allowedTaskContextBeads[taskContext.Beads]; !ok {
-		return stableerr.Errorf("task_context.beads %q is invalid; allowed: %s", taskContext.Beads, formatStringSet(allowedTaskContextBeads))
+		return fmt.Errorf("task_context.beads %q is invalid; allowed: %s", taskContext.Beads, formatStringSet(allowedTaskContextBeads))
 	}
 
 	if !taskContext.MarkdownFallback.Set {
-		return stableerr.New("task_context.markdown_fallback is required")
+		return errors.New("task_context.markdown_fallback is required")
 	}
 
 	return nil
@@ -978,13 +976,13 @@ func validateTaskContext(taskContext TaskContext) error {
 func validateVCSPolicy(policy VCSPolicy) error {
 	if value := policy.DirtyStart; value != "" {
 		if _, ok := allowedDirtyStartPolicies[value]; !ok {
-			return stableerr.Errorf("vcs.dirty_start %q is invalid; allowed: %s", value, formatStringSet(allowedDirtyStartPolicies))
+			return fmt.Errorf("vcs.dirty_start %q is invalid; allowed: %s", value, formatStringSet(allowedDirtyStartPolicies))
 		}
 	}
 
 	if value := policy.NoVCS; value != "" {
 		if _, ok := allowedNoVCSPolicies[value]; !ok {
-			return stableerr.Errorf("vcs.no_vcs %q is invalid; allowed: %s", value, formatStringSet(allowedNoVCSPolicies))
+			return fmt.Errorf("vcs.no_vcs %q is invalid; allowed: %s", value, formatStringSet(allowedNoVCSPolicies))
 		}
 	}
 
@@ -1005,7 +1003,7 @@ func validateDefaults(defaults Defaults) error {
 	}
 
 	if defaults.Retries == nil {
-		return stableerr.New("defaults.retries is required")
+		return errors.New("defaults.retries is required")
 	}
 
 	for i, dir := range defaults.RuntimeDirs {
@@ -1019,16 +1017,16 @@ func validateDefaults(defaults Defaults) error {
 
 func validateRuntimeDirPath(name, value string) error {
 	if value == "" {
-		return stableerr.Errorf("%s is empty", name)
+		return fmt.Errorf("%s is empty", name)
 	}
 
 	if strings.HasPrefix(value, "~") || strings.ContainsAny(value, "$`") {
-		return stableerr.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
 	}
 
 	clean := filepath.Clean(value)
 	if clean != value {
-		return stableerr.Errorf("%s %q must be clean", name, value)
+		return fmt.Errorf("%s %q must be clean", name, value)
 	}
 
 	if filepath.IsAbs(value) {
@@ -1036,7 +1034,7 @@ func validateRuntimeDirPath(name, value string) error {
 	}
 
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return stableerr.Errorf("%s %q must be repo-relative or absolute and stay under repository root", name, value)
+		return fmt.Errorf("%s %q must be repo-relative or absolute and stay under repository root", name, value)
 	}
 
 	return nil
@@ -1044,11 +1042,11 @@ func validateRuntimeDirPath(name, value string) error {
 
 func validatePositiveDuration(name string, value Duration) error {
 	if !value.Set {
-		return stableerr.Errorf("%s is required", name)
+		return fmt.Errorf("%s is required", name)
 	}
 
 	if value.Duration <= 0 {
-		return stableerr.Errorf("%s must be > 0, got %s", name, value.Duration)
+		return fmt.Errorf("%s must be > 0, got %s", name, value.Duration)
 	}
 
 	return nil
@@ -1056,11 +1054,11 @@ func validatePositiveDuration(name string, value Duration) error {
 
 func validateLoopCapsConfig(name string, caps LoopCapsConfig) error {
 	if caps.Soft.Set && caps.Soft.Value < 0 {
-		return stableerr.Errorf("%s.soft must be >= 0, got %d", name, caps.Soft.Value)
+		return fmt.Errorf("%s.soft must be >= 0, got %d", name, caps.Soft.Value)
 	}
 
 	if caps.Hard.Set && caps.Hard.Value < 0 {
-		return stableerr.Errorf("%s.hard must be >= 0, got %d", name, caps.Hard.Value)
+		return fmt.Errorf("%s.hard must be >= 0, got %d", name, caps.Hard.Value)
 	}
 
 	return nil
@@ -1072,15 +1070,15 @@ func validateEffectiveLoopCaps(name string, caps EffectiveLoopCaps) error {
 	}
 
 	if caps.Soft <= 0 {
-		return stableerr.Errorf("%s.soft must be > 0 when enabled, got %d", name, caps.Soft)
+		return fmt.Errorf("%s.soft must be > 0 when enabled, got %d", name, caps.Soft)
 	}
 
 	if caps.Hard <= 0 {
-		return stableerr.Errorf("%s.hard must be > 0 when enabled, got %d", name, caps.Hard)
+		return fmt.Errorf("%s.hard must be > 0 when enabled, got %d", name, caps.Hard)
 	}
 
 	if caps.Hard <= caps.Soft {
-		return stableerr.Errorf("%s.hard must be greater than soft when enabled, got hard=%d soft=%d", name, caps.Hard, caps.Soft)
+		return fmt.Errorf("%s.hard must be greater than soft when enabled, got hard=%d soft=%d", name, caps.Hard, caps.Soft)
 	}
 
 	return nil

@@ -11,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const (
@@ -45,11 +43,11 @@ type Options struct {
 // Run creates or previews the Tiny Orc project scaffold.
 func Run(opts Options) error {
 	if opts.Root == "" {
-		return stableerr.New("project root is required")
+		return errors.New("project root is required")
 	}
 
 	if opts.DryRun && opts.Yes {
-		return stableerr.New("--dry-run and --yes cannot be used together")
+		return errors.New("--dry-run and --yes cannot be used together")
 	}
 
 	if opts.Stdout == nil {
@@ -199,7 +197,7 @@ func (r runner) planFile(item scaffoldFile) (plannedAction, error) {
 		}
 
 		if r.yes {
-			return plannedAction{}, stableerr.Errorf("%s already exists with different content; rerun without --yes to review the overwrite prompt", item.path)
+			return plannedAction{}, fmt.Errorf("%s already exists with different content; rerun without --yes to review the overwrite prompt", item.path)
 		}
 
 		ok, err := r.confirm("Overwrite " + item.path + "?")
@@ -257,7 +255,7 @@ func (r runner) planGitignore() (plannedAction, error) {
 	case targetExists:
 		analysis := analyzeIgnoreContent(string(target.content), runsIgnoreEntry)
 		if analysis.hasBroadOrcIgnore {
-			return plannedAction{}, stableerr.Errorf("%s ignores all persistent .orc config with %q; replace it with %s and rerun init", gitignoreName, analysis.broadPattern, runsIgnoreEntry)
+			return plannedAction{}, fmt.Errorf("%s ignores all persistent .orc config with %q; replace it with %s and rerun init", gitignoreName, analysis.broadPattern, runsIgnoreEntry)
 		}
 
 		if analysis.hasRunsEntry {
@@ -307,7 +305,7 @@ func (r runner) planRuntimeDir() (plannedAction, error) {
 	switch {
 	case err == nil:
 		if !info.IsDir() {
-			return plannedAction{}, stableerr.Errorf("%s already exists and is not a directory", runsDirPath)
+			return plannedAction{}, fmt.Errorf("%s already exists and is not a directory", runsDirPath)
 		}
 
 		return noopAction("exists", runsDirPath), nil
@@ -406,7 +404,7 @@ func writeNewFile(path string, content []byte) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePermPrivate) // #nosec G304 -- path is resolved under the selected project root.
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return stableerr.Errorf("%s changed during init; rerun init", path)
+			return fmt.Errorf("%s changed during init; rerun init", path)
 		}
 
 		return fmt.Errorf("write new file: %w", err)
@@ -431,7 +429,7 @@ func writeFileIfUnchanged(path string, expected, next []byte) error {
 	}
 
 	if !bytes.Equal(current, expected) {
-		return stableerr.Errorf("%s changed during init; rerun init", path)
+		return fmt.Errorf("%s changed during init; rerun init", path)
 	}
 
 	if err := os.WriteFile(path, next, filePermPrivate); err != nil { // #nosec G703 -- path is resolved under the selected project root.
@@ -528,7 +526,7 @@ func (r runner) targetPath(relPath string) (string, error) {
 func cleanScaffoldPath(relPath string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(relPath))
 	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
-		return "", stableerr.Errorf("scaffold path %q must stay under project root", relPath)
+		return "", fmt.Errorf("scaffold path %q must stay under project root", relPath)
 	}
 
 	return clean, nil
@@ -604,7 +602,7 @@ func validateExistingAncestor(realRoot, containmentRoot, target string) error {
 
 		next := filepath.Dir(ancestor)
 		if next == ancestor {
-			return stableerr.Errorf("no existing ancestor for %s", target)
+			return fmt.Errorf("no existing ancestor for %s", target)
 		}
 
 		ancestor = next
@@ -644,7 +642,7 @@ func validateUnderRoot(realRoot, path string) error {
 	}
 
 	if rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return stableerr.New("path must not escape project root")
+		return errors.New("path must not escape project root")
 	}
 
 	return nil

@@ -20,7 +20,7 @@ func TestSkipPersistsAuditedTransition(t *testing.T) {
 	root := writeSkipProject(t, true, runskipStepReview, "")
 	store := openSkipStore(t, root)
 
-	run, err := store.Create(runstore.CreateRunRequest{RunID: "skip-ok", Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "skip-ok", Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestSkipConsumesPriorOutcomeWhenSelectedStepCameFromRouting(t *testing.T) {
 	root := writeSkipRoutingProject(t)
 	store := openSkipStore(t, root)
 
-	run, err := store.Create(runstore.CreateRunRequest{RunID: "skip-routed-step", Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: "skip-routed-step", Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestSkipConsumesPriorOutcomeWhenSelectedStepCameFromRouting(t *testing.T) {
 	writeSkipConfigSnapshot(t, root, store, run.ID)
 	recordReportedAttempt(t, store, run.ID, "plan-attempt", runskipStepPlan, runskipAgentPlanner, "done", "ready")
 
-	before, err := store.Load(run.ID)
+	before, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load before returned error: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestSkipConsumesPriorOutcomeWhenSelectedStepCameFromRouting(t *testing.T) {
 		t.Fatalf("workflow state = %+v, want selected code with no pending outcome", state)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load after returned error: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 			setup: func(t *testing.T, store *runstore.Store, runID string) {
 				t.Helper()
 
-				if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+				if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 					StepID:          runskipStepPlan,
 					AgentID:         runskipAgentPlanner,
 					AttemptID:       "attempt-active",
@@ -159,7 +159,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 			setup: func(t *testing.T, store *runstore.Store, runID string) {
 				t.Helper()
 
-				if _, _, err := store.UpdateStatus(runID, runstore.StatusUpdate{State: "ready_for_human"}); err != nil {
+				if _, _, err := store.UpdateStatusContext(context.Background(), runID, runstore.StatusUpdate{State: "ready_for_human"}); err != nil {
 					t.Fatalf("UpdateStatus returned error: %v", err)
 				}
 			},
@@ -176,7 +176,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 			root := writeSkipProject(t, true, runskipStepReview, "failed/error: 1")
 			store := openSkipStore(t, root)
 
-			run, err := store.Create(runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+			run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
 			if err != nil {
 				t.Fatalf("Create returned error: %v", err)
 			}
@@ -184,7 +184,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 			writeSkipConfigSnapshot(t, root, store, run.ID)
 			tt.setup(t, store, run.ID)
 
-			before, err := store.Load(run.ID)
+			before, err := store.LoadContext(context.Background(), run.ID)
 			if err != nil {
 				t.Fatalf("Load before returned error: %v", err)
 			}
@@ -194,7 +194,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 				t.Fatalf("Skip error = %v, want containing %q", err, tt.want)
 			}
 
-			after, err := store.Load(run.ID)
+			after, err := store.LoadContext(context.Background(), run.ID)
 			if err != nil {
 				t.Fatalf("Load after returned error: %v", err)
 			}
@@ -209,7 +209,7 @@ func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 func setupRetryDecisionForSkipRejection(t *testing.T, store *runstore.Store, runID string) {
 	t.Helper()
 
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          runskipStepPlan,
 		AgentID:         runskipAgentPlanner,
 		AttemptID:       runskipAttemptRetry,
@@ -220,16 +220,16 @@ func setupRetryDecisionForSkipRejection(t *testing.T, store *runstore.Store, run
 	}
 
 	promptRef := writeSkipTestArtifact(t, store, runID, runstore.KindPrompt, "prompt\n")
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{AttemptID: runskipAttemptRetry, PromptRef: promptRef}); err != nil {
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{AttemptID: runskipAttemptRetry, PromptRef: promptRef}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
 	logRef := writeSkipTestArtifact(t, store, runID, runstore.KindLog, "log\n")
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{AttemptID: runskipAttemptRetry, LogRef: logRef}); err != nil {
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{AttemptID: runskipAttemptRetry, LogRef: logRef}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        runskipAttemptRetry,
 		PID:              123,
 		ProcessStartTime: "123456789",
@@ -243,7 +243,7 @@ func setupRetryDecisionForSkipRejection(t *testing.T, store *runstore.Store, run
 func writeSkipTestArtifact(t *testing.T, store *runstore.Store, runID string, kind runstore.ArtifactKind, content string) runstore.ArtifactRef {
 	t.Helper()
 
-	ref, err := store.WriteArtifact(runID, runstore.Artifact{Kind: kind, Name: runskipStepPlan, Content: []byte(content)})
+	ref, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{Kind: kind, Name: runskipStepPlan, Content: []byte(content)})
 	if err != nil {
 		t.Fatalf("WriteArtifact %s returned error: %v", kind, err)
 	}
@@ -254,7 +254,7 @@ func writeSkipTestArtifact(t *testing.T, store *runstore.Store, runID string, ki
 func recordRetryReport(t *testing.T, store *runstore.Store, runID string) {
 	t.Helper()
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		Report: runstore.Report{
 			RunID:     runID,
 			StepID:    runskipStepPlan,
@@ -287,7 +287,7 @@ func TestSkipRejectsWrongStepNonSkippableAndBlankReason(t *testing.T) {
 			root := writeSkipProject(t, tt.skippable, runskipStepReview, "")
 			store := openSkipStore(t, root)
 
-			run, err := store.Create(runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
+			run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{RunID: strings.ReplaceAll(tt.name, " ", "-"), Workflow: runskipWorkflowImplementation, InitialState: runskipStepPlan})
 			if err != nil {
 				t.Fatalf("Create returned error: %v", err)
 			}
@@ -299,7 +299,7 @@ func TestSkipRejectsWrongStepNonSkippableAndBlankReason(t *testing.T) {
 				t.Fatalf("Skip error = %v, want containing %q", err, tt.want)
 			}
 
-			loaded, err := store.Load(run.ID)
+			loaded, err := store.LoadContext(context.Background(), run.ID)
 			if err != nil {
 				t.Fatalf("Load returned error: %v", err)
 			}
@@ -324,7 +324,7 @@ func writeSkipConfigSnapshot(t *testing.T, root string, store *runstore.Store, r
 		t.Fatalf("BuildInitial returned error: %v", err)
 	}
 
-	if err := store.WriteInitialConfigSnapshot(runID, snapshot); err != nil {
+	if err := store.WriteInitialConfigSnapshotContext(context.Background(), runID, snapshot); err != nil {
 		t.Fatalf("WriteInitialConfigSnapshot returned error: %v", err)
 	}
 }
@@ -332,7 +332,7 @@ func writeSkipConfigSnapshot(t *testing.T, root string, store *runstore.Store, r
 func recordReportedAttempt(t *testing.T, store *runstore.Store, runID, attemptID, stepID, agentID, status, result string) {
 	t.Helper()
 
-	if _, _, err := store.StartAttempt(runID, runstore.StartAttemptRequest{
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, runstore.StartAttemptRequest{
 		StepID:          stepID,
 		AgentID:         agentID,
 		AttemptID:       attemptID,
@@ -342,25 +342,25 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID, attemptID
 		t.Fatalf("StartAttempt returned error: %v", err)
 	}
 
-	promptRef, err := store.WriteArtifact(runID, runstore.Artifact{Kind: runstore.KindPrompt, Name: stepID, Content: []byte("prompt\n")})
+	promptRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{Kind: runstore.KindPrompt, Name: stepID, Content: []byte("prompt\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact prompt returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptPrompt(runID, runstore.AttemptPromptRequest{AttemptID: attemptID, PromptRef: promptRef}); err != nil {
+	if _, _, err := store.RecordAttemptPromptContext(context.Background(), runID, runstore.AttemptPromptRequest{AttemptID: attemptID, PromptRef: promptRef}); err != nil {
 		t.Fatalf("RecordAttemptPrompt returned error: %v", err)
 	}
 
-	logRef, err := store.WriteArtifact(runID, runstore.Artifact{Kind: runstore.KindLog, Name: stepID, Content: []byte("log\n")})
+	logRef, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{Kind: runstore.KindLog, Name: stepID, Content: []byte("log\n")})
 	if err != nil {
 		t.Fatalf("WriteArtifact log returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptLog(runID, runstore.AttemptLogRequest{AttemptID: attemptID, LogRef: logRef}); err != nil {
+	if _, _, err := store.RecordAttemptLogContext(context.Background(), runID, runstore.AttemptLogRequest{AttemptID: attemptID, LogRef: logRef}); err != nil {
 		t.Fatalf("RecordAttemptLog returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptProcess(runID, runstore.AttemptProcessRequest{
+	if _, _, err := store.RecordAttemptProcessContext(context.Background(), runID, runstore.AttemptProcessRequest{
 		AttemptID:        attemptID,
 		PID:              123,
 		ProcessStartTime: "123456789",
@@ -368,7 +368,7 @@ func recordReportedAttempt(t *testing.T, store *runstore.Store, runID, attemptID
 		t.Fatalf("RecordAttemptProcess returned error: %v", err)
 	}
 
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		Report: runstore.Report{
 			RunID:     runID,
 			StepID:    stepID,

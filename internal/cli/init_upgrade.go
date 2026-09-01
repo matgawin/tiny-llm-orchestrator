@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"tiny-llm-orchestrator/orc/internal/initupgrade"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 type initUpgradeOptions struct {
@@ -74,7 +73,7 @@ func newInitUpgradeCommand(stdout, stderr io.Writer) *cobra.Command {
 				return nil
 			}
 
-			return initUpgradeFlagError(cmd, stderr, stableerr.Errorf("unexpected argument %q", args[0]))
+			return initUpgradeFlagError(cmd, stderr, fmt.Errorf("unexpected argument %q", args[0]))
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executeInitUpgrade(opts, stdout, stderr)
@@ -166,7 +165,7 @@ func refuseInitUpgradeApplyConflicts(opts initUpgradeOptions, stdout, stderr io.
 		return fmt.Errorf("execute init upgrade: %w", writeErr)
 	}
 
-	return stableerr.New("init upgrade apply detected conflicts")
+	return errors.New("init upgrade apply detected conflicts")
 }
 
 func handleInitUpgradeApplyConflicts(opts initUpgradeOptions, stdout, stderr io.Writer, plan *initupgrade.Result, applied *initupgrade.ApplyResult, conflicts []initupgrade.Conflict) error {
@@ -192,7 +191,7 @@ func handleInitUpgradeApplyConflicts(opts initUpgradeOptions, stdout, stderr io.
 		return fmt.Errorf("execute init upgrade: %w", writeErr)
 	}
 
-	return stableerr.New("init upgrade apply completed with unresolved conflicts")
+	return errors.New("init upgrade apply completed with unresolved conflicts")
 }
 
 func encodeInitUpgradeJSON(stdout io.Writer, payload initUpgradeJSON) error {

@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ func TestCreateRunCreatesInitialArtifacts(t *testing.T) {
 	store := openStore(t, root)
 	now := time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC)
 
-	run, err := store.Create(CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{
 		Workflow: testWorkflowName,
 		TaskSlug: "main-997",
 		Time:     now,
@@ -61,7 +62,7 @@ func TestCreateRunPersistsInitialWorkflowStateEntry(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	now := time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC)
 
-	run, err := store.Create(CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{
 		RunID:        "loop-run",
 		Workflow:     testWorkflowName,
 		InitialState: testWorkflowStateCode,
@@ -95,7 +96,7 @@ func TestCreateRunPersistsInitialWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("payload entry = %+v, want %+v", payload.WorkflowStateEntry, entry)
 	}
 
-	loaded, err := store.Load(run.ID)
+	loaded, err := store.LoadContext(context.Background(), run.ID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -109,11 +110,11 @@ func TestCreateRunRejectsExplicitIDCollision(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
 	req := CreateRunRequest{RunID: testManualRunID, Workflow: testWorkflowName}
-	if _, err := store.Create(req); err != nil {
+	if _, err := store.CreateContext(context.Background(), req); err != nil {
 		t.Fatalf("first Create returned error: %v", err)
 	}
 
-	_, err := store.Create(req)
+	_, err := store.CreateContext(context.Background(), req)
 	requireErrorContains(t, err, "already exists")
 }
 
@@ -125,7 +126,7 @@ func TestCreateRunRejectsExplicitIDEmptyDirectoryCollision(t *testing.T) {
 		t.Fatalf("create empty run directory collision: %v", err)
 	}
 
-	_, err := store.Create(CreateRunRequest{RunID: testManualRunID, Workflow: testWorkflowName})
+	_, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: testManualRunID, Workflow: testWorkflowName})
 	requireErrorContains(t, err, "already exists")
 }
 
@@ -140,7 +141,7 @@ func TestCreateRunExplicitIDConcurrentCollision(t *testing.T) {
 		wg.Go(func() {
 			<-start
 
-			_, err := store.Create(req)
+			_, err := store.CreateContext(context.Background(), req)
 			errs <- err
 		})
 	}
@@ -169,7 +170,7 @@ func TestCreateRunExplicitIDConcurrentCollision(t *testing.T) {
 		t.Fatalf("Create results = %d successes %d failures, want one of each", successes, failures)
 	}
 
-	if _, err := store.Load(req.RunID); err != nil {
+	if _, err := store.LoadContext(context.Background(), req.RunID); err != nil {
 		t.Fatalf("Load returned error after concurrent create: %v", err)
 	}
 }
@@ -177,7 +178,7 @@ func TestCreateRunExplicitIDConcurrentCollision(t *testing.T) {
 func TestCreateRunIDSlugFallbackAndTruncation(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{
 		Workflow: "Implementation!!! Workflow",
 		TaskSlug: "!!!",
 		Time:     time.Date(2026, 5, 2, 14, 30, 22, 0, time.UTC),
@@ -190,7 +191,7 @@ func TestCreateRunIDSlugFallbackAndTruncation(t *testing.T) {
 		t.Fatalf("run id %q did not use sanitized workflow and task fallback", run.ID)
 	}
 
-	longRun, err := store.Create(CreateRunRequest{
+	longRun, err := store.CreateContext(context.Background(), CreateRunRequest{
 		Workflow: strings.Repeat("a", 80),
 		TaskSlug: testTaskSlug,
 		Time:     time.Date(2026, 5, 2, 14, 31, 22, 0, time.UTC),
@@ -208,7 +209,7 @@ func TestCreateRunIDSlugFallbackAndTruncation(t *testing.T) {
 func TestCreateRejectsUnsluggableWorkflowForGeneratedRunID(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	_, err := store.Create(CreateRunRequest{Workflow: "!!!", TaskSlug: "main-997"})
+	_, err := store.CreateContext(context.Background(), CreateRunRequest{Workflow: "!!!", TaskSlug: "main-997"})
 	requireErrorContains(t, err, "workflow slug")
 }
 
@@ -216,7 +217,7 @@ func TestCreateRejectsInvalidExplicitRunIDs(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	for _, id := range []string{".", "..", "a/b", `a\b`, "has space"} {
 		t.Run(id, func(t *testing.T) {
-			_, err := store.Create(CreateRunRequest{RunID: id, Workflow: testWorkflowName})
+			_, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: id, Workflow: testWorkflowName})
 			requireErrorContains(t, err)
 		})
 	}
@@ -225,7 +226,7 @@ func TestCreateRejectsInvalidExplicitRunIDs(t *testing.T) {
 func TestCreateGeneratesRunIDWhenExplicitIDEmpty(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.Create(CreateRunRequest{RunID: "", Workflow: testWorkflowName})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "", Workflow: testWorkflowName})
 	if err != nil {
 		t.Fatalf("Create with empty id returned error: %v", err)
 	}
@@ -276,7 +277,7 @@ func TestCreateRejectsSymlinkedStoreParents(t *testing.T) {
 			tc.setup(t, root)
 			store := openStore(t, root)
 
-			_, err := store.Create(CreateRunRequest{RunID: "parent-symlink", Workflow: testWorkflowName})
+			_, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "parent-symlink", Workflow: testWorkflowName})
 			requireErrorContains(t, err, "symlink")
 		})
 	}

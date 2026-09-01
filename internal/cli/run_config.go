@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"tiny-llm-orchestrator/orc/internal/runinspect"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func executeRunConfig(args []string, stdout, stderr io.Writer) error {
@@ -16,7 +15,7 @@ func executeRunConfig(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("execute run config: %w", err)
 		}
 
-		return stableerr.Errorf("run config requires run id")
+		return fmt.Errorf("run config requires run id")
 	}
 
 	root, err := os.Getwd()

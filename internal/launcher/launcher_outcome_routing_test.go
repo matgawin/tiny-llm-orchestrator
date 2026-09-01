@@ -82,7 +82,7 @@ func TestLaunchNextRetriesResolvedHumanBlockAfterReload(t *testing.T) {
 		t.Fatalf("retry step = %q, want %q", retry.Attempt.StepID, first.Attempt.StepID)
 	}
 
-	loaded, err := store.Load(runID)
+	loaded, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	store := openLauncherStore(t, root)
 
 	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-plan", launcherPlanStep, launcherAgentPlanner)
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -242,7 +242,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 		t.Fatalf("attempt state = %q, want synthesized missing_report after code worker exits", result.Attempt.State)
 	}
 
-	loaded, err := store.Load(runID)
+	loaded, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 	store := openLauncherStore(t, root)
 
 	attempt := seedProcessedLauncherAttempt(t, store, runID, "reported-retry", launcherPlanStep, launcherAgentPlanner)
-	if _, _, err := store.RecordAttemptReport(runID, runstore.RecordReportRequest{
+	if _, _, err := store.RecordAttemptReportContext(context.Background(), runID, runstore.RecordReportRequest{
 		State: runstore.AttemptStateReported,
 		Report: runstore.Report{
 			RunID:     runID,
@@ -294,7 +294,7 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 
 	assertRetryLaunch(t, root, runID, attempt.AttemptID, result.Attempt, "done/ready", 1)
 
-	loaded, err := store.Load(runID)
+	loaded, err := store.LoadContext(context.Background(), runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}

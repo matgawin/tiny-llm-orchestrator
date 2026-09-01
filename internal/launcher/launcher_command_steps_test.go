@@ -146,7 +146,7 @@ func TestLaunchNextRoutesFailingCommandStepBackToCode(t *testing.T) {
 		t.Fatalf("summary = %q, want stderr tail", result.Attempt.Report.Summary)
 	}
 
-	loaded, err := runcontext.Load(root, runID)
+	loaded, err := runcontext.LoadContext(context.Background(), root, runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestLaunchNextUndeclaredCommandOutcomePersistsOriginalConfigError(t *testin
 		t.Fatalf("report = %+v, want original generated outcome report", result.Attempt.Report)
 	}
 
-	loaded, err := runcontext.Load(root, runID)
+	loaded, err := runcontext.LoadContext(context.Background(), root, runID)
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}

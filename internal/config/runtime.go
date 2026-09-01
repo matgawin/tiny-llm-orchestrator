@@ -1,13 +1,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -90,7 +89,7 @@ func validateRuntime(runtime Runtime) error {
 	}
 
 	if runtime.Prompt.Delivery != runtimePromptDeliveryStdin && runtime.Prompt.Delivery != runtimePromptDeliveryFile {
-		return stableerr.Errorf("prompt.delivery %q is invalid; allowed: stdin, file", runtime.Prompt.Delivery)
+		return fmt.Errorf("prompt.delivery %q is invalid; allowed: stdin, file", runtime.Prompt.Delivery)
 	}
 
 	if err := validateRuntimeModel(runtime); err != nil {
@@ -114,11 +113,11 @@ func validateRuntime(runtime Runtime) error {
 
 func validateConfigID(name, id string) error {
 	if id == "" {
-		return stableerr.Errorf("%s is required", name)
+		return fmt.Errorf("%s is required", name)
 	}
 
 	if !configIDPattern.MatchString(id) {
-		return stableerr.Errorf("%s %q is invalid; must match %s", name, id, configIDPattern.String())
+		return fmt.Errorf("%s %q is invalid; must match %s", name, id, configIDPattern.String())
 	}
 
 	return nil
@@ -126,11 +125,11 @@ func validateConfigID(name, id string) error {
 
 func validateRuntimeExecutable(runtime Runtime) error {
 	if runtime.Command.Executable == "" {
-		return stableerr.New("is required")
+		return errors.New("is required")
 	}
 
 	if strings.Contains(runtime.Command.Executable, "{") || strings.Contains(runtime.Command.Executable, "}") {
-		return stableerr.New("must not contain placeholders")
+		return errors.New("must not contain placeholders")
 	}
 
 	return nil
@@ -174,13 +173,13 @@ func validateRuntimeSelection(runtime Runtime, selection runtimeSelectionValidat
 	if !selection.supported {
 		switch {
 		case selection.required:
-			return stableerr.Errorf("%s.required requires %s.supported=true", selection.name, selection.name)
+			return fmt.Errorf("%s.required requires %s.supported=true", selection.name, selection.name)
 		case selection.defaultName != "":
-			return stableerr.Errorf("%s.default requires %s.supported=true", selection.name, selection.name)
+			return fmt.Errorf("%s.default requires %s.supported=true", selection.name, selection.name)
 		case len(selection.allowed) > 0:
-			return stableerr.Errorf("%s.allowed requires %s.supported=true", selection.name, selection.name)
+			return fmt.Errorf("%s.allowed requires %s.supported=true", selection.name, selection.name)
 		case len(selection.args) > 0:
-			return stableerr.Errorf("%s.args requires %s.supported=true", selection.name, selection.name)
+			return fmt.Errorf("%s.args requires %s.supported=true", selection.name, selection.name)
 		}
 
 		return nil
@@ -191,7 +190,7 @@ func validateRuntimeSelection(runtime Runtime, selection runtimeSelectionValidat
 	}
 
 	if len(selection.allowed) > 0 && selection.defaultName != "" && !slices.Contains(selection.allowed, selection.defaultName) {
-		return stableerr.Errorf("%s.default %q is not allowed by %s.allowed", selection.name, selection.defaultName, selection.name)
+		return fmt.Errorf("%s.default %q is not allowed by %s.allowed", selection.name, selection.defaultName, selection.name)
 	}
 
 	return validateRuntimeArgv(selection.name+".args", selection.args, runtime, selection.placeholder)
@@ -200,7 +199,7 @@ func validateRuntimeSelection(runtime Runtime, selection runtimeSelectionValidat
 func validateRuntimeDirectories(runtime Runtime) error {
 	if !runtime.Directories.Supported {
 		if len(runtime.Directories.Args) > 0 {
-			return stableerr.New("directories.args requires directories.supported=true")
+			return errors.New("directories.args requires directories.supported=true")
 		}
 
 		return nil
@@ -211,11 +210,11 @@ func validateRuntimeDirectories(runtime Runtime) error {
 	}
 
 	if len(runtime.Directories.Args) == 0 {
-		return stableerr.New("directories.args must include {dir} when directories.supported=true")
+		return errors.New("directories.args must include {dir} when directories.supported=true")
 	}
 
 	if !argvContainsPlaceholder(runtime.Directories.Args, "{dir}") {
-		return stableerr.New("directories.args must include {dir} when directories.supported=true")
+		return errors.New("directories.args must include {dir} when directories.supported=true")
 	}
 
 	return nil
@@ -223,7 +222,7 @@ func validateRuntimeDirectories(runtime Runtime) error {
 
 func validateRuntimeSandbox(runtime Runtime) error {
 	if runtime.Sandbox.Required && !runtime.Sandbox.Supported {
-		return stableerr.New("sandbox.required requires sandbox.supported=true")
+		return errors.New("sandbox.required requires sandbox.supported=true")
 	}
 
 	if err := validateRuntimeSandboxEnvConfig(runtime.Sandbox.Requirements.Env); err != nil {
@@ -243,15 +242,15 @@ func validateRuntimeSandbox(runtime Runtime) error {
 		}
 
 		if ref.Mount == "" {
-			return stableerr.Errorf("sandbox.requirements.env.set_from_mount[%q].mount is required", name)
+			return fmt.Errorf("sandbox.requirements.env.set_from_mount[%q].mount is required", name)
 		}
 
 		if _, ok := mountIDs[ref.Mount]; !ok {
-			return stableerr.Errorf("sandbox.requirements.env.set_from_mount[%q].mount %q does not reference a sandbox.requirements.mounts id", name, ref.Mount)
+			return fmt.Errorf("sandbox.requirements.env.set_from_mount[%q].mount %q does not reference a sandbox.requirements.mounts id", name, ref.Mount)
 		}
 
 		if ref.Value != "target" {
-			return stableerr.Errorf("sandbox.requirements.env.set_from_mount[%q].value %q is invalid; allowed: target", name, ref.Value)
+			return fmt.Errorf("sandbox.requirements.env.set_from_mount[%q].value %q is invalid; allowed: target", name, ref.Value)
 		}
 	}
 
@@ -280,22 +279,22 @@ func validateRuntimeSandboxMount(index int, mount RuntimeSandboxMount, mountIDs 
 		}
 
 		if _, ok := mountIDs[mount.ID]; ok {
-			return stableerr.Errorf("%s.id %q duplicates another sandbox.requirements.mounts id", name, mount.ID)
+			return fmt.Errorf("%s.id %q duplicates another sandbox.requirements.mounts id", name, mount.ID)
 		}
 
 		mountIDs[mount.ID] = struct{}{}
 	}
 
 	if mount.Mode != sandboxMountModeRO && mount.Mode != sandboxMountModeRW {
-		return stableerr.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
+		return fmt.Errorf("%s.mode %q is invalid; allowed: ro, rw", name, mount.Mode)
 	}
 
 	hasSource := runtimeMountHasSource(mount.Source)
 	switch {
 	case mount.Host != "" && hasSource:
-		return stableerr.Errorf("%s must not combine simple host with extended source", name)
+		return fmt.Errorf("%s must not combine simple host with extended source", name)
 	case mount.Host == "" && !hasSource:
-		return stableerr.Errorf("%s.host is required", name)
+		return fmt.Errorf("%s.host is required", name)
 	case mount.Host != "":
 		return validateRuntimeSimpleSandboxMount(name, mount)
 	default:
@@ -309,11 +308,11 @@ func validateRuntimeSimpleSandboxMount(name string, mount RuntimeSandboxMount) e
 	}
 
 	if mount.Target.Path == "" {
-		return stableerr.Errorf("%s.target is required", name)
+		return fmt.Errorf("%s.target is required", name)
 	}
 
 	if runtimeMountHasStructuredTarget(mount.Target) {
-		return stableerr.Errorf("%s.target must use either simple path or extended target fields, not both", name)
+		return fmt.Errorf("%s.target must use either simple path or extended target fields, not both", name)
 	}
 
 	if err := validateSandboxMountTarget("", SandboxHomeModeSynthetic, mount.Target.Path); err != nil {
@@ -325,11 +324,11 @@ func validateRuntimeSimpleSandboxMount(name string, mount RuntimeSandboxMount) e
 
 func validateRuntimeExtendedSandboxMount(name string, mount RuntimeSandboxMount) error {
 	if mount.Target.Path != "" {
-		return stableerr.Errorf("%s.target must use extended target fields when source is extended", name)
+		return fmt.Errorf("%s.target must use extended target fields when source is extended", name)
 	}
 
 	if mount.Source.Env == "" {
-		return stableerr.Errorf("%s.source.env is required", name)
+		return fmt.Errorf("%s.source.env is required", name)
 	}
 
 	if err := validateSandboxEnvName(mount.Source.Env); err != nil {
@@ -343,19 +342,19 @@ func validateRuntimeExtendedSandboxMount(name string, mount RuntimeSandboxMount)
 	}
 
 	if !mount.Target.EnvSameAsSource {
-		return stableerr.Errorf("%s.target.env_same_as_source must be true for env-sourced mounts", name)
+		return fmt.Errorf("%s.target.env_same_as_source must be true for env-sourced mounts", name)
 	}
 
 	if mount.Source.Fallback.HostHome != "" {
 		if mount.Target.Fallback.SandboxHome == "" {
-			return stableerr.Errorf("%s.target.fallback.sandbox_home is required when source.fallback.host_home is set", name)
+			return fmt.Errorf("%s.target.fallback.sandbox_home is required when source.fallback.host_home is set", name)
 		}
 
 		if err := validateCleanRelativeNoExpansion(name+".target.fallback.sandbox_home", mount.Target.Fallback.SandboxHome); err != nil {
 			return err
 		}
 	} else if mount.Target.Fallback.SandboxHome != "" {
-		return stableerr.Errorf("%s.target.fallback.sandbox_home requires source.fallback.host_home", name)
+		return fmt.Errorf("%s.target.fallback.sandbox_home requires source.fallback.host_home", name)
 	}
 
 	return nil
@@ -371,12 +370,12 @@ func runtimeMountHasStructuredTarget(target RuntimeSandboxMountTarget) bool {
 
 func validateRuntimeRequirementHost(name, host string) error {
 	if strings.HasPrefix(host, "~") || strings.ContainsAny(host, "$`") {
-		return stableerr.Errorf("%s %q must not use shell, environment, or tilde expansion", name, host)
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, host)
 	}
 
 	if filepath.IsAbs(host) {
 		if filepath.Clean(host) != host {
-			return stableerr.Errorf("%s %q must be clean", name, host)
+			return fmt.Errorf("%s %q must be clean", name, host)
 		}
 
 		return nil
@@ -384,7 +383,7 @@ func validateRuntimeRequirementHost(name, host string) error {
 
 	clean := filepath.Clean(host)
 	if host != clean || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return stableerr.Errorf("%s %q must be clean and stay under repository root", name, host)
+		return fmt.Errorf("%s %q must be clean and stay under repository root", name, host)
 	}
 
 	return nil
@@ -392,16 +391,16 @@ func validateRuntimeRequirementHost(name, host string) error {
 
 func validateCleanRelativeNoExpansion(name, value string) error {
 	if strings.HasPrefix(value, "~") || strings.ContainsAny(value, "$`") {
-		return stableerr.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
+		return fmt.Errorf("%s %q must not use shell, environment, or tilde expansion", name, value)
 	}
 
 	if filepath.IsAbs(value) {
-		return stableerr.Errorf("%s %q must be relative", name, value)
+		return fmt.Errorf("%s %q must be relative", name, value)
 	}
 
 	clean := filepath.Clean(value)
 	if value != clean || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return stableerr.Errorf("%s %q must be clean and stay under its base directory", name, value)
+		return fmt.Errorf("%s %q must be clean and stay under its base directory", name, value)
 	}
 
 	return nil
@@ -458,7 +457,7 @@ type sandboxRequirementMount struct {
 func (s sandboxRequirementSet) addEnvSet(source string, env map[string]string) error {
 	for name, value := range env {
 		if existing, ok := s.envSet[name]; ok && existing != value {
-			return stableerr.Errorf("%s.%s conflicts with another fixed sandbox environment value for %s", source, name, name)
+			return fmt.Errorf("%s.%s conflicts with another fixed sandbox environment value for %s", source, name, name)
 		}
 
 		s.envSet[name] = value
@@ -509,7 +508,7 @@ func (s sandboxRequirementSet) addStaticMountDescriptor(target string, next sand
 	}
 
 	if existing.host != next.host || existing.mode != next.mode || existing.optional != next.optional {
-		return stableerr.Errorf("%s target %q conflicts with %s target %q", next.source, target, existing.source, target)
+		return fmt.Errorf("%s target %q conflicts with %s target %q", next.source, target, existing.source, target)
 	}
 
 	return nil
@@ -561,7 +560,7 @@ const (
 func validateRuntimeArgv(name string, args []string, runtime Runtime, ctx placeholderContext) error {
 	for i, arg := range args {
 		if arg == "" {
-			return stableerr.Errorf("%s[%d] is empty", name, i)
+			return fmt.Errorf("%s[%d] is empty", name, i)
 		}
 
 		if err := validateRuntimePlaceholders(name, i, arg, runtime, ctx); err != nil {
@@ -578,36 +577,36 @@ func validateRuntimePlaceholders(name string, index int, arg string, runtime Run
 		case "{agent_id}", "{step_id}", "{attempt_id}", "{run_id}":
 		case "{prompt_file}":
 			if runtime.Prompt.Delivery != runtimePromptDeliveryFile {
-				return stableerr.Errorf("%s[%d] placeholder %s requires prompt.delivery=file", name, index, placeholder)
+				return fmt.Errorf("%s[%d] placeholder %s requires prompt.delivery=file", name, index, placeholder)
 			}
 		case "{model}":
 			if !runtime.Model.Supported {
-				return stableerr.Errorf("%s[%d] placeholder %s requires model.supported=true", name, index, placeholder)
+				return fmt.Errorf("%s[%d] placeholder %s requires model.supported=true", name, index, placeholder)
 			}
 
 			if ctx == placeholderContextDirectories || ctx == placeholderContextReasoning {
-				return stableerr.Errorf("%s[%d] placeholder %s is not valid in %s", name, index, placeholder, placeholderContextName(ctx))
+				return fmt.Errorf("%s[%d] placeholder %s is not valid in %s", name, index, placeholder, placeholderContextName(ctx))
 			}
 		case "{reasoning}":
 			if !runtime.Reasoning.Supported {
-				return stableerr.Errorf("%s[%d] placeholder %s requires reasoning.supported=true", name, index, placeholder)
+				return fmt.Errorf("%s[%d] placeholder %s requires reasoning.supported=true", name, index, placeholder)
 			}
 
 			if ctx != placeholderContextReasoning {
-				return stableerr.Errorf("%s[%d] placeholder %s is valid only in reasoning.args", name, index, placeholder)
+				return fmt.Errorf("%s[%d] placeholder %s is valid only in reasoning.args", name, index, placeholder)
 			}
 		case "{dir}":
 			if ctx != placeholderContextDirectories {
-				return stableerr.Errorf("%s[%d] placeholder %s is valid only in directories.args", name, index, placeholder)
+				return fmt.Errorf("%s[%d] placeholder %s is valid only in directories.args", name, index, placeholder)
 			}
 		default:
-			return stableerr.Errorf("%s[%d] contains unknown placeholder %s", name, index, placeholder)
+			return fmt.Errorf("%s[%d] contains unknown placeholder %s", name, index, placeholder)
 		}
 	}
 
 	withoutPlaceholders := argvPlaceholderRegex.ReplaceAllString(arg, "")
 	if strings.ContainsAny(withoutPlaceholders, "{}") {
-		return stableerr.Errorf("%s[%d] contains malformed placeholder syntax", name, index)
+		return fmt.Errorf("%s[%d] contains malformed placeholder syntax", name, index)
 	}
 
 	return nil
@@ -629,7 +628,7 @@ func placeholderContextName(ctx placeholderContext) string {
 func validateStringListNoEmpty(name string, values []string) error {
 	for i, value := range values {
 		if value == "" {
-			return stableerr.Errorf("%s[%d] is empty", name, i)
+			return fmt.Errorf("%s[%d] is empty", name, i)
 		}
 	}
 

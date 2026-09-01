@@ -332,7 +332,7 @@ runtimes:
 
 	store := openLauncherStore(t, root)
 
-	run, err := store.Create(runstore.CreateRunRequest{
+	run, err := store.CreateContext(context.Background(), runstore.CreateRunRequest{
 		RunID:        "custom-runtime-run",
 		Workflow:     launcherWorkflowImplementation,
 		InitialState: launcherCodeStep,
@@ -344,7 +344,7 @@ runtimes:
 
 	writeLauncherConfigSnapshot(t, root, store, run.ID)
 
-	if _, err := store.WriteArtifact(run.ID, runstore.Artifact{
+	if _, err := store.WriteArtifactContext(context.Background(), run.ID, runstore.Artifact{
 		Kind:    runstore.KindTaskContext,
 		Name:    launcherTaskArtifactName,
 		Content: []byte("# Task\n\nLaunch a worker.\n"),

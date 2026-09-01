@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"tiny-llm-orchestrator/orc/internal/runconfigrefresh"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 func executeRunRefreshConfig(args []string, stdout, stderr io.Writer) error {
@@ -16,7 +15,7 @@ func executeRunRefreshConfig(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("execute run refresh config: %w", err)
 		}
 
-		return stableerr.Errorf("run refresh-config requires run id")
+		return fmt.Errorf("run refresh-config requires run id")
 	}
 
 	result, err := runconfigrefresh.Refresh(context.Background(), runconfigrefresh.Options{

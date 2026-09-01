@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -301,7 +302,7 @@ func TestRunAdvanceStopsOnInvalidRunState(t *testing.T) {
 	writeCLIAdvanceCommandProject(t, root, "", "")
 
 	run := executeCLIRunStart(t, root, []string{cliFlagTask, cliTaskMarkdown}, nil)
-	if _, _, err := openCLIStore(t, root).UpdateStatus(run.runID, runstore.StatusUpdate{State: "unknown_run_state"}); err != nil {
+	if _, _, err := openCLIStore(t, root).UpdateStatusContext(context.Background(), run.runID, runstore.StatusUpdate{State: "unknown_run_state"}); err != nil {
 		t.Fatalf("UpdateStatus returned error: %v", err)
 	}
 

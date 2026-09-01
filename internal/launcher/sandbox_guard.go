@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"tiny-llm-orchestrator/orc/internal/config"
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 )
 
 const sandboxWorkerGuardGuidance = "sandbox.require_for_workers is enabled; start the orchestrator with `orc sandbox run` so worker launches inherit the sandbox"
@@ -54,9 +53,9 @@ func verifyWorkerRepoSandbox(root string) error {
 func workerSandboxGuardError(err error) error {
 	switch {
 	case errors.Is(err, errMissingWorkerSandboxMarker):
-		return stableerr.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX=1)")
+		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX=1)")
 	case errors.Is(err, errMissingWorkerSandboxRoot):
-		return stableerr.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX_ROOT)")
+		return errors.New(sandboxWorkerGuardGuidance + " (missing ORC_SANDBOX_ROOT)")
 	default:
 		var invalid workerSandboxRootInvalidError
 		if errors.As(err, &invalid) {
@@ -65,7 +64,7 @@ func workerSandboxGuardError(err error) error {
 
 		var mismatch workerSandboxRootMismatchError
 		if errors.As(err, &mismatch) {
-			return stableerr.Errorf("%s; ORC_SANDBOX_ROOT %q does not match current repo root %q", sandboxWorkerGuardGuidance, mismatch.sandboxRoot, mismatch.currentRoot)
+			return fmt.Errorf("%s; ORC_SANDBOX_ROOT %q does not match current repo root %q", sandboxWorkerGuardGuidance, mismatch.sandboxRoot, mismatch.currentRoot)
 		}
 
 		return err

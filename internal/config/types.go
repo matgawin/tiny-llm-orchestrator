@@ -1,12 +1,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
-
-	"tiny-llm-orchestrator/orc/internal/stableerr"
 
 	"github.com/goccy/go-yaml"
 )
@@ -169,7 +168,7 @@ type SandboxPathConfig struct {
 // SandboxProtectedPath stores one static protected host-path declaration. The
 // host_home and absolute values are syntactic config only; host-dependent
 // resolution belongs to internal/sandbox.
-type SandboxProtectedPath struct { //nolint:recvcheck // YAML requires pointer unmarshal state tracking and value marshal support for slice elements.
+type SandboxProtectedPath struct {
 	HostHome    string `yaml:"host_home" json:"HostHome"`
 	Absolute    string `yaml:"absolute" json:"Absolute"`
 	HostHomeSet bool   `yaml:"-" json:"HostHomeSet"`
@@ -269,7 +268,7 @@ type SandboxCommand struct {
 func (c *SandboxCommand) UnmarshalYAML(data []byte) error {
 	var shellCommand string
 	if err := yaml.Unmarshal(data, &shellCommand); err == nil {
-		return stableerr.New("sandbox.command must use argv; shell-string commands are not supported")
+		return errors.New("sandbox.command must use argv; shell-string commands are not supported")
 	}
 
 	type sandboxCommand SandboxCommand
