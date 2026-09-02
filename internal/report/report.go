@@ -85,7 +85,7 @@ func submit(ctx context.Context, opts Options, beforeRecord func()) (Result, err
 			StepID:    payload.StepID,
 			AgentID:   payload.AgentID,
 			AttemptID: payload.AttemptID,
-			Reason:    reportTargetCurrentAttemptReason,
+			Reason:    "report does not target current active attempt",
 			Errors:    []string{targetErr.Error()},
 			Time:      opts.Time,
 		})

@@ -35,8 +35,8 @@ introduce `orc project upgrade`, `orc init --upgrade`, or an otherwise-empty
 `orc project` namespace for this feature.
 
 Bare `orc init upgrade` is plan-only and writes nothing. It inspects the live
-project setup and reports planned safe changes, warnings, conflicts, stale
-managed files, affected paths, and follow-up guidance. V1 intentionally has no
+project setup and reports planned safe changes, warnings, conflicts, affected
+paths, stale managed files, and follow-up guidance. V1 intentionally has no
 `--dry-run` flag because the bare command is the dry-run behavior.
 
 `orc init upgrade --apply` writes the safe independent subset of the upgrade
