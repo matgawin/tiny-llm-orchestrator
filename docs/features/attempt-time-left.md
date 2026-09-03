@@ -29,12 +29,15 @@ orc time-left --run <run-id> --attempt <attempt-id>
 
 Human output includes `deadline`, `calculated_at`, `elapsed`, `remaining`,
 `timeout`, `phase`, and `action`. It also prints `run`, `step`, `agent`, `attempt`, and
-`started_at` for troubleshooting. `--json` prints the same fields as JSON for
-hooks:
+`started_at` for troubleshooting. `--json` prints the same fields as structured
+deadline data:
 
 ```bash
 orc time-left --json
 ```
+
+Use `--codex-hook` for Codex PostToolUse hooks. Hook mode writes nothing for
+`NORMAL`.
 
 If neither worker environment nor `--run` and `--attempt` identify an attempt,
 the command fails and names the required inputs.
@@ -137,43 +140,14 @@ do
   fi
 done
 
-if ! output=$(cd "$ORC_PROJECT_ROOT" && orc time-left --json 2>/dev/null); then
-  exit 0
-fi
-
-phase=$(printf '%s\n' "$output" | sed -n 's/.*"phase"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-remaining=$(printf '%s\n' "$output" | sed -n 's/.*"remaining"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-action=$(printf '%s\n' "$output" | sed -n 's/.*"action"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-
-case "$phase" in
-  NORMAL|"")
-    exit 0
-    ;;
-  NARROW)
-    action="stop expanding scope"
-    ;;
-  WRAP_UP)
-    action="stop implementing new behavior and run at most one cheap check"
-    ;;
-  REPORT_NOW)
-    action="submit orc report now or report blocked/blocked now if blocked"
-    ;;
-  *)
-    action="inspect attempt deadline state"
-    ;;
-esac
-
-if [ -z "$remaining" ] || [ -z "$action" ]; then
-  exit 0
-fi
-
-printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"Orc deadline phase: %s. Time remaining: %s. %s."}}\n' \
-  "$phase" "$remaining" "$action"
+cd "$ORC_PROJECT_ROOT" 2>/dev/null || exit 0
+orc time-left --codex-hook 2>/dev/null || exit 0
 ```
 
 Codex command hooks run from the session cwd. The script uses
-`ORC_PROJECT_ROOT` as the stable project root and runs `orc time-left --json`
-from that directory.
+`ORC_PROJECT_ROOT` as the stable project root and runs
+`orc time-left --codex-hook` from that directory. The command creates the
+complete Codex hook response.
 
 The hook stays quiet outside Orc runtime, when any required Orc environment
 variable is missing, for `NORMAL`, and for command failures. For `NARROW`,

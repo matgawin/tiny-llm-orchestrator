@@ -43,6 +43,6 @@ For debugging, pass --run <run-id> and --attempt <attempt-id>.
 Project root lookup uses --root <path>, then ORC_PROJECT_ROOT, then the current working directory.
 
 Output includes deadline, elapsed time, remaining time, timeout, phase, and action.
-Use --json from hooks. NORMAL stays quiet in hooks; NARROW, WRAP_UP, and REPORT_NOW can be shown as short directives.
+Use --json for structured deadline data. Use --codex-hook for Codex PostToolUse hooks. Hook mode writes nothing for NORMAL.
 Final worker outcomes still go through %s report.`, appName, appName)
 }

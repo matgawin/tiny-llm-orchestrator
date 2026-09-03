@@ -20,6 +20,7 @@ type timeLeftOptions struct {
 	AttemptID string
 	Root      string
 	JSON      bool
+	CodexHook bool
 }
 
 type timeLeftJSON struct {
@@ -35,6 +36,15 @@ type timeLeftJSON struct {
 	Timeout      string `json:"timeout"`
 	Phase        string `json:"phase"`
 	Action       string `json:"action"`
+}
+
+type timeLeftCodexHook struct {
+	HookSpecificOutput timeLeftCodexHookOutput `json:"hookSpecificOutput"`
+}
+
+type timeLeftCodexHookOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
 }
 
 func newTimeLeftCommand(stdout, stderr io.Writer) *cobra.Command {
@@ -62,9 +72,11 @@ func newTimeLeftCommand(stdout, stderr io.Writer) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.BoolVar(&opts.JSON, "json", false, "Print machine-readable JSON")
+	flags.BoolVar(&opts.CodexHook, "codex-hook", false, "Emit Codex PostToolUse JSON for urgent phases")
 	flags.StringVar(&opts.RunID, "run", "", "Run id for explicit lookup")
 	flags.StringVar(&opts.AttemptID, "attempt", "", "Attempt id for explicit lookup")
 	flags.StringVar(&opts.Root, "root", "", "Project root for run store lookup")
+	cmd.MarkFlagsMutuallyExclusive("json", "codex-hook")
 	cmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if _, writeErr := fmt.Fprintf(stderr, "%s %s: %v\n\n", appName, commandTimeLeft, err); writeErr != nil {
 			return fmt.Errorf("time-left flag error: %w", writeErr)
@@ -137,7 +149,44 @@ func executeTimeLeft(ctx context.Context, opts timeLeftOptions, stdout io.Writer
 		return writeTimeLeftJSON(stdout, guidance)
 	}
 
+	if opts.CodexHook {
+		return writeTimeLeftCodexHook(stdout, guidance)
+	}
+
 	return writeTimeLeftHuman(stdout, guidance)
+}
+
+func writeTimeLeftCodexHook(stdout io.Writer, guidance attemptdeadline.Guidance) error {
+	switch guidance.Phase {
+	case attemptdeadline.PhaseNormal, attemptdeadline.PhaseNarrow, attemptdeadline.PhaseWrapUp, attemptdeadline.PhaseReportNow:
+	default:
+		return fmt.Errorf("encode time-left Codex hook output: unknown phase %q", guidance.Phase)
+	}
+
+	if guidance.Action == "" {
+		return errors.New("encode time-left Codex hook output: action is empty")
+	}
+
+	if guidance.Phase == attemptdeadline.PhaseNormal {
+		return nil
+	}
+
+	payload := timeLeftCodexHook{HookSpecificOutput: timeLeftCodexHookOutput{
+		HookEventName:     "PostToolUse",
+		AdditionalContext: fmt.Sprintf("Orc deadline phase: %s. Time remaining: %s. %s.", guidance.Phase, guidance.Remaining.String(), guidance.Action),
+	}}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode time-left Codex hook output: %w", err)
+	}
+
+	encoded = append(encoded, '\n')
+	if _, err := stdout.Write(encoded); err != nil {
+		return fmt.Errorf("write time-left Codex hook output: %w", err)
+	}
+
+	return nil
 }
 
 func findAttempt(attempts []runstore.Attempt, attemptID string) (runstore.Attempt, bool) {

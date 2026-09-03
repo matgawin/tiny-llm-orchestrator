@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,8 @@ const (
 	timeLeftTestAttemptID  = "attempt-001"
 	timeLeftTestFlag       = "--attempt"
 	timeLeftTestJSONFlag   = "--json"
+	timeLeftTestHookFlag   = "--codex-hook"
+	timeLeftTestMissing    = "missing"
 	timeLeftTestRunFlag    = "--run"
 	timeLeftTestStepCode   = "plan"
 	timeLeftTestTask       = "# Task"
@@ -50,6 +54,140 @@ func TestExecuteTimeLeftUsesWorkerEnvironment(t *testing.T) {
 		"phase: REPORT_NOW",
 		"action: submit orc report now or report blocked/blocked now if blocked",
 	})
+}
+
+func TestExecuteTimeLeftRejectsJSONWithCodexHookBeforeLookup(t *testing.T) {
+	t.Setenv("ORC_RUN_ID", "")
+	t.Setenv("ORC_ATTEMPT_ID", "")
+
+	var stdout, stderr bytes.Buffer
+
+	err := Execute([]string{commandTimeLeft, timeLeftTestJSONFlag, timeLeftTestHookFlag}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want flag conflict")
+	}
+
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+
+	if !strings.Contains(err.Error(), "json") || !strings.Contains(err.Error(), "codex-hook") {
+		t.Fatalf("error = %q, want both conflicting flags", err)
+	}
+}
+
+func TestExecuteTimeLeftCodexHookPhases(t *testing.T) {
+	tests := []struct {
+		phase     string
+		remaining time.Duration
+	}{
+		{phase: attemptdeadline.PhaseNormal, remaining: 20 * time.Minute},
+		{phase: attemptdeadline.PhaseNarrow, remaining: 7 * time.Minute},
+		{phase: attemptdeadline.PhaseWrapUp, remaining: 3 * time.Minute},
+		{phase: attemptdeadline.PhaseReportNow, remaining: time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.phase, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			descriptorPath := filepath.Join(root, ".orc", "agents", "planner.md")
+			descriptor := string(readCLIFile(t, descriptorPath))
+			writeCLIFile(t, descriptorPath, strings.Replace(descriptor, "role: planner", "role: coder", 1))
+			result := executeCLIRunStart(t, root, []string{timeLeftTestTaskFlag, timeLeftTestTask}, nil)
+			attemptID := "attempt-hook-" + strings.ToLower(tt.phase)
+			startCLIActiveAttemptWithRemaining(t, root, result.runID, attemptID, tt.remaining)
+
+			output := executeCLICommand(t, []string{commandTimeLeft, timeLeftTestRunFlag, result.runID, timeLeftTestFlag, attemptID, timeLeftTestHookFlag})
+			if tt.phase == attemptdeadline.PhaseNormal {
+				if output != "" {
+					t.Fatalf("output = %q, want empty", output)
+				}
+
+				return
+			}
+
+			var payload timeLeftCodexHook
+			if err := json.Unmarshal([]byte(output), &payload); err != nil {
+				t.Fatalf("unmarshal Codex hook JSON: %v\n%s", err, output)
+			}
+
+			wantAction := attemptdeadline.Action(tt.phase, attemptdeadline.ActionGroupImplementation)
+
+			wantContext := "Orc deadline phase: " + tt.phase + ". Time remaining: "
+			if payload.HookSpecificOutput.HookEventName != "PostToolUse" || !strings.HasPrefix(payload.HookSpecificOutput.AdditionalContext, wantContext) || !strings.HasSuffix(payload.HookSpecificOutput.AdditionalContext, ". "+wantAction+".") {
+				t.Fatalf("payload = %+v, want complete %s hook response with implementation action", payload, tt.phase)
+			}
+
+			if !strings.HasSuffix(output, "}\n") {
+				t.Fatalf("output = %q, want one trailing newline", output)
+			}
+		})
+	}
+}
+
+func TestExecuteTimeLeftCodexHookLookupErrorWritesNoOutput(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIProject(t, root, "optional", true)
+
+	var stdout, stderr bytes.Buffer
+
+	err := Execute([]string{commandTimeLeft, "--root", root, timeLeftTestRunFlag, timeLeftTestMissing, timeLeftTestFlag, timeLeftTestMissing, timeLeftTestHookFlag}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("Execute returned nil error, want lookup error")
+	}
+
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestWriteTimeLeftCodexHook(t *testing.T) {
+	guidance := attemptdeadline.Guidance{
+		Phase:     attemptdeadline.PhaseWrapUp,
+		Remaining: 2*time.Minute + 3*time.Second,
+		Action:    `finish "quoted" work`,
+	}
+
+	var output bytes.Buffer
+	if err := writeTimeLeftCodexHook(&output, guidance); err != nil {
+		t.Fatalf("writeTimeLeftCodexHook returned error: %v", err)
+	}
+
+	want := "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"Orc deadline phase: WRAP_UP. Time remaining: 2m3s. finish \\\"quoted\\\" work.\"}}\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
+func TestWriteTimeLeftCodexHookRejectsInvalidGuidanceBeforeOutput(t *testing.T) {
+	tests := []attemptdeadline.Guidance{
+		{Phase: "UNKNOWN", Action: "act"},
+		{Phase: attemptdeadline.PhaseNormal},
+	}
+	for _, guidance := range tests {
+		var output bytes.Buffer
+		if err := writeTimeLeftCodexHook(&output, guidance); err == nil {
+			t.Fatalf("guidance = %+v returned nil error", guidance)
+		}
+
+		if output.Len() != 0 {
+			t.Fatalf("guidance = %+v wrote %q, want empty", guidance, output.String())
+		}
+	}
+}
+
+func TestWriteTimeLeftCodexHookReturnsWriterError(t *testing.T) {
+	reader, writer := io.Pipe()
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close pipe reader: %v", err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+
+	err := writeTimeLeftCodexHook(writer, attemptdeadline.Guidance{Phase: attemptdeadline.PhaseNarrow, Remaining: time.Minute, Action: "act"})
+	if err == nil || !errors.Is(err, io.ErrClosedPipe) || !strings.Contains(err.Error(), "write time-left Codex hook output") {
+		t.Fatalf("error = %v, want output writer error", err)
+	}
 }
 
 func TestExecuteTimeLeftExplicitLookupJSON(t *testing.T) {
