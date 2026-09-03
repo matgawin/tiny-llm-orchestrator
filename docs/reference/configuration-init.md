@@ -1,5 +1,7 @@
 # Configuration Init Reference
 
+Each scaffold workflow defines `verification.full_check.argv: ["task", "check"]`. Existing deterministic `task check` steps set `verification: full`. `task lsp` steps do not set this marker. Upgrade refreshes owned files and preserves customized files.
+
 ## Purpose
 
 Document the `orc init` scaffold contract and the v1 scaffold files generated from `internal/initconfig/scaffold/.orc`.

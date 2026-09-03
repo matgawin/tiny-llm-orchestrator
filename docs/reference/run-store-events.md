@@ -1,5 +1,29 @@
 # Run Store Events Reference
 
+Accepted `attempt.reported` payloads can contain `report.findings`. Old payloads without this field remain valid.
+
+Each finding has these required fields:
+
+- `finding_id`
+- `category`
+- `path`
+- `location`
+- `summary`
+
+Each value must be non-empty and trimmed. A `finding_id` must match `[a-z0-9][a-z0-9._-]{0,63}`. Each `finding_id` must be unique in its report.
+
+A finding `path` must be a clean project-relative path with slash separators. These path values are invalid:
+
+- an absolute path
+- `.` or `..`
+- a path that starts with `../`
+- a path with an empty segment
+- a path with a backslash
+
+Workers can submit findings only with `orc report --json-file`. A new `done/changes_requested` report must contain one or more findings. A new `done/approved` report must not contain findings. Other outcomes can omit findings or use an empty array.
+
+These submission rules do not reject old stored reports. The report event type and store schema version do not change.
+
 ## Purpose
 
 Provide the v1 append-only event log and event payload contract for durable run

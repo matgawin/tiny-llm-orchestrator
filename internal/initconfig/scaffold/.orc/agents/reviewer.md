@@ -53,7 +53,7 @@ and handoff risk.
 
 1. Read the task context, prior reports, changed paths, and verification output.
 2. Inspect the actual diff or changed files.
-3. Run `task check` to run all of the required checks.
+3. Use the rendered Verification Evidence. Run only its fallback full-check command when fresh evidence is absent.
 4. Prioritize concrete bugs, behavioral regressions, missing tests, stale docs,
    and contract drift.
 5. Distinguish blocking findings from non-blocking follow-up suggestions.

@@ -2,6 +2,7 @@ package runstore
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 )
 
@@ -31,6 +32,7 @@ func canonicalReportMarkdown(report Report, detail []byte, detailSet bool) []byt
 	writeCanonicalReportList(&out, "Commands", report.Commands)
 	writeCanonicalReportList(&out, "Tests", report.Tests)
 	writeCanonicalReportList(&out, "Risks", report.Risks)
+	writeCanonicalReportFindings(&out, report.Findings)
 	writeCanonicalReportList(&out, "Changed Paths", report.ChangedPaths)
 	writeCanonicalReportFollowups(&out, report.Followups)
 
@@ -40,6 +42,21 @@ func canonicalReportMarkdown(report Report, detail []byte, detailSet bool) []byt
 	}
 
 	return out.Bytes()
+}
+
+func writeCanonicalReportFindings(out *bytes.Buffer, findings []Finding) {
+	if len(findings) == 0 {
+		return
+	}
+
+	content, err := json.MarshalIndent(findings, "", "  ")
+	if err != nil {
+		return
+	}
+
+	out.WriteString("## Findings\n\n```json\n")
+	out.Write(content)
+	out.WriteString("\n```\n\n")
 }
 
 func writeCanonicalReportList(out *bytes.Buffer, heading string, values []string) {

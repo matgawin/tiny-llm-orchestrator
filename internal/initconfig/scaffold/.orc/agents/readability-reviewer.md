@@ -81,7 +81,7 @@ config keys, and observed behavior.
 - Do not request churn for personal taste.
 - Do not require new abstractions unless they remove real complexity.
 - Do not edit files.
-- Do not run tests.
+- Do not run extra tests. Run the rendered fallback full check when fresh evidence is absent.
 
 ## Report Rubric
 

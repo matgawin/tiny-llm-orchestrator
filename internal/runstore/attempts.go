@@ -164,6 +164,7 @@ func applyStartAttemptStatus(status *Status, event Event, req StartAttemptReques
 
 	status.Continued = nil
 	applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
+	applyAttemptOutcomeConsumption(status, event, routing.ConsumeAttemptID)
 	status.ActiveAttempt = &attempt
 	status.Attempts = append(status.Attempts, attempt)
 	status.UpdatedAt = event.Time

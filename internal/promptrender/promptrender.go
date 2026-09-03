@@ -4,6 +4,7 @@ package promptrender
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -13,14 +14,13 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/attemptdeadline"
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	reportpkg "tiny-llm-orchestrator/orc/internal/report"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
-
-const priorReportExcerptLimit = 1200
 
 // Options describes a prompt rendering request from a worker launcher.
 type Options struct {
@@ -246,6 +246,20 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 
 	out.WriteString(renderLoopContext(renderCtx, opts))
 	out.WriteString(renderPriorReports(reports))
+
+	if reviewerRole(renderCtx.agent.Role) {
+		evidence, err := renderVerificationEvidence(renderCtx)
+		if err != nil {
+			return nil, err
+		}
+
+		out.WriteString(evidence)
+	}
+
+	if correctionBoundary(renderCtx) {
+		out.WriteString("## Correction Search Boundary\n\nStart from the blocking finding, failed command, and changed lines. Inspect direct definitions, callers, and dependencies only. Do not search for additional defects or improvements. Report blocked before broader repository investigation.\n\n")
+	}
+
 	out.WriteString(progressGuidance)
 
 	group, err := attemptdeadline.GroupForAttempt(renderCtx.run, renderCtx.attempt)
@@ -269,6 +283,23 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	fmt.Fprintf(&out, "orc report --run %s --step %s --agent %s --attempt %s --status <status> --result <result> --summary \"<summary>\"\n", shellQuote(opts.RunID), shellQuote(opts.StepID), shellQuote(opts.AgentID), shellQuote(opts.AttemptID))
 	out.WriteString("```\n")
 	out.WriteString(reportOptionalFields)
+
+	if slices.Contains(allowedPairs(renderCtx.step), "done/changes_requested") {
+		out.WriteString(`Use a JSON report for ` + "`done/changes_requested`" + `. Direct report flags cannot provide findings. Each finding must use this exact object shape:
+
+` + "```json" + `
+{
+  "finding_id": "time-left-missing-error-output",
+  "category": "correctness",
+  "path": "internal/cli/time_left.go",
+  "location": "executeTimeLeft",
+  "summary": "The command returns an error without writing it."
+}
+` + "```" + `
+
+All five fields are required, must be non-empty, and must be trimmed. ` + "`finding_id`" + ` must match ` + "`[a-z0-9][a-z0-9._-]{0,63}`" + ` and must be unique in one report. ` + "`path`" + ` must be a clean project-relative slash path. It must not be absolute, contain a backslash or empty segment, or contain ` + "`.`" + ` or ` + "`..`" + ` segments. A ` + "`done/changes_requested`" + ` report requires one or more findings. A ` + "`done/approved`" + ` report must not contain findings.
+`)
+	}
 
 	return out.Bytes(), nil
 }
@@ -390,11 +421,7 @@ func renderPriorReports(reports []reportContext) string {
 			fmt.Fprintf(&out, "Full report: `%s`\n\n", report.fullPath)
 		}
 
-		fmt.Fprintf(&out, "%s\n", report.excerpt)
-
-		if report.requireRead {
-			fmt.Fprintf(&out, "\nThis excerpt is truncated. Read the full report before using this prior report as implementation, review, or correction input: `%s`\n", report.fullPath)
-		}
+		fmt.Fprintf(&out, "%s\n", report.content)
 
 		out.WriteString("\n")
 	}
@@ -424,53 +451,20 @@ func taskContextContent(ctx context.Context, renderCtx renderContext) (string, e
 }
 
 type reportContext struct {
-	heading     string
-	excerpt     string
-	fullPath    string
-	requireRead bool
+	heading  string
+	content  string
+	fullPath string
 }
 
 func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]reportContext, error) {
+	selected, err := selectReports(renderCtx)
+	if err != nil {
+		return nil, err
+	}
+
 	var reports []reportContext
-	for _, skipped := range renderCtx.run.Status.SkippedSteps {
-		reports = append(reports, reportContext{
-			heading: fmt.Sprintf("step %s skipped", skipped.StepID),
-			excerpt: fmt.Sprintf("step %s skipped by human decision: %s", skipped.StepID, skipped.Reason),
-		})
-	}
 
-	attemptReportPaths := attemptReportArtifactPaths(renderCtx.run.Status.Attempts)
-
-	for _, ref := range renderCtx.run.Status.Artifacts {
-		if ref.Kind != runstore.KindReport {
-			continue
-		}
-
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("prior report contexts: %w", err)
-		}
-
-		content, err := renderCtx.store.ReadArtifactContext(ctx, renderCtx.run.ID, ref)
-		if err != nil {
-			return nil, fmt.Errorf("read prior report %s: %w", ref.Path, err)
-		}
-
-		if _, ok := attemptReportPaths[ref.Path]; ok {
-			continue
-		}
-
-		excerpt, _ := excerptMarkdown(content, priorReportExcerptLimit)
-		reports = append(reports, reportContext{
-			heading: ref.Path,
-			excerpt: excerpt,
-		})
-	}
-
-	for _, attempt := range renderCtx.run.Status.Attempts {
-		if attempt.Report == nil {
-			continue
-		}
-
+	for _, attempt := range selected {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("prior report contexts: %w", err)
 		}
@@ -485,44 +479,245 @@ func priorReportContexts(ctx context.Context, renderCtx renderContext) ([]report
 		}
 
 		fullPath := filepath.ToSlash(filepath.Join(".orc", "runs", renderCtx.run.ID, filepath.FromSlash(attempt.Report.ReportRef.Path)))
-		excerpt, truncated := excerptMarkdown(content, priorReportExcerptLimit)
 		reports = append(reports, reportContext{
-			heading:     fmt.Sprintf("attempt %s (%s %s/%s)", attempt.AttemptID, attempt.StepID, attempt.Report.Status, attempt.Report.Result),
-			excerpt:     excerpt,
-			fullPath:    fullPath,
-			requireRead: truncated,
+			heading:  fmt.Sprintf("attempt %s (%s %s/%s)", attempt.AttemptID, attempt.StepID, attempt.Report.Status, attempt.Report.Result),
+			content:  strings.TrimSpace(string(content)),
+			fullPath: fullPath,
 		})
 	}
 
 	return reports, nil
 }
 
-func attemptReportArtifactPaths(attempts []runstore.Attempt) map[string]struct{} {
-	paths := make(map[string]struct{})
+func acceptedReports(attempts []runstore.Attempt) []runstore.Attempt {
+	var out []runstore.Attempt
 
-	for _, attempt := range attempts {
-		if attempt.Report == nil || attempt.Report.ReportRef == nil || attempt.Report.ReportRef.Path == "" {
+	for _, a := range attempts {
+		if a.State == runstore.AttemptStateReported && a.Report != nil && a.ReportRef != nil {
+			out = append(out, a)
+		}
+	}
+
+	return out
+}
+
+func snapshotVersion(a runstore.Attempt) int {
+	if a.ConfigSnapshotVersion == 0 {
+		return 1
+	}
+
+	return a.ConfigSnapshotVersion
+}
+
+func selectReports(renderCtx renderContext) ([]runstore.Attempt, error) {
+	accepted := acceptedReports(renderCtx.run.Status.Attempts)
+
+	var planner, implementation, modifying, routing *runstore.Attempt
+
+	startSeq := attemptStartedSequence(renderCtx.run.Events, renderCtx.attempt.AttemptID)
+
+	for i := range accepted {
+		a := &accepted[i]
+
+		snapshot, err := configsnapshot.LoadVersion(renderCtx.run, snapshotVersion(*a))
+		if err != nil {
+			return nil, fmt.Errorf("load report snapshot: %w", err)
+		}
+
+		agent := snapshot.Project.Agents[a.AgentID]
+		if agent.Role == "planner" {
+			planner = later(planner, a)
+		}
+
+		if receivesImplementationReport(renderCtx.agent.Role) && implementationRole(agent.Role) {
+			implementation = later(implementation, a)
+		}
+
+		if len(a.Report.ChangedPaths) > 0 {
+			modifying = later(modifying, a)
+		}
+
+		if startSeq != 0 && a.ConsumedByEvent == startSeq {
+			routing = a
+		}
+	}
+
+	fresh, err := freshVerification(renderCtx)
+	if err != nil {
+		return nil, err
+	}
+
+	ordered := []*runstore.Attempt{planner, implementation, modifying, fresh, routing}
+	if routing != nil {
+		for _, finding := range routing.Report.Findings {
+			for i := range accepted {
+				if containsFinding(accepted[i].Report.Findings, finding.FindingID) {
+					ordered = append(ordered, &accepted[i])
+					break
+				}
+			}
+		}
+	}
+
+	seen := map[string]bool{}
+
+	var out []runstore.Attempt
+
+	for _, a := range ordered {
+		if a != nil && !seen[a.AttemptID] {
+			seen[a.AttemptID] = true
+			out = append(out, *a)
+		}
+	}
+
+	return out, nil
+}
+
+func later(current, candidate *runstore.Attempt) *runstore.Attempt {
+	if current == nil || candidate.ReportRef.EventSequence > current.ReportRef.EventSequence {
+		return candidate
+	}
+
+	return current
+}
+
+func containsFinding(values []runstore.Finding, id string) bool {
+	return slices.ContainsFunc(values, func(value runstore.Finding) bool { return value.FindingID == id })
+}
+
+func attemptStartedSequence(events []runstore.Event, attemptID string) int {
+	for _, event := range events {
+		if event.Type != "attempt.started" {
 			continue
 		}
 
-		paths[attempt.Report.ReportRef.Path] = struct{}{}
+		var p struct {
+			Attempt struct {
+				AttemptID string `json:"attempt_id"`
+			} `json:"attempt"`
+		}
+		if json.Unmarshal(event.Payload, &p) == nil && p.Attempt.AttemptID == attemptID {
+			return event.Sequence
+		}
 	}
 
-	return paths
+	return 0
 }
 
-func excerptMarkdown(content []byte, limit int) (string, bool) {
-	text := strings.TrimSpace(string(content))
-	if text == "" {
-		return "(empty report)", false
+func freshVerification(renderCtx renderContext) (*runstore.Attempt, error) {
+	wantVersion := snapshotVersion(renderCtx.attempt)
+
+	var (
+		changedSeq int
+		fresh      *runstore.Attempt
+	)
+
+	for _, a := range acceptedReports(renderCtx.run.Status.Attempts) {
+		if len(a.Report.ChangedPaths) > 0 && a.ReportRef.EventSequence > changedSeq {
+			changedSeq = a.ReportRef.EventSequence
+		}
 	}
 
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text, false
+	for i := range renderCtx.run.Status.Attempts {
+		a := &renderCtx.run.Status.Attempts[i]
+		if a.State != runstore.AttemptStateReported || a.Report == nil || a.ReportRef == nil || snapshotVersion(*a) != wantVersion || a.Report.Status != "done" || a.Report.Result != "passed" {
+			continue
+		}
+
+		snapshot, err := configsnapshot.LoadVersion(renderCtx.run, snapshotVersion(*a))
+		if err != nil {
+			return nil, fmt.Errorf("load verification snapshot: %w", err)
+		}
+
+		step, ok := snapshot.Project.Workflows[renderCtx.run.Status.Workflow].Steps[a.StepID]
+		if !ok || step.Verification != "full" || (step.EffectiveKind() != config.StepKindCommand && step.EffectiveKind() != config.StepKindScript) || a.ReportRef.EventSequence <= changedSeq {
+			continue
+		}
+
+		fresh = later(fresh, a)
 	}
 
-	return strings.TrimSpace(string(runes[:limit])) + "\n\n[excerpt truncated]", true
+	return fresh, nil
+}
+
+func reviewerRole(role string) bool {
+	return role == "reviewer" || strings.HasSuffix(role, "-reviewer")
+}
+
+func receivesImplementationReport(role string) bool {
+	return implementationRole(role) || role == "tester" || reviewerRole(role)
+}
+
+func implementationRole(role string) bool {
+	return role == "coder" || role == "mechanical-coder"
+}
+
+func correctionRoute(ctx renderContext) bool {
+	seq := attemptStartedSequence(ctx.run.Events, ctx.attempt.AttemptID)
+	if seq == 0 {
+		return false
+	}
+
+	for _, a := range acceptedReports(ctx.run.Status.Attempts) {
+		if a.ConsumedByEvent == seq {
+			return a.Report.Status == "failed" || a.Report.Result == "changes_requested"
+		}
+	}
+
+	return false
+}
+
+func correctionBoundary(ctx renderContext) bool {
+	return implementationRole(ctx.agent.Role) && correctionRoute(ctx)
+}
+
+func renderVerificationEvidence(ctx renderContext) (string, error) {
+	var out strings.Builder
+	out.WriteString("## Verification Evidence\n\n")
+
+	evidence, err := freshVerification(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if evidence != nil {
+		snapshot, err := configsnapshot.LoadVersion(ctx.run, snapshotVersion(*evidence))
+		if err != nil {
+			return "", fmt.Errorf("load verification evidence snapshot: %w", err)
+		}
+
+		step := snapshot.Project.Workflows[ctx.run.Status.Workflow].Steps[evidence.StepID]
+		fmt.Fprintf(&out, "- step_id: `%s`\n- attempt_id: `%s`\n- command: `%s`\n- result: `%s/%s`\n- event_sequence: `%d`\n\n", evidence.StepID, evidence.AttemptID, shellDisplay(step), evidence.Report.Status, evidence.Report.Result, evidence.ReportRef.EventSequence)
+		out.WriteString("This full-verification result is fresh. Do not repeat the full check. Accurate `changed_paths` values control freshness.\n\n")
+
+		return out.String(), nil
+	}
+
+	if len(ctx.workflow.Verification.FullCheck.Argv) > 0 {
+		fmt.Fprintf(&out, "No fresh full-verification evidence exists. Run `%s` from the project root before `done/approved`. If it cannot run, report `blocked/blocked`. Accurate `changed_paths` values control freshness.\n\n", quoteArgv(ctx.workflow.Verification.FullCheck.Argv))
+		return out.String(), nil
+	}
+
+	out.WriteString("No fresh full-verification evidence or fallback command exists. Report `blocked/blocked`. Accurate `changed_paths` values control freshness.\n\n")
+
+	return out.String(), nil
+}
+
+func shellDisplay(step config.Step) string {
+	if step.EffectiveKind() == config.StepKindCommand {
+		return quoteArgv(step.Command.Argv)
+	}
+
+	return quoteArgv(append([]string{step.Script.Path}, step.Script.Args...))
+}
+
+func quoteArgv(argv []string) string {
+	values := make([]string, len(argv))
+	for i, value := range argv {
+		values[i] = shellQuote(value)
+	}
+
+	return strings.Join(values, " ")
 }
 
 func allowedPairs(step config.Step) []string {

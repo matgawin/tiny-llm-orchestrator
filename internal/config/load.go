@@ -169,13 +169,14 @@ func loadWorkflow(realOrcDir, path string) (Workflow, error) {
 }
 
 type workflowConfigYAML struct {
-	Name        string        `yaml:"name"`
-	Start       string        `yaml:"start"`
-	Execution   Execution     `yaml:"execution"`
-	TaskContext TaskContext   `yaml:"task_context"`
-	VCS         VCSPolicy     `yaml:"vcs"`
-	Defaults    Defaults      `yaml:"defaults"`
-	Steps       yaml.MapSlice `yaml:"steps"`
+	Name         string             `yaml:"name"`
+	Start        string             `yaml:"start"`
+	Execution    Execution          `yaml:"execution"`
+	TaskContext  TaskContext        `yaml:"task_context"`
+	VCS          VCSPolicy          `yaml:"vcs"`
+	Defaults     Defaults           `yaml:"defaults"`
+	Verification VerificationConfig `yaml:"verification"`
+	Steps        yaml.MapSlice      `yaml:"steps"`
 }
 
 func decodeWorkflow(content []byte, path string) (Workflow, error) {
@@ -190,14 +191,15 @@ func decodeWorkflow(content []byte, path string) (Workflow, error) {
 	}
 
 	return Workflow{
-		Name:        raw.Name,
-		Start:       raw.Start,
-		Execution:   raw.Execution,
-		TaskContext: raw.TaskContext,
-		VCS:         raw.VCS,
-		Defaults:    raw.Defaults,
-		Steps:       steps,
-		StepOrder:   stepOrder,
+		Name:         raw.Name,
+		Start:        raw.Start,
+		Execution:    raw.Execution,
+		TaskContext:  raw.TaskContext,
+		VCS:          raw.VCS,
+		Defaults:     raw.Defaults,
+		Verification: raw.Verification,
+		Steps:        steps,
+		StepOrder:    stepOrder,
 	}, nil
 }
 

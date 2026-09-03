@@ -461,11 +461,33 @@ type Workflow struct {
 	TaskContext      TaskContext         `yaml:"task_context" json:"TaskContext"`
 	VCS              VCSPolicy           `yaml:"vcs" json:"VCS"`
 	Defaults         Defaults            `yaml:"defaults" json:"Defaults"`
+	Verification     VerificationConfig  `yaml:"verification,omitempty" json:"Verification"`
 	LoopCaps         EffectiveLoopCaps   `yaml:"-" json:"LoopCaps"`
 	Steps            map[string]Step     `yaml:"steps" json:"Steps"`
 	StepOrder        []string            `yaml:"-" json:"StepOrder"`
 	SourcePath       string              `yaml:"-" json:"SourcePath"`
 	ReferencedAgents map[string]AgentRef `yaml:"-" json:"ReferencedAgents"`
+}
+
+// VerificationConfig declares the reviewer fallback full check.
+type VerificationConfig struct {
+	FullCheck CommandStep `yaml:"full_check" json:"FullCheck"`
+	present   bool
+}
+
+// UnmarshalYAML records the presence of the optional verification block.
+func (v *VerificationConfig) UnmarshalYAML(data []byte) error {
+	type plain VerificationConfig
+
+	var decoded plain
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		return fmt.Errorf("unmarshal verification config: %w", err)
+	}
+
+	*v = VerificationConfig(decoded)
+	v.present = true
+
+	return nil
 }
 
 // Execution declares workflow execution semantics.
@@ -663,6 +685,7 @@ type Step struct {
 	Script         ScriptStep          `yaml:"script" json:"Script"`
 	CWD            string              `yaml:"cwd" json:"CWD"`
 	Env            map[string]string   `yaml:"env" json:"Env"`
+	Verification   string              `yaml:"verification" json:"Verification"`
 	Skippable      bool                `yaml:"skippable" json:"Skippable"`
 	AllowedResults map[string][]string `yaml:"allowed_results" json:"AllowedResults"`
 	On             map[string]string   `yaml:"on" json:"On"`

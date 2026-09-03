@@ -1,5 +1,7 @@
 # Run Inspection
 
+Human inspection lists structured review findings in report sequence order. Each entry identifies the report attempt and step. When findings exist, the suggested review focus tells the operator to review them.
+
 ## Purpose
 
 Define the read-only run inspection behavior exposed by `orc run status`,

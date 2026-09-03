@@ -81,7 +81,7 @@ config keys, and observed behavior. Do not add vague quality claims.
 - Do not request docs for tiny internal refactors with no durable surface.
 - Do not duplicate canonical docs into multiple places.
 - Do not edit files.
-- Do not run tests.
+- Do not run extra tests. Run the rendered fallback full check when fresh evidence is absent.
 
 ## Report Rubric
 

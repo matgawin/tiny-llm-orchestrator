@@ -81,7 +81,7 @@ config keys, and observed behavior.
 - Do not request consolidation when local repetition makes the workflow clearer.
 - Do not edit files.
 - Do not turn a narrow review into a broad architecture critique.
-- Do not run tests.
+- Do not run extra tests. Run the rendered fallback full check when fresh evidence is absent.
 
 ## Report Rubric
 

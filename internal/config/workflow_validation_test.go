@@ -31,6 +31,75 @@ func TestLoadAcceptsCommandAndScriptSteps(t *testing.T) {
 	}
 }
 
+func TestLoadValidatesFullVerificationConfiguration(t *testing.T) {
+	t.Run("rejects present block without fallback", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{workflow: `name: implementation
+start: plan
+execution:
+  mode: sequential
+verification: {}
+task_context:
+  beads: optional
+  markdown_fallback: true
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  runtime: codex
+  retries: {}
+steps:
+  plan:
+    agent: planner
+    allowed_results:
+      done: [ready]
+    on:
+      done/ready: ready_for_human
+`})
+		assertLoadErrorContains(t, root, `workflow "implementation"`, "verification.full_check.argv must declare at least one argument")
+	})
+
+	t.Run("accepts command marker and fallback", func(t *testing.T) {
+		root := writeMinimalProject(t, projectFixture{workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+			workflow.Verification.FullCheck.Argv = []string{"task", "check"}
+			step := workflow.Steps["plan"]
+			step.Kind = StepKindCommand
+			step.Agent = ""
+			step.Runtime = ""
+			step.Command.Argv = []string{"task", "check"}
+			step.Verification = "full"
+			workflow.Steps["plan"] = step
+
+			return workflow
+		})})
+
+		project, err := Load(root)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+
+		if got := project.Workflows["implementation"].Verification.FullCheck.Argv; !slices.Equal(got, []string{"task", "check"}) {
+			t.Fatalf("verification full_check argv = %v, want [task check]", got)
+		}
+	})
+
+	for _, tt := range []struct {
+		name, value, want string
+	}{
+		{"agent marker", "full", `step "plan" kind agent must not set verification`},
+		{"unknown marker", "partial", `step "plan" verification "partial" is invalid; allowed: full`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{workflow: workflowYAML(t, func(workflow Workflow) Workflow {
+				step := workflow.Steps["plan"]
+				step.Verification = tt.value
+				workflow.Steps["plan"] = step
+
+				return workflow
+			})})
+			assertLoadErrorContains(t, root, `workflow "implementation"`, tt.want)
+		})
+	}
+}
+
 func TestLoadAcceptsSkippableStepContract(t *testing.T) {
 	root := writeMinimalProject(t, projectFixture{
 		workflow: workflowYAML(t, func(workflow Workflow) Workflow {

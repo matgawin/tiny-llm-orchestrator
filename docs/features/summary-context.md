@@ -1,5 +1,7 @@
 # Summary Context
 
+`orc run summary-context` renders structured findings after risks in each worker report. It does not truncate finding fields.
+
 ## Purpose
 
 Define the read-only review context rendered by `orc run summary-context`.

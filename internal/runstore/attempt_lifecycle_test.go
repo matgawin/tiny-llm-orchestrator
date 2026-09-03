@@ -116,6 +116,34 @@ func TestAttemptLifecyclePersistsAndReplaysActiveAttemptState(t *testing.T) {
 	}
 }
 
+func TestApplyReplayedAttemptStartedRecordsConsumedReportEvent(t *testing.T) {
+	eventTime := time.Date(2026, 5, 4, 12, 3, 0, 0, time.UTC)
+	status := Status{
+		State: stateRunning,
+		Attempts: []Attempt{{
+			AttemptID: "attempt-review", State: AttemptStateReported,
+			Status: attemptStatusDone, Result: "changes_requested",
+		}},
+	}
+
+	payload, err := marshalPayload(attemptStartedPayload{
+		Attempt:          Attempt{AttemptID: "attempt-code", StepID: "code", AgentID: "coder", State: AttemptStateStarting, Timeout: "30m0s", ReportExitGrace: "30s", StartedAt: eventTime},
+		ConsumeAttemptID: "attempt-review",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	event := Event{Sequence: 12, Time: eventTime, Payload: payload}
+	if err := applyReplayedAttemptStarted(&status, event); err != nil {
+		t.Fatalf("applyReplayedAttemptStarted returned error: %v", err)
+	}
+
+	if got := status.Attempts[0].ConsumedByEvent; got != event.Sequence {
+		t.Fatalf("ConsumedByEvent = %d, want %d", got, event.Sequence)
+	}
+}
+
 func TestRecordAttemptProcessOnlyTransitionsStartingAttemptOnce(t *testing.T) {
 	store := openStore(t, t.TempDir())
 	run := createManualRun(t, store, "attempt-process-once-run")

@@ -97,17 +97,11 @@ cap, hard cap, prior statuses when recorded by workflow state-entry metadata,
 and guidance to break the loop or escalate instead of repeating the same
 outcome.
 
-Prior report context includes bounded excerpts of canonical report artifacts for
-completed attempts, so loopback prompts for coder steps include tester failure
-summaries and reviewer requested-change summaries even when the worker did not
-attach a separate report file. Every prior attempt report section includes the
-project-relative full report path under `.orc/runs/<run-id>/reports/`. When an
-excerpt is truncated, the prompt explicitly tells the worker to read the full
-report before using that prior report as implementation, review, or correction
-input. If a prior attempt report is missing `report_ref`, or if the referenced
-artifact cannot be read through the Run Store, rendering fails instead of
-silently omitting recorded context. Skipped-step context is not an attempt
-report and does not require a report artifact path.
+Prior report context selects accepted reports for the current route. It orders planner scope, the latest implementation report, the latest modifying report, fresh full-verification evidence, the routing report, and finding origins. It removes duplicate attempt ids. It does not include unrelated history or a history index.
+
+A full-verification report is fresh when it uses the review attempt's config snapshot and follows the latest accepted report with non-empty `changed_paths`. Accurate `changed_paths` values control freshness. A review prompt uses fresh evidence without repeating the check. If evidence is absent, the prompt requires `verification.full_check.argv`. If both are absent, the reviewer reports `blocked/blocked`.
+
+A correction prompt includes the routing report and its structured findings without truncation. It limits investigation to the failed input, changed lines, and direct definitions, callers, and dependencies.
 
 ## Report Contract
 

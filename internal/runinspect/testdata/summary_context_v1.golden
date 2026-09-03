@@ -37,6 +37,11 @@ Implement summary context.
 - outcome_result: "ready"
 - summary: "Plan approved."
 - report_artifact: "reports/000017-plan.md"
+#### Risks
+- none
+#### Findings
+- none
+
 ### Report
 - step: "code"
 - attempt: "attempt-code"
@@ -45,6 +50,21 @@ Implement summary context.
 - outcome_result: "ready"
 - summary: "Code changed."
 - report_artifact: "reports/000010-code.md"
+#### Risks
+- "format needs human approval"
+#### Findings
+```json
+[
+  {
+    "finding_id": "summary-order",
+    "category": "correctness",
+    "path": "internal/runinspect/runinspect.go",
+    "location": "renderWorkerReports",
+    "summary": "Keep this finding with the code report."
+  }
+]
+```
+
 
 ## Changes
 ### Worker Reported
@@ -126,4 +146,5 @@ Modified files: docs/features/summary-context.md internal/runinspect/runinspect.
 
 ## Suggested Human Review Focus
 - Review reported risks and caveats.
+- Review structured review findings.
 - Review recorded follow-ups before final handoff.

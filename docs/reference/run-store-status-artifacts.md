@@ -1,5 +1,7 @@
 # Run Store Status and Artifacts Reference
 
+Nested report objects in `status.json` preserve structured findings. Canonical report Markdown writes findings under `## Findings` as one indented JSON array. This format preserves complete field values.
+
 ## Purpose
 
 Provide the v1 latest status and artifact reference contract for durable run

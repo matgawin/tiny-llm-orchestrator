@@ -121,6 +121,7 @@ type reportFields struct {
 	commands     []string
 	tests        []string
 	risks        []string
+	hasFindings  bool
 	followups    []runstore.Followup
 }
 
@@ -237,8 +238,28 @@ func renderStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run
 	printWorkflowLoopStatus(w, workflowConfig, run)
 	reports := reportPaths(run.Status.Artifacts)
 	printReportPaths(w, reports)
+	printReviewFindings(w, run.Status.Attempts)
 	printArtifacts(w, run.Status.Artifacts)
 	printTerminalHumanState(w, run, decision, reports)
+}
+
+func printReviewFindings(w io.Writer, attempts []runstore.Attempt) {
+	wroteHeading := false
+
+	for _, attempt := range attempts {
+		if attempt.Report == nil || attempt.ReportRef == nil {
+			continue
+		}
+
+		for _, finding := range attempt.Report.Findings {
+			if !wroteHeading {
+				_, _ = fmt.Fprintln(w, "review_findings:")
+				wroteHeading = true
+			}
+
+			_, _ = fmt.Fprintf(w, "  - attempt: %s\n    step: %s\n    finding_id: %s\n    category: %s\n    path: %s\n    location: %s\n    summary: %s\n", quoteScalar(attempt.AttemptID), quoteScalar(attempt.StepID), quoteScalar(finding.FindingID), quoteScalar(finding.Category), quoteScalar(finding.Path), quoteScalar(finding.Location), quoteScalar(finding.Summary))
+		}
+	}
 }
 
 func renderConfig(w io.Writer, run *runstore.Run, snapshot configsnapshot.Inspection) {
@@ -561,6 +582,9 @@ func renderWorkerReports(w io.Writer, attempts []runstore.Attempt) {
 		printStringField(w, "outcome_result", report.Result)
 		printStringField(w, "summary", report.Summary)
 		printOptionalStringField(w, "report_artifact", attempt.ReportRef)
+		_, _ = fmt.Fprintln(w, "#### Risks")
+		printStringListItems(w, report.Risks)
+		renderReportFindings(w, report.Findings)
 	}
 
 	_, _ = fmt.Fprintln(w)
@@ -613,6 +637,34 @@ func renderRisks(w io.Writer, state string, fields reportFields) {
 	_, _ = fmt.Fprintln(w)
 }
 
+func renderReportFindings(w io.Writer, findings []runstore.Finding) {
+	_, _ = fmt.Fprintln(w, "#### Findings")
+	if len(findings) == 0 {
+		_, _ = fmt.Fprintln(w, "- none")
+		_, _ = fmt.Fprintln(w)
+
+		return
+	}
+
+	content, err := json.MarshalIndent(findings, "", "  ")
+	if err != nil {
+		return
+	}
+
+	_, _ = fmt.Fprintf(w, "```json\n%s\n```\n\n", content)
+}
+
+func printStringListItems(w io.Writer, values []string) {
+	if len(values) == 0 {
+		_, _ = fmt.Fprintln(w, "- none")
+		return
+	}
+
+	for _, value := range values {
+		_, _ = fmt.Fprintf(w, "- %s\n", quoteScalar(value))
+	}
+}
+
 func renderFollowups(w io.Writer, structured []runstore.Followup, recorded string) {
 	_, _ = fmt.Fprintln(w, "## Follow-Ups")
 
@@ -658,6 +710,10 @@ func renderHumanReviewFocus(w io.Writer, state string, fields reportFields, hasR
 
 	if len(fields.risks) > 0 {
 		bullets = append(bullets, "Review reported risks and caveats.")
+	}
+
+	if fields.hasFindings {
+		bullets = append(bullets, "Review structured review findings.")
 	}
 
 	if len(fields.tests) == 0 {
@@ -995,6 +1051,7 @@ func collectReportFields(attempts []runstore.Attempt) reportFields {
 		fields.commands = append(fields.commands, report.Commands...)
 		fields.tests = append(fields.tests, report.Tests...)
 		fields.risks = append(fields.risks, report.Risks...)
+		fields.hasFindings = fields.hasFindings || len(report.Findings) > 0
 		fields.followups = append(fields.followups, report.Followups...)
 	}
 

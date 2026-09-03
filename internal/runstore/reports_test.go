@@ -34,6 +34,7 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 			Tests:        []string{"go test ./internal/runstore"},
 			Risks:        []string{"none"},
 			Followups:    []Followup{{Title: "Document report summaries", Details: "Later summary work."}},
+			Findings:     []Finding{{FindingID: "missing-output", Category: "correctness", Path: "internal/cli/main.go", Location: "run", Summary: "The error is not written."}},
 		},
 		Time: time.Date(2026, 5, 4, 12, 2, 0, 0, time.UTC),
 	})
@@ -88,6 +89,10 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 		t.Fatalf("replayed report = %+v, want structured changed path", replayed.Report)
 	}
 
+	if len(replayed.Report.Findings) != 1 || replayed.Report.Findings[0].FindingID != "missing-output" {
+		t.Fatalf("replayed findings = %+v, want missing-output", replayed.Report.Findings)
+	}
+
 	if replayed.ReportRef == nil || *replayed.ReportRef != *recorded.ReportRef {
 		t.Fatalf("replayed report ref = %+v, want %+v", replayed.ReportRef, recorded.ReportRef)
 	}
@@ -105,6 +110,7 @@ func TestRecordAttemptReportTerminalizesActiveAttempt(t *testing.T) {
 		"## Commands\n\n- go test ./internal/runstore",
 		"## Tests\n\n- go test ./internal/runstore",
 		"## Risks\n\n- none",
+		"## Findings\n\n```json\n[\n  {\n    \"finding_id\": \"missing-output\"",
 		"## Changed Paths\n\n- README.md",
 		"## Follow-ups\n\n- Document report summaries\n  Details: Later summary work.",
 	})

@@ -9,12 +9,12 @@ prompt:
 model:
   supported: true
   required: false
-  allowed: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"]
+  allowed: ["gpt-5.6-sol", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"]
   args: [--model, "{model}"]
 reasoning:
   supported: true
   required: false
-  default: medium
+  default: low
   allowed: [low, medium, high, xhigh]
   args: [--config, 'model_reasoning_effort="{reasoning}"']
 directories:

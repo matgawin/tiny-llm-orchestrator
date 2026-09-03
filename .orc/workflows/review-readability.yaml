@@ -2,6 +2,9 @@ name: review-readability
 start: readability-review
 execution:
   mode: sequential
+verification:
+  full_check:
+    argv: ["task", "check"]
 task_context:
   beads: optional
   markdown_fallback: true

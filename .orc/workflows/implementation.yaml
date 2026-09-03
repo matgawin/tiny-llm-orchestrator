@@ -2,6 +2,9 @@ name: implementation
 start: plan
 execution:
   mode: sequential
+verification:
+  full_check:
+    argv: ["task", "check"]
 task_context:
   beads: optional
   markdown_fallback: true
@@ -12,7 +15,8 @@ defaults:
   timeout: 30m
   report_exit_grace: 30s
   runtime: codex
-  model: gpt-5.5
+  model: gpt-5.6-sol
+  reasoning: medium
   retries:
     failed/missing_report: 1
     failed/timeout: 0
@@ -22,8 +26,6 @@ defaults:
 steps:
   plan:
     agent: planner
-    model: gpt-5.5
-    reasoning: xhigh
     allowed_results:
       done: [ready]
       blocked: [blocked]
@@ -38,6 +40,8 @@ steps:
       failed/process_error: blocked_for_human
   code:
     agent: coder
+    model: gpt-5.6-sol
+    reasoning: low
     skippable: true
     allowed_results:
       done: [ready, skipped]
@@ -68,6 +72,7 @@ steps:
       failed/process_error: blocked_for_human
   test:
     kind: command
+    verification: full
     command:
       argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:
@@ -116,6 +121,8 @@ steps:
       failed/process_error: blocked_for_human
   code_fixer:
     agent: coder
+    model: gpt-5.6-sol
+    reasoning: low
     skippable: true
     allowed_results:
       done: [ready, skipped]
@@ -146,6 +153,7 @@ steps:
       failed/process_error: blocked_for_human
   test-redundancy:
     kind: command
+    verification: full
     command:
       argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:
@@ -177,6 +185,8 @@ steps:
       failed/process_error: blocked_for_human
   code_cleaner:
     agent: coder
+    model: gpt-5.6-sol
+    reasoning: low
     skippable: true
     allowed_results:
       done: [ready, skipped]
@@ -207,6 +217,7 @@ steps:
       failed/process_error: blocked_for_human
   test-readability:
     kind: command
+    verification: full
     command:
       argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:

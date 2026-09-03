@@ -6,7 +6,7 @@ files:
   - path: .orc/agents/coder.md
     sha256: 27daec040196a849511973acc131800fba69daf8448c38656eb6cd787d4259a5
   - path: .orc/agents/docs-reviewer.md
-    sha256: 9c5472d9126a4f687c44071141aa8064fc23834c337613b348132e38cd811343
+    sha256: 753ec28c495e5fd83fdc6628f3968adec7d30c0965ca8ac7aabf8c6eed0fc4eb
   - path: .orc/agents/mechanical-coder.md
     sha256: 85eb4aede60bd6d5b4d1e3c2d940265c10ebb797464c1a3d3db296631c99ac21
   - path: .orc/agents/mechanical-reviewer.md
@@ -14,7 +14,7 @@ files:
   - path: .orc/agents/planner.md
     sha256: 773c92dacf073d40d15bca3c76c19c2ac10e28860f0ca9b9c1b62b7078bbe68b
   - path: .orc/agents/readability-reviewer.md
-    sha256: 8b546337b0e9be2ee83729f0fb3f78faf049f480d8a93ef66fe96acf80b870f7
+    sha256: 876a714cabea2552493951d93cbdedbaf78e2d875364b11a7e13adc59128bf25
   - path: .orc/agents/redundancy-reviewer.md
     sha256: a65d5daf1814181e81bee18b5e675c8ae0c97fac75ac06fbc72f5f52c8a60635
   - path: .orc/agents/reviewer.md
@@ -26,18 +26,18 @@ files:
   - path: .orc/workflows/bugfix.yaml
     sha256: 863581b2997c7d78168fa5eec112d2ad8afeb60449361e856e80f97d3d69d204
   - path: .orc/workflows/docs-update.yaml
-    sha256: c48b091d941e64a10d0df31f36556b3cc2712ad1c955ba308dbf9e01f079b0b3
+    sha256: 28dc0024c4a6f95208addf11f1ec9e7bbc7220f59555a1811bc41859e0f2302d
   - path: .orc/workflows/mechanical-change.yaml
     sha256: 84d155e9147595697c49602a49a4aa5d42c18e18630742d083e7ed73b96b02d4
   - path: .orc/workflows/review-docs.yaml
-    sha256: 30f8b2c59237edea57f433a76684d8468397620a9cd399d2a42bce70dc36d211
+    sha256: cf97c6fee9090f2dd15b2b42e470a86f48039b544f6c1c63935bef1cf51eecf3
   - path: .orc/workflows/review-fix.yaml
     sha256: b13876955c713d36c0c03942225312d5fabf9b339e51331227bf21353cd360d6
   - path: .orc/workflows/review-mechanical.yaml
-    sha256: 54fe27291c655f86aff2075d88dcdd160601df45636e891070dc47b921dcdf8c
+    sha256: d40a1ca0d204feac6903fc54a8adc38b5461b7e4cd3ec049e8a2fd270b3e29b2
   - path: .orc/workflows/review-readability.yaml
-    sha256: 5b5b5ffe0dfff81b0776b2942165d045fdd2c49aeab65009329d5ece8c4c45ce
+    sha256: e83b8670df849bfdfe1cb159b0d5e97dc2ba5cfa16bae588572413410f6626d1
   - path: .orc/workflows/review-redundancy.yaml
-    sha256: f931feedca8d0acd8e934b29779628f1c16bb2848b5aec6c10dbbb8347191c90
+    sha256: 3337d3135f116d5b1cb544333c53a499222989ca0f685d31ec4fb2f376320b54
   - path: .orc/workflows/test-only.yaml
-    sha256: e80746dc60c6d35a173d00b40d0500ab2549e9ac9a6b7223930e0c4d6f7e9527
+    sha256: 0a8e4aadfab38a855eda309a5a3f3bd0f4c4f5d8ff1efa78296df26c545b7613

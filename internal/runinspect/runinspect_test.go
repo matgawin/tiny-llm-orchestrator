@@ -23,6 +23,20 @@ import (
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
+func TestPrintReviewFindingsIncludesFullStructuredValues(t *testing.T) {
+	var out bytes.Buffer
+	printReviewFindings(&out, []runstore.Attempt{{
+		AttemptID: "review-1", StepID: "review", ReportRef: &runstore.ArtifactRef{},
+		Report: &runstore.Report{Findings: []runstore.Finding{{FindingID: "missing-output", Category: "correctness", Path: "internal/cli/main.go", Location: "run", Summary: "The error is not written."}}},
+	}})
+
+	for _, want := range []string{"review_findings:", `attempt: "review-1"`, `finding_id: "missing-output"`, `path: "internal/cli/main.go"`, `summary: "The error is not written."`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("inspection output = %q, want %q", out.String(), want)
+		}
+	}
+}
+
 func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
@@ -730,6 +744,7 @@ func writeApprovedSummaryContextFixture(t *testing.T, root string) string {
 		Commands:     []string{"go test ./internal/runinspect"},
 		Tests:        []string{"go test ./internal/runinspect"},
 		Risks:        []string{"format needs human approval"},
+		Findings:     []runstore.Finding{{FindingID: "summary-order", Category: "correctness", Path: "internal/runinspect/runinspect.go", Location: "renderWorkerReports", Summary: "Keep this finding with the code report."}},
 		Followups:    []runstore.Followup{{Title: "Update release note", Details: "Mention summary-context."}},
 	}, fixedTime().Add(2*time.Minute))
 	recordLaunchedStepAttempt(t, store, runID, "plan", "planner", "attempt-plan")

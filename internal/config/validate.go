@@ -103,14 +103,8 @@ func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 }
 
 func validateSandboxConfig(projectRoot string, sandbox *SandboxConfig) error {
-	if len(sandbox.Command.Argv) == 0 {
-		return errors.New("sandbox.command.argv must declare at least one argument")
-	}
-
-	for i, arg := range sandbox.Command.Argv {
-		if arg == "" {
-			return fmt.Errorf("sandbox.command.argv[%d] is empty", i)
-		}
+	if err := validateCommandArgv("sandbox.command.argv", sandbox.Command.Argv); err != nil {
+		return err
 	}
 
 	if sandbox.CWD == "" {
@@ -565,6 +559,12 @@ func validateWorkflowShape(workflow Workflow) error {
 		return err
 	}
 
+	if workflow.Verification.present || len(workflow.Verification.FullCheck.Argv) > 0 {
+		if err := validateCommandArgv("verification.full_check.argv", workflow.Verification.FullCheck.Argv); err != nil {
+			return err
+		}
+	}
+
 	if len(workflow.Steps) == 0 {
 		return errors.New("steps are required")
 	}
@@ -630,6 +630,14 @@ func validateSkipContract(stepName string, step Step, stepPairs resultPairSet) e
 
 func validateStepKind(stepName string, step Step, workflow Workflow, agents map[string]Agent, runtimes map[string]Runtime) error {
 	kind := step.EffectiveKind()
+	if step.Verification != "" && step.Verification != "full" {
+		return fmt.Errorf("step %q verification %q is invalid; allowed: full", stepName, step.Verification)
+	}
+
+	if kind == StepKindAgent && step.Verification != "" {
+		return fmt.Errorf("step %q kind agent must not set verification", stepName)
+	}
+
 	if step.Script.Body != "" {
 		return fmt.Errorf("step %q script.body is not supported in v1", stepName)
 	}
@@ -695,18 +703,26 @@ func validateCommandStepKind(stepName string, step Step) error {
 		return err
 	}
 
-	if len(step.Command.Argv) == 0 {
-		return fmt.Errorf("step %q command.argv must declare at least one argument", stepName)
-	}
-
-	for i, arg := range step.Command.Argv {
-		if arg == "" {
-			return fmt.Errorf("step %q command.argv[%d] is empty", stepName, i)
-		}
+	if err := validateCommandArgv(fmt.Sprintf("step %q command.argv", stepName), step.Command.Argv); err != nil {
+		return err
 	}
 
 	if step.Script.Path != "" || len(step.Script.Args) > 0 {
 		return fmt.Errorf("step %q kind command must not set script", stepName)
+	}
+
+	return nil
+}
+
+func validateCommandArgv(name string, argv []string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("%s must declare at least one argument", name)
+	}
+
+	for i, arg := range argv {
+		if arg == "" {
+			return fmt.Errorf("%s[%d] is empty", name, i)
+		}
 	}
 
 	return nil

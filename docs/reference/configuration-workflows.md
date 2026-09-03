@@ -41,6 +41,9 @@ Workflow files define:
 - `defaults.reasoning`, optional
 - `defaults.runtime_dirs`, optional
 - `steps`
+- `verification.full_check.argv`, an optional reviewer fallback command
+
+`verification.full_check.argv` is one non-empty argument list. Reviewers run it from the project root when no fresh full-verification evidence exists. A command or script step can set `verification: full`. Only a `done/passed` report from that step supplies full-verification evidence. Agent steps cannot set `verification`.
 
 Validation rules:
 

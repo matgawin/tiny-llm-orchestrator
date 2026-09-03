@@ -2,6 +2,9 @@ name: review-docs
 start: docs-review
 execution:
   mode: sequential
+verification:
+  full_check:
+    argv: ["task", "check"]
 task_context:
   beads: optional
   markdown_fallback: true

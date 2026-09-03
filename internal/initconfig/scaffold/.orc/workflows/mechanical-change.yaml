@@ -2,6 +2,9 @@ name: mechanical-change
 start: plan
 execution:
   mode: sequential
+verification:
+  full_check:
+    argv: ["task", "check"]
 task_context:
   beads: optional
   markdown_fallback: true
@@ -63,6 +66,7 @@ steps:
       failed/process_error: blocked_for_human
   test:
     kind: command
+    verification: full
     command:
       argv: ["timeout", "--kill-after=10s", "5m", "task", "check"]
     allowed_results:

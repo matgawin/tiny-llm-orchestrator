@@ -224,9 +224,19 @@ type Report struct {
 	Commands     []string     `json:"commands,omitempty"`
 	Tests        []string     `json:"tests,omitempty"`
 	Risks        []string     `json:"risks,omitempty"`
+	Findings     []Finding    `json:"findings,omitempty"`
 	Followups    []Followup   `json:"followups,omitempty"`
 	ReportFile   string       `json:"report_file,omitempty"`
 	ReportRef    *ArtifactRef `json:"report_ref,omitempty"`
+}
+
+// Finding is one stable, structured review finding.
+type Finding struct {
+	FindingID string `json:"finding_id"`
+	Category  string `json:"category"`
+	Path      string `json:"path"`
+	Location  string `json:"location"`
+	Summary   string `json:"summary"`
 }
 
 // Followup is a report-proposed follow-up item. The follow-up artifact is owned

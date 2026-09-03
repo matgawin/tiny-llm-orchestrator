@@ -74,6 +74,31 @@ func TestSubmitRejectsWorkerReportedSkippedOutcome(t *testing.T) {
 	}
 }
 
+func TestValidatePayloadShapeValidatesFindings(t *testing.T) {
+	valid := runstore.Finding{FindingID: "missing-output", Category: "correctness", Path: "internal/cli/main.go", Location: "run", Summary: "The error is not written."}
+
+	tests := []struct {
+		name   string
+		report runstore.Report
+		want   string
+	}{
+		{"changes requested requires findings", runstore.Report{Status: "done", Result: "changes_requested", Summary: "fix"}, "done/changes_requested requires findings"},
+		{"approved rejects findings", runstore.Report{Status: "done", Result: "approved", Summary: "ok", Findings: []runstore.Finding{valid}}, "done/approved must not contain findings"},
+		{"invalid id", runstore.Report{Status: "done", Result: "changes_requested", Summary: "fix", Findings: []runstore.Finding{{FindingID: "Bad ID", Category: "correctness", Path: "main.go", Location: "run", Summary: "fix"}}}, "findings[0].finding_id must match"},
+		{"duplicate id", runstore.Report{Status: "done", Result: "changes_requested", Summary: "fix", Findings: []runstore.Finding{valid, valid}}, `findings[1].finding_id "missing-output" duplicates findings[0].finding_id`},
+		{"unsafe path", runstore.Report{Status: "done", Result: "changes_requested", Summary: "fix", Findings: []runstore.Finding{{FindingID: "unsafe", Category: "correctness", Path: "../main.go", Location: "run", Summary: "fix"}}}, "findings[0].path must be a clean project-relative slash path"},
+		{"dot path", runstore.Report{Status: "done", Result: "changes_requested", Summary: "fix", Findings: []runstore.Finding{{FindingID: "dot", Category: "correctness", Path: ".", Location: "run", Summary: "fix"}}}, "findings[0].path must be a clean project-relative slash path"},
+		{"untrimmed field", runstore.Report{Status: "done", Result: "changes_requested", Summary: "fix", Findings: []runstore.Finding{{FindingID: "trim", Category: " correctness", Path: "main.go", Location: "run", Summary: "fix"}}}, "findings[0].category must be trimmed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := strings.Join(validatePayloadShape(tt.report), "\n"); !strings.Contains(got, tt.want) {
+				t.Fatalf("validation errors = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSubmitValidatesReportAgainstPinnedWorkflowAfterLiveMutation(t *testing.T) {
 	root := t.TempDir()
 	writeSkippableReportProject(t, root)

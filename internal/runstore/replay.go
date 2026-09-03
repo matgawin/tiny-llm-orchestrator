@@ -210,6 +210,8 @@ func applyReplayedAttemptStarted(status *Status, event Event) error {
 
 	status.Continued = nil
 	attempt := payload.Attempt
+
+	applyAttemptOutcomeConsumption(status, event, routing.ConsumeAttemptID)
 	applyAttemptStartRouting(status, event.Time, attempt.AttemptID, routing)
 	status.ActiveAttempt = &attempt
 	status.Attempts = append(status.Attempts, attempt)

@@ -182,6 +182,7 @@ func TestWriteTimeLeftCodexHookReturnsWriterError(t *testing.T) {
 	if err := reader.Close(); err != nil {
 		t.Fatalf("close pipe reader: %v", err)
 	}
+
 	t.Cleanup(func() { _ = writer.Close() })
 
 	err := writeTimeLeftCodexHook(writer, attemptdeadline.Guidance{Phase: attemptdeadline.PhaseNarrow, Remaining: time.Minute, Action: "act"})

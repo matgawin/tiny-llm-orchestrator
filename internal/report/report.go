@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -197,7 +199,12 @@ func recordTargetRaceResult(ctx context.Context, store *runstore.Store, report r
 }
 
 func loadWorkflowConfig(run *runstore.Run) (config.Workflow, error) {
-	snapshot, err := configsnapshot.LoadCurrent(run)
+	version := 1
+	if run.Status.ActiveAttempt != nil && run.Status.ActiveAttempt.ConfigSnapshotVersion > 0 {
+		version = run.Status.ActiveAttempt.ConfigSnapshotVersion
+	}
+
+	snapshot, err := configsnapshot.LoadVersion(run, version)
 	if err != nil {
 		return config.Workflow{}, fmt.Errorf("load workflow config: %w", err)
 	}
@@ -278,19 +285,20 @@ func loadPayload(opts Options) (runstore.Report, string, []string, error) {
 }
 
 type jsonReport struct {
-	RunID        string         `json:"run_id"`
-	StepID       string         `json:"step_id"`
-	AgentID      string         `json:"agent_id"`
-	AttemptID    string         `json:"attempt_id"`
-	Status       string         `json:"status"`
-	Result       string         `json:"result"`
-	Summary      string         `json:"summary"`
-	ChangedPaths []string       `json:"changed_paths"`
-	Commands     []string       `json:"commands"`
-	Tests        []string       `json:"tests"`
-	Risks        []string       `json:"risks"`
-	Followups    []jsonFollowup `json:"followups"`
-	ReportFile   string         `json:"report_file"`
+	RunID        string             `json:"run_id"`
+	StepID       string             `json:"step_id"`
+	AgentID      string             `json:"agent_id"`
+	AttemptID    string             `json:"attempt_id"`
+	Status       string             `json:"status"`
+	Result       string             `json:"result"`
+	Summary      string             `json:"summary"`
+	ChangedPaths []string           `json:"changed_paths"`
+	Commands     []string           `json:"commands"`
+	Tests        []string           `json:"tests"`
+	Risks        []string           `json:"risks"`
+	Findings     []runstore.Finding `json:"findings"`
+	Followups    []jsonFollowup     `json:"followups"`
+	ReportFile   string             `json:"report_file"`
 }
 
 type jsonFollowup struct {
@@ -392,6 +400,7 @@ func (report jsonReport) toReport() runstore.Report {
 		Commands:     report.Commands,
 		Tests:        report.Tests,
 		Risks:        report.Risks,
+		Findings:     report.Findings,
 		Followups:    followups,
 		ReportFile:   report.ReportFile,
 	}
@@ -411,6 +420,7 @@ func hasFlagPayload(opts Options) bool {
 		len(report.Commands) > 0 ||
 		len(report.Tests) > 0 ||
 		len(report.Risks) > 0 ||
+		len(report.Findings) > 0 ||
 		len(report.Followups) > 0 ||
 		report.ReportFile != "" ||
 		opts.ReportFile != ""
@@ -489,7 +499,55 @@ func validatePayloadShape(report runstore.Report) []string {
 		}
 	}
 
+	errs = append(errs, validateFindings(report.Findings)...)
+	if report.Status == "done" && report.Result == "changes_requested" && len(report.Findings) == 0 {
+		errs = append(errs, "done/changes_requested requires findings")
+	}
+
+	if report.Status == "done" && report.Result == "approved" && len(report.Findings) > 0 {
+		errs = append(errs, "done/approved must not contain findings")
+	}
+
 	return errs
+}
+
+var findingIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+func validateFindings(findings []runstore.Finding) []string {
+	var errs []string
+
+	seen := map[string]int{}
+
+	for i, finding := range findings {
+		fields := []struct{ name, value string }{{"finding_id", finding.FindingID}, {"category", finding.Category}, {"path", finding.Path}, {"location", finding.Location}, {"summary", finding.Summary}}
+		for _, field := range fields {
+			if field.value == "" {
+				errs = append(errs, fmt.Sprintf("findings[%d].%s is required", i, field.name))
+			} else if field.value != strings.TrimSpace(field.value) {
+				errs = append(errs, fmt.Sprintf("findings[%d].%s must be trimmed", i, field.name))
+			}
+		}
+
+		if finding.FindingID != "" && !findingIDPattern.MatchString(finding.FindingID) {
+			errs = append(errs, fmt.Sprintf("findings[%d].finding_id must match [a-z0-9][a-z0-9._-]{0,63}", i))
+		}
+
+		if first, ok := seen[finding.FindingID]; ok && finding.FindingID != "" {
+			errs = append(errs, fmt.Sprintf("findings[%d].finding_id %q duplicates findings[%d].finding_id", i, finding.FindingID, first))
+		} else {
+			seen[finding.FindingID] = i
+		}
+
+		if !cleanFindingPath(finding.Path) {
+			errs = append(errs, fmt.Sprintf("findings[%d].path must be a clean project-relative slash path", i))
+		}
+	}
+
+	return errs
+}
+
+func cleanFindingPath(path string) bool {
+	return path != "." && !strings.Contains(path, `\`) && fs.ValidPath(path)
 }
 
 func validatePayloadWorkflow(workflowConfig config.Workflow, report runstore.Report) []string {

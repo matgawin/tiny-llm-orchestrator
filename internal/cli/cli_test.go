@@ -184,6 +184,14 @@ func cliCodexShimWorkerReport() {
 		}
 	}
 
+	if status == "done" && result == "changes_requested" {
+		if err := submitCLIShimChangesRequested(prompt, summary); err != nil {
+			os.Exit(1)
+		}
+
+		return
+	}
+
 	args := []string{
 		commandReport,
 		"--run", promptValue(prompt, "run_id"),
@@ -197,6 +205,45 @@ func cliCodexShimWorkerReport() {
 	if err := Execute(args, os.Stdout, os.Stderr); err != nil {
 		os.Exit(1)
 	}
+}
+
+func submitCLIShimChangesRequested(prompt, summary string) error {
+	payload := runstore.Report{
+		RunID: promptValue(prompt, "run_id"), StepID: promptValue(prompt, "step_id"), AgentID: promptValue(prompt, "agent_id"), AttemptID: promptValue(prompt, "attempt_id"),
+		Status: "done", Result: "changes_requested", Summary: summary,
+		Findings: []runstore.Finding{{FindingID: "review-change", Category: "correctness", Path: "docs/README.md", Location: "review", Summary: summary}},
+	}
+
+	content, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal report: %w", err)
+	}
+
+	file, err := os.CreateTemp("", "orc-report-*.json")
+	if err != nil {
+		return fmt.Errorf("create report file: %w", err)
+	}
+
+	name := file.Name()
+	if _, err = file.Write(content); err == nil {
+		err = file.Close()
+	}
+
+	if err == nil {
+		err = Execute([]string{commandReport, "--json-file", name}, os.Stdout, os.Stderr)
+	}
+
+	removeErr := os.Remove(name)
+
+	if err != nil {
+		return err
+	}
+
+	if removeErr != nil {
+		return fmt.Errorf("remove report file: %w", removeErr)
+	}
+
+	return nil
 }
 
 func promptValue(prompt, name string) string {

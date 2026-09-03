@@ -70,8 +70,6 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"Creates implementation plans and scope boundaries.",
 		"Plan the work and report readiness.",
 		"# Task\n\nBuild prompt rendering.",
-		"### reports/000004-plan.md\n",
-		"# Prior Plan\n\nUse existing run-store artifacts.",
 		"`done/ready`",
 		"`blocked/blocked`",
 		"## Live Progress\n",
@@ -445,6 +443,36 @@ func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
 	}
 }
 
+func TestRenderReviewerReportContractDefinesFindings(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	startPromptAttempt(t, store, runID, "review", "reviewer", "attempt-review")
+
+	result, err := Render(context.Background(), Options{
+		Root: root, RunID: runID, StepID: "review", AgentID: "reviewer", AttemptID: "attempt-review", AllowUnselectedStep: true,
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	assertPromptContainsAll(t, string(result.Content), []string{
+		`"finding_id": "time-left-missing-error-output"`,
+		`"category": "correctness"`,
+		`"path": "internal/cli/time_left.go"`,
+		`"location": "executeTimeLeft"`,
+		`"summary": "The command returns an error without writing it."`,
+		"All five fields are required, must be non-empty, and must be trimmed.",
+		"`finding_id` must match `[a-z0-9][a-z0-9._-]{0,63}` and must be unique in one report.",
+		"`path` must be a clean project-relative slash path.",
+		"It must not be absolute, contain a backslash or empty segment, or contain `.` or `..` segments.",
+		"A `done/changes_requested` report requires one or more findings.",
+		"A `done/approved` report must not contain findings.",
+	})
+}
+
 func TestRenderIncludesStructuredPriorReportCanonicalArtifactPath(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)
@@ -606,10 +634,9 @@ func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
 	}
 
 	prompt := string(result.Content)
-	assertPromptContainsAll(t, prompt, []string{
-		"### step plan skipped\n",
-		"step plan skipped by human decision: not worth another review",
-	})
+	if strings.Contains(prompt, "not worth another review") {
+		t.Fatalf("prompt contains skipped-step history:\n%s", prompt)
+	}
 }
 
 func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
@@ -681,14 +708,8 @@ func TestRenderRequiresPriorAttemptReportRef(t *testing.T) {
 		AttemptID: "attempt-test",
 		Time:      fixedPromptTime().Add(8 * time.Minute),
 	})
-	if err == nil {
-		t.Fatal("Render returned nil error, want missing report_ref error")
-	}
-
-	for _, want := range []string{`run "prompt-run"`, `attempt "` + "attempt-plan" + `"`, `step "` + "plan" + `"`, "missing report_ref"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("Render error = %q, want %q", err, want)
-		}
+	if err != nil {
+		t.Fatalf("Render returned error for a report outside accepted selection: %v", err)
 	}
 }
 
@@ -723,8 +744,7 @@ func TestRenderTruncatedPriorReportRequiresReadingFullReport(t *testing.T) {
 
 	assertPromptContainsAll(t, string(result.Content), []string{
 		"Full report: `.orc/runs/prompt-run/reports/000009-plan.md`",
-		"[excerpt truncated]",
-		"This excerpt is truncated. Read the full report before using this prior report as implementation, review, or correction input: `.orc/runs/prompt-run/reports/000009-plan.md`",
+		strings.TrimSpace(strings.Repeat("long summary ", 160)),
 	})
 }
 
@@ -938,6 +958,238 @@ func TestShellQuoteQuotesOpaqueAttemptIDs(t *testing.T) {
 	got := shellQuote("attempt with space")
 	if got != "'attempt with space'" {
 		t.Fatalf("shellQuote returned %q, want quoted opaque id", got)
+	}
+}
+
+func TestSelectReportsDoesNotInventRoutingReport(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+
+	loaded, err := store.LoadContext(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	ref := &runstore.ArtifactRef{EventSequence: 4}
+	loaded.Status.Attempts = []runstore.Attempt{{
+		AttemptID: "old-test", AgentID: "tester", State: runstore.AttemptStateReported,
+		Report: &runstore.Report{Status: "done", Result: "passed"}, ReportRef: ref,
+	}}
+	loaded.Events = nil
+
+	selected, err := selectReports(renderContext{run: loaded, attempt: runstore.Attempt{AttemptID: "initial-plan", ConfigSnapshotVersion: 1}})
+	if err != nil {
+		t.Fatalf("selectReports returned error: %v", err)
+	}
+
+	if len(selected) != 0 {
+		t.Fatalf("selected reports = %+v, want none", selected)
+	}
+
+	if correctionRoute(renderContext{run: loaded, attempt: runstore.Attempt{AttemptID: "initial-plan"}}) {
+		t.Fatal("correctionRoute = true without an attempt.started event")
+	}
+}
+
+func TestVerificationEvidenceAndCorrectionRoute(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+
+	loaded, err := store.LoadContext(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	mutatePromptResolvedSnapshot(t, root, runID, func(project *config.Project) {
+		wf := project.Workflows["implementation"]
+		step := wf.Steps["test"]
+		step.Kind = config.StepKindCommand
+		step.Agent = ""
+		step.Command.Argv = []string{"task", "check"}
+		step.Verification = "full"
+		wf.Steps["test"] = step
+		project.Workflows["implementation"] = wf
+	})
+
+	verificationRef := &runstore.ArtifactRef{EventSequence: 8}
+	changedRef := &runstore.ArtifactRef{EventSequence: 6}
+	routingRef := &runstore.ArtifactRef{EventSequence: 9}
+	loaded.Status.Attempts = []runstore.Attempt{
+		{AttemptID: "changed", AgentID: "planner", State: runstore.AttemptStateReported, Report: &runstore.Report{Status: "done", Result: "ready", ChangedPaths: []string{"main.go"}}, ReportRef: changedRef},
+		{AttemptID: "verified", StepID: "test", AgentID: "command", ConfigSnapshotVersion: 1, State: runstore.AttemptStateReported, Report: &runstore.Report{Status: "done", Result: "passed"}, ReportRef: verificationRef},
+		{AttemptID: "review", AgentID: "reviewer", State: runstore.AttemptStateReported, ConsumedByEvent: 10, Report: &runstore.Report{Status: "done", Result: "changes_requested"}, ReportRef: routingRef},
+	}
+	loaded.Events = []runstore.Event{{Type: "attempt.started", Sequence: 10, Payload: json.RawMessage(`{"attempt":{"attempt_id":"code"}}`)}}
+	ctx := renderContext{
+		run: loaded, attempt: runstore.Attempt{AttemptID: "code", ConfigSnapshotVersion: 1},
+		workflow: config.Workflow{Verification: config.VerificationConfig{FullCheck: config.CommandStep{Argv: []string{"task", "check"}}}},
+	}
+
+	fresh, err := freshVerification(ctx)
+	if err != nil || fresh == nil || fresh.AttemptID != "verified" {
+		t.Fatalf("freshVerification = %+v, %v, want verified", fresh, err)
+	}
+
+	evidence, err := renderVerificationEvidence(ctx)
+	if err != nil || !strings.Contains(evidence, "Do not repeat the full check") || !strings.Contains(evidence, "`task check`") {
+		t.Fatalf("renderVerificationEvidence = %q, %v", evidence, err)
+	}
+
+	if !correctionRoute(ctx) {
+		t.Fatal("correctionRoute = false, want true")
+	}
+
+	loaded.Status.Attempts[0].ReportRef.EventSequence = 11
+
+	evidence, err = renderVerificationEvidence(ctx)
+	if err != nil || !strings.Contains(evidence, "Run `task check`") {
+		t.Fatalf("stale renderVerificationEvidence = %q, %v", evidence, err)
+	}
+
+	ctx.workflow.Verification.FullCheck.Argv = nil
+
+	evidence, err = renderVerificationEvidence(ctx)
+	if err != nil || !strings.Contains(evidence, "Report `blocked/blocked`") {
+		t.Fatalf("missing fallback evidence = %q, %v", evidence, err)
+	}
+}
+
+func TestSelectReportsDoesNotGiveImplementationContextOrCorrectionBoundaryToPlanner(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	mutatePromptResolvedSnapshot(t, root, runID, func(project *config.Project) {
+		project.Agents["coder"] = config.Agent{ID: "coder", Role: "coder"}
+	})
+
+	loaded, err := store.LoadContext(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	implementationRef := &runstore.ArtifactRef{EventSequence: 4}
+	routingRef := &runstore.ArtifactRef{EventSequence: 6}
+	loaded.Status.Attempts = []runstore.Attempt{
+		{AttemptID: "implementation", AgentID: "coder", State: runstore.AttemptStateReported, Report: &runstore.Report{Status: "done", Result: "ready"}, ReportRef: implementationRef},
+		{AttemptID: "failed-check", AgentID: "tester", State: runstore.AttemptStateReported, ConsumedByEvent: 7, Report: &runstore.Report{Status: "done", Result: "failed"}, ReportRef: routingRef},
+	}
+	loaded.Events = []runstore.Event{{Type: "attempt.started", Sequence: 7, Payload: json.RawMessage(`{"attempt":{"attempt_id":"replan"}}`)}}
+	ctx := renderContext{run: loaded, agent: config.Agent{Role: "planner"}, attempt: runstore.Attempt{AttemptID: "replan", ConfigSnapshotVersion: 1}}
+
+	selected, err := selectReports(ctx)
+	if err != nil {
+		t.Fatalf("selectReports returned error: %v", err)
+	}
+
+	if len(selected) != 1 || selected[0].AttemptID != "failed-check" {
+		t.Fatalf("selected reports = %+v, want failed-check only", selected)
+	}
+
+	if correctionBoundary(ctx) {
+		t.Fatal("planner prompt includes correction search boundary")
+	}
+}
+
+func TestRenderCorrectionPromptContainsOnlyRequiredContext(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n\nFix the reported failure.\n", fixedPromptTime())
+
+	mutatePromptResolvedSnapshot(t, root, runID, func(project *config.Project) {
+		project.Agents["coder"] = config.Agent{ID: "coder", Role: "coder", Description: "Implements corrections."}
+		wf := project.Workflows["implementation"]
+		wf.Steps["code"] = config.Step{Agent: "coder"}
+		step := wf.Steps["test"]
+		step.Kind = config.StepKindCommand
+		step.Agent = ""
+		step.Command.Argv = []string{"task", "check"}
+		step.Verification = "full"
+		wf.Steps["test"] = step
+		project.Workflows["implementation"] = wf
+	})
+
+	loaded, err := store.LoadContext(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	reportAttempt := func(attemptID, stepID, agentID, content string, report runstore.Report) runstore.Attempt {
+		t.Helper()
+
+		ref, writeErr := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
+			Kind: runstore.KindReport, Name: stepID, Content: []byte(content), Time: fixedPromptTime(),
+		})
+		if writeErr != nil {
+			t.Fatalf("WriteArtifact report returned error: %v", writeErr)
+		}
+
+		report.RunID, report.StepID, report.AgentID, report.AttemptID = runID, stepID, agentID, attemptID
+		report.ReportRef = &ref
+
+		return runstore.Attempt{
+			AttemptID: attemptID, StepID: stepID, AgentID: agentID, ConfigSnapshotVersion: 1,
+			State: runstore.AttemptStateReported, Report: &report, ReportRef: &ref,
+		}
+	}
+
+	planner := reportAttempt("planner", "plan", "planner", "PLANNER SCOPE", runstore.Report{Status: "done", Result: "ready"})
+	implementation := reportAttempt("implementation", "code", "coder", "LATEST IMPLEMENTATION AND MODIFICATION", runstore.Report{Status: "done", Result: "ready", ChangedPaths: []string{"internal/example.go"}})
+	verification := reportAttempt("verification", "test", "command", "FRESH FULL VERIFICATION", runstore.Report{Status: "done", Result: "passed"})
+	origin := reportAttempt("finding-origin", "review", "reviewer", "FINDING ORIGIN FULL DETAIL", runstore.Report{Status: "done", Result: "changes_requested", Findings: []runstore.Finding{{FindingID: "focused-failure", Category: "correctness", Path: "internal/example.go", Location: "run", Summary: "The failure remains."}}})
+	routing := reportAttempt("routing", "review", "reviewer", "ROUTING REPORT", runstore.Report{Status: "done", Result: "changes_requested", Findings: []runstore.Finding{{FindingID: "focused-failure", Category: "correctness", Path: "internal/example.go", Location: "run", Summary: "Fix this failure."}}})
+	unrelated := reportAttempt("unrelated", "test", "tester", "UNRELATED HISTORY", runstore.Report{Status: "done", Result: "failed"})
+	routing.ConsumedByEvent = unrelated.ReportRef.EventSequence + 1
+	current := runstore.Attempt{AttemptID: "correction", StepID: "code", AgentID: "coder", ConfigSnapshotVersion: 1, Timeout: "30m", StartedAt: fixedPromptTime()}
+	loaded.Status.Attempts = []runstore.Attempt{planner, implementation, verification, origin, routing, unrelated, current}
+	loaded.Events = []runstore.Event{{Type: "attempt.started", Sequence: routing.ConsumedByEvent, Payload: json.RawMessage(`{"attempt":{"attempt_id":"correction"}}`)}}
+
+	snapshot, err := configsnapshot.LoadVersion(loaded, 1)
+	if err != nil {
+		t.Fatalf("LoadVersion returned error: %v", err)
+	}
+
+	renderCtx := renderContext{
+		store: store, run: loaded, workflow: snapshot.Project.Workflows["implementation"],
+		step: snapshot.Project.Workflows["implementation"].Steps["code"], agent: snapshot.Project.Agents["coder"], attempt: current,
+	}
+
+	content, err := renderPrompt(context.Background(), renderCtx, Options{Root: root, RunID: runID, StepID: "code", AgentID: "coder", AttemptID: "correction", Time: fixedPromptTime().Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("renderPrompt returned error: %v", err)
+	}
+
+	prompt := string(content)
+	assertPromptContainsAll(t, prompt, []string{
+		"# Task\n\nFix the reported failure.", "PLANNER SCOPE", "LATEST IMPLEMENTATION AND MODIFICATION",
+		"FRESH FULL VERIFICATION", "ROUTING REPORT", "FINDING ORIGIN FULL DETAIL",
+		"Start from the blocking finding, failed command, and changed lines. Inspect direct definitions, callers, and dependencies only. Do not search for additional defects or improvements. Report blocked before broader repository investigation.",
+	})
+
+	if strings.Contains(prompt, "UNRELATED HISTORY") {
+		t.Fatalf("correction prompt contains unrelated history:\n%s", prompt)
+	}
+
+	if strings.Count(prompt, "LATEST IMPLEMENTATION AND MODIFICATION") != 1 {
+		t.Fatalf("correction prompt did not de-duplicate implementation and modifying report:\n%s", prompt)
+	}
+
+	wantOrder := []string{"PLANNER SCOPE", "LATEST IMPLEMENTATION AND MODIFICATION", "FRESH FULL VERIFICATION", "ROUTING REPORT", "FINDING ORIGIN FULL DETAIL"}
+	last := -1
+
+	for _, marker := range wantOrder {
+		index := strings.Index(prompt, marker)
+		if index <= last {
+			t.Fatalf("correction prompt report order is wrong at %q:\n%s", marker, prompt)
+		}
+
+		last = index
 	}
 }
 
