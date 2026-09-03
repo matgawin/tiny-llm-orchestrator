@@ -54,14 +54,6 @@ path to duplicate guards at each caller.
 - Two stdlib options, same size? Take the one that is correct on edge cases. Lazy means writing less code, not picking the weaker algorithm.
 - Mark deliberate simplifications that cut a real corner with a known ceiling (global lock, O(n^2) scan, naive heuristic) with a `minimum:` comment naming the ceiling and upgrade path (`# minimum: global lock, per-account locks if throughput matters`).
 
-## Output
-
-Code first. Then use at most three short lines: what was skipped, and when to
-add it. Do not add a design note unless the user asks for it. A requested
-report, walkthrough, or phase note can be longer.
-
-Pattern: `[code] -> skipped: [X], add when [Y].`
-
 ## Intensity
 
 | Level | What change |
@@ -85,17 +77,8 @@ not keep arguing.
 Never reduce the reading step. The ladder shortens the solution, not the
 analysis. Trace every file that the change touches before you pick a rung.
 
-Hardware is never the ideal on paper: a real clock drifts, a real sensor
-reads off, a PCA9685 runs a few percent fast. Leave the calibration knob, not
-just less code. The physical world needs tuning that a minimal model cannot
-see.
-
-Lazy code without its check is unfinished. Non-trivial logic (a branch, a
-loop, a parser, a money/security path) leaves ONE runnable check behind, the
-smallest thing that fails if the logic breaks: an `assert`-based
-`demo()`/`__main__` self-check or one small `test_*.py`. No frameworks, no
-fixtures, no per-function suites unless asked. Trivial one-liners need no
-test, YAGNI applies to tests too.
+Follow repository test policy. Leave the narrowest proof required for changed
+behavior.
 
 ## Boundaries
 

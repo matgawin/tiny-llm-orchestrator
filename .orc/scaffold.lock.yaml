@@ -2,27 +2,27 @@ version: 1
 setup_version: 1
 files:
   - path: .orc/agents/bug-reproducer.md
-    sha256: 667dd1d9422bac863003013247c8dfa5c0a6f31fb7f44e34925f82c41f550342
+    sha256: 7c255a58287a4247baa8cc1c0aa9dace24329460542743f4c2b9f70dd5ead8fa
   - path: .orc/agents/coder.md
-    sha256: 2aeab8b0528d88650647e0e484ce2ae53e40e67b69f1bc88d417bb36f8f12870
+    sha256: 27daec040196a849511973acc131800fba69daf8448c38656eb6cd787d4259a5
   - path: .orc/agents/docs-reviewer.md
-    sha256: 7316146e40b164dc54a4f03c8d7edf8741b649b017abfaac7cb90f6e29e95e01
+    sha256: 9c5472d9126a4f687c44071141aa8064fc23834c337613b348132e38cd811343
   - path: .orc/agents/mechanical-coder.md
-    sha256: 008aebf98a554821a5f5b0e9688f59de1b78c60f72292fa432a5755ff064d74b
+    sha256: 85eb4aede60bd6d5b4d1e3c2d940265c10ebb797464c1a3d3db296631c99ac21
   - path: .orc/agents/mechanical-reviewer.md
-    sha256: 25298f87f8fda5ac82e75193b7c8c88b35e3eda3f4c78454c10e93af450d8f38
+    sha256: 7762e458ee6f3dddb4278c5390fbfc13e80d8410c495639d1908f2af927c6d32
   - path: .orc/agents/planner.md
-    sha256: b32220a04fa1512f1b9ad604c7ce478973751395836261e36450e7070e3c1711
+    sha256: 773c92dacf073d40d15bca3c76c19c2ac10e28860f0ca9b9c1b62b7078bbe68b
   - path: .orc/agents/readability-reviewer.md
-    sha256: a3b0d3487ef414087b3e470ce6b686bad54f4d3562557bfdc043a1a3caeb22e8
+    sha256: 8b546337b0e9be2ee83729f0fb3f78faf049f480d8a93ef66fe96acf80b870f7
   - path: .orc/agents/redundancy-reviewer.md
     sha256: a65d5daf1814181e81bee18b5e675c8ae0c97fac75ac06fbc72f5f52c8a60635
   - path: .orc/agents/reviewer.md
     sha256: b5af3de01c6d5475a10b6db30687c1fa1f3cf55d7d7d0f395e86d6218acc3e8e
   - path: .orc/agents/test-designer.md
-    sha256: 3b7edf8c689455653403ff94bbf609647e57eb2d079b87006e7c6db9ee08892e
+    sha256: 8d852fa9e26de15d9d8573db7df6e3f6c230c9931510153b095720e4fdc70c37
   - path: .orc/agents/tester.md
-    sha256: e60c9b1b406c886dacd2f4e7810f673d8552afdb3080049103534f0f37444081
+    sha256: 75d0f22546afe525392b60bcc87667f3d3ffb6dbb60b729219aeae0d64cca958
   - path: .orc/workflows/bugfix.yaml
     sha256: 863581b2997c7d78168fa5eec112d2ad8afeb60449361e856e80f97d3d69d204
   - path: .orc/workflows/docs-update.yaml

@@ -73,17 +73,23 @@ Rendered prompts include:
 - the worker-reportable `status/result` pairs for the selected step
 - the exact required `orc report` command shape
 
-Scaffolded role descriptors include a scope-control contract for expansive
-models. Planner prompts require a scope envelope with `Required change`,
-`Out of scope`, `Acceptable files`, `Required checks`, and `Stop after`
-headings. Coding prompts tell workers to make one scoped implementation pass,
-run focused validation when time allows, and report instead of running an
-internal implement-review-implement loop. Review, test, and reproduction
-prompts tell workers to keep blocking findings inside the task scope and record
-adjacent cleanup, broad tests, future-proofing, unrelated bugs, and architecture
-preferences as follow-ups. Role descriptors that write reports require
-ASD-STE100 Simplified Technical English with exact paths, commands, config
-keys, and observed behavior.
+Scaffolded role descriptors use one authority order. Human `Task Context`
+defines the maximum scope. A planner can reduce this scope but cannot expand
+it. A reviewer can request changes only for original requirements, preserved
+behavior, or regressions introduced by the run. A repository skill controls
+the work method only. It cannot change task scope, role boundaries, required
+results, or stop conditions. Work outside these limits is a follow-up or a
+blocker.
+
+Repository instruction files remain mandatory. A matching repository skill
+replaces matching method rules only. Planner prompts require `Required change`,
+`Out of scope`, `Expected files`, `Required checks`, and `Stop after`.
+`Expected files` is guidance and is not an allowlist. Coding prompts permit an
+unexpected path only when correct requested behavior requires it. They require
+one separate structured risk for each path:
+`unexpected path <path>: <reason the requested behavior cannot be correct without this change>`.
+Review prompts inspect the repository diff and compare each unexpected path
+and reason with the human task, planner scope, and actual diff.
 
 Loop context includes the workflow name, repeated state, current count, soft
 cap, hard cap, prior statuses when recorded by workflow state-entry metadata,

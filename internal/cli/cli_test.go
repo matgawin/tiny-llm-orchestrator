@@ -22,6 +22,13 @@ import (
 	"tiny-llm-orchestrator/orc/internal/testutil"
 )
 
+var cliWorkerIdentityEnv = []string{
+	"ORC_PROJECT_ROOT",
+	"ORC_RUN_ID",
+	"ORC_STEP_ID",
+	"ORC_ATTEMPT_ID",
+}
+
 func TestMain(m *testing.M) {
 	if os.Getenv("ORC_CLI_CODEX_SHIM") == "1" && filepath.Base(os.Args[0]) == "codex" {
 		cliCodexShimMain()
@@ -36,7 +43,36 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	for _, name := range cliWorkerIdentityEnv {
+		_ = os.Unsetenv(name)
+	}
+
 	os.Exit(m.Run())
+}
+
+func TestCLITestProcessClearsInheritedWorkerIdentity(t *testing.T) {
+	if os.Getenv("ORC_CLI_TEST_INHERITED_WORKER_IDENTITY") == "1" {
+		for _, name := range cliWorkerIdentityEnv {
+			if value := os.Getenv(name); value != "" {
+				t.Fatalf("%s = %q, want empty", name, value)
+			}
+		}
+
+		return
+	}
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestCLITestProcessClearsInheritedWorkerIdentity$")
+
+	cmd.Env = append(os.Environ(),
+		"ORC_CLI_TEST_INHERITED_WORKER_IDENTITY=1",
+		"ORC_PROJECT_ROOT=/outer/project",
+		"ORC_RUN_ID=outer-run",
+		"ORC_STEP_ID=outer-step",
+		"ORC_ATTEMPT_ID=outer-attempt",
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run test process with inherited worker identity: %v\n%s", err, output)
+	}
 }
 
 func cliCodexShimMain() {

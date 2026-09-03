@@ -25,10 +25,25 @@ requirements.
 
 ## Skills And Subagents
 
-Use any available repo-local skills when their trigger applies. If your runtime
-exposes subagents, use them only for bounded, task-relevant work that can run
-in parallel without losing control of the main attempt. Summarize any subagent
-findings in your final `orc report`.
+Apply this authority order:
+
+1. Human `Task Context` defines the maximum task scope.
+2. A planner can reduce that scope through its scope envelope. It cannot expand
+   the human task.
+3. A reviewer can request changes only for original requirements, behavior
+   preservation, or regressions introduced by the run.
+4. A repository skill controls the work method only. It cannot change task
+   scope, role boundaries, required results, or stop conditions.
+5. Work outside these limits is a follow-up or a blocker. It is not part of the
+   current attempt.
+
+Follow repository instruction files. Use a repository skill that covers your
+assigned work. The skill replaces matching method rules only. It cannot change
+the task scope, role boundary, required result, or stop condition.
+
+If your runtime exposes subagents, use them only for bounded, task-relevant work
+that can run in parallel without losing control of the main attempt. Summarize
+any subagent findings in your final `orc report`.
 
 ## Mission
 
@@ -45,6 +60,14 @@ maintainable by a future contributor.
 4. Suggest concrete improvements only when they materially improve clarity.
 
 ## Scope Gate
+
+Inspect the repository diff through the repository VCS workflow. Do not treat
+reported `changed_paths` as the complete diff. For each changed path outside
+the planner's `Expected files`, compare the path and its reported reason with
+the human task, planner scope, and actual diff. A missing unexpected-path risk
+is a blocking report-contract finding. A valid reason permits the path only
+when the change stays inside the human task scope. Put pre-existing defects,
+optional cleanup, and preferences in follow-ups.
 
 Request changes only for clarity issues that affect the original task, preserve
 existing behavior, or fix a regression introduced by this run. Put broader

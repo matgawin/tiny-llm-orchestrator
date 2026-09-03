@@ -87,6 +87,125 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 	}
 }
 
+func TestScaffoldedAgentScopeContract(t *testing.T) {
+	agents := map[string]string{}
+
+	for _, file := range ScaffoldFiles() {
+		if strings.HasPrefix(file.Path, ".orc/agents/") {
+			agents[filepath.Base(file.Path)] = string(file.Content)
+		}
+	}
+
+	if len(agents) != 11 {
+		t.Fatalf("scaffolded agent count = %d, want 11", len(agents))
+	}
+
+	authority := []string{
+		"Human `Task Context` defines the maximum task scope.",
+		"A planner can reduce that scope through its scope envelope. It cannot expand",
+		"A reviewer can request changes only for original requirements, behavior",
+		"A repository skill controls the work method only. It cannot change task",
+		"Work outside these limits is a follow-up or a blocker. It is not part of the",
+	}
+
+	for name, content := range agents {
+		position := -1
+
+		for _, want := range authority {
+			next := strings.Index(content, want)
+
+			if next <= position {
+				t.Fatalf("%s missing scope contract %q", name, want)
+			}
+
+			position = next
+		}
+
+		if want := "The skill replaces matching method rules only. It cannot change"; !strings.Contains(content, want) {
+			t.Fatalf("%s missing scope contract %q", name, want)
+		}
+	}
+
+	for _, name := range []string{"coder.md", "mechanical-coder.md"} {
+		content := agents[name]
+		for _, want := range []string{
+			"- Make the smallest correct change.",
+			"- Reuse existing repository code first.",
+			"- Prefer the standard library and platform features.",
+			"- Do not add support for future requirements.",
+			"- Do not add unrelated files, checks, or deliverables.",
+			"one separate `--risk` value for each unexpected path",
+			"unexpected path <path>: <reason the requested behavior cannot be correct without this change>",
+		} {
+			if !strings.Contains(content, want) {
+				t.Fatalf("%s missing portable coder rule %q", name, want)
+			}
+		}
+	}
+
+	planner := agents["planner.md"]
+	position := -1
+
+	for _, heading := range []string{"`Required change`", "`Out of scope`", "`Expected files`", "`Required checks`", "`Stop after`"} {
+		next := strings.Index(planner, heading)
+
+		if next <= position {
+			t.Fatalf("planner scope heading %s is missing or out of order:\n%s", heading, planner)
+		}
+
+		position = next
+	}
+
+	for _, name := range []string{"reviewer.md", "mechanical-reviewer.md", "readability-reviewer.md", "redundancy-reviewer.md", "docs-reviewer.md"} {
+		content := agents[name]
+		for _, want := range []string{"Do not treat\nreported `changed_paths` as the complete diff.", "A missing unexpected-path risk\nis a blocking report-contract finding."} {
+			if !strings.Contains(content, want) {
+				t.Fatalf("%s missing review rule %q", name, want)
+			}
+		}
+	}
+
+	assertLiveAgentDescriptorsAndManifest(t, agents)
+}
+
+func assertLiveAgentDescriptorsAndManifest(t *testing.T, agents map[string]string) {
+	t.Helper()
+
+	manifestContent, err := os.ReadFile(filepath.Join("..", "..", scaffoldManifestPath))
+	if err != nil {
+		t.Fatalf("read live scaffold manifest: %v", err)
+	}
+
+	_, hashes, err := ParseScaffoldManifest(manifestContent)
+	if err != nil {
+		t.Fatalf("parse live scaffold manifest: %v", err)
+	}
+
+	// These live descriptors contain documented local line-wrap customizations.
+	customized := map[string]bool{"redundancy-reviewer.md": true, "reviewer.md": true}
+	for name, content := range agents {
+		if customized[name] {
+			continue
+		}
+
+		path := filepath.Join("..", "..", ".orc", "agents", name)
+
+		live, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read live agent descriptor %s: %v", name, err)
+		}
+
+		if !bytes.Equal(live, []byte(content)) {
+			t.Fatalf("live agent descriptor %s does not match scaffold source", name)
+		}
+
+		manifestPath := filepath.ToSlash(filepath.Join(".orc", "agents", name))
+		if got, want := hashes[manifestPath], SHA256Hex(live); got != want {
+			t.Fatalf("live agent descriptor %s hash = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestParseScaffoldManifestRejectsUnsupportedSetupVersion(t *testing.T) {
 	validHash := strings.Repeat("a", 64)
 

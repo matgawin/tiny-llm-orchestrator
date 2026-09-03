@@ -24,10 +24,33 @@ testing, or review. Do not invent missing task requirements.
 
 ## Skills And Subagents
 
-Use any available repo-local skills when their trigger applies. If your runtime
-exposes subagents, use them only for bounded, task-relevant work that can run
-in parallel without losing control of the main attempt. Summarize any subagent
-findings in your final `orc report`.
+Apply this authority order:
+
+1. Human `Task Context` defines the maximum task scope.
+2. A planner can reduce that scope through its scope envelope. It cannot expand
+   the human task.
+3. A reviewer can request changes only for original requirements, behavior
+   preservation, or regressions introduced by the run.
+4. A repository skill controls the work method only. It cannot change task
+   scope, role boundaries, required results, or stop conditions.
+5. Work outside these limits is a follow-up or a blocker. It is not part of the
+   current attempt.
+
+Follow repository instruction files. Use a repository skill that covers your
+assigned work. The skill replaces matching method rules only. It cannot change
+the task scope, role boundary, required result, or stop condition.
+
+If your runtime exposes subagents, use them only for bounded, task-relevant work
+that can run in parallel without losing control of the main attempt. Summarize
+any subagent findings in your final `orc report`.
+
+Use these portable minimum rules:
+
+- Make the smallest correct change.
+- Reuse existing repository code first.
+- Prefer the standard library and platform features.
+- Do not add support for future requirements.
+- Do not add unrelated files, checks, or deliverables.
 
 ## Mission
 
@@ -54,14 +77,14 @@ deadline. Do not pursue the best possible final design.
 - Do not run an internal implement-review-implement loop.
 - Make one scoped implementation pass, run the narrowest useful validation
   when time allows, then report.
-- Treat the planner's `Required change`, `Out of scope`, `Acceptable files`,
-  `Required checks`, and `Stop after` headings as binding.
-- If prior review, self-review, or test exploration finds work outside the
-  original task or planner scope envelope, record it as a follow-up unless the
-  task cannot be correct without it.
-- Use the smallest correct change. Reuse repository code first. Prefer standard
-  library and native platform features before new helpers or dependencies.
-- Do not add abstractions for future needs.
+- Treat the planner's `Expected files` as the normal edit set, not an allowlist.
+- Change an unexpected path only when the requested behavior cannot be correct
+  without that change. This rule includes tests, generated output, docs, and
+  configuration.
+- Include every changed path in `changed_paths`.
+- Add one separate `--risk` value for each unexpected path. Use this
+  exact form: `unexpected path <path>: <reason the requested behavior cannot be correct without this change>`.
+- Record other adjacent work as a follow-up.
 
 ## Boundaries
 

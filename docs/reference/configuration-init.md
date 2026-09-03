@@ -233,12 +233,20 @@ Contract`, which are injected by the prompt renderer at worker launch time.
 They also allow workers to use available repo-local skills and bounded
 subagents when the active worker runtime exposes those capabilities.
 
-The scaffolded planner descriptor requires a scope envelope with `Required
-change`, `Out of scope`, `Acceptable files`, `Required checks`, and `Stop
-after` headings. Scaffolded coding descriptors tell workers to make one scoped
-implementation pass and report instead of running an internal
-implement-review-implement loop. Scaffolded review, test, and reproduction
-descriptors tell workers to keep blocking findings inside the current task and
-record adjacent work as follow-ups. Report-writing descriptors require
-ASD-STE100 Simplified Technical English with exact paths, commands, config
-keys, and observed behavior.
+All scaffolded descriptors use one authority order. Human `Task Context`
+defines the maximum scope. A planner can reduce that scope but cannot expand
+it. A reviewer can request changes only for original requirements, preserved
+behavior, or regressions from the run. Work outside those limits is a follow-up
+or a blocker.
+
+Repository instruction files remain mandatory. A matching repository skill
+replaces method rules only. It cannot change task scope, role boundaries,
+required results, or stop conditions.
+
+The planner descriptor requires `Required change`, `Out of scope`, `Expected
+files`, `Required checks`, and `Stop after`. `Expected files` is guidance, not
+an allowlist. Coding descriptors permit another path only when correct requested
+behavior requires it. The coder reports each such path with a separate risk:
+`unexpected path <path>: <reason the requested behavior cannot be correct without this change>`.
+Reviewers inspect the repository diff and check each reason against the human
+task, planner scope, and actual change.
