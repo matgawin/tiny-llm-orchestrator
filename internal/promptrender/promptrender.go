@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/attemptdeadline"
 	"tiny-llm-orchestrator/orc/internal/config"
 	reportpkg "tiny-llm-orchestrator/orc/internal/report"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
@@ -53,6 +54,7 @@ type renderContext struct {
 	workflow config.Workflow
 	step     config.Step
 	agent    config.Agent
+	attempt  runstore.Attempt
 }
 
 // Render loads run/config context, renders the worker prompt, and persists it
@@ -68,6 +70,12 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 
 	if err := validateOptions(opts); err != nil {
 		return Result{}, err
+	}
+
+	if opts.Time.IsZero() {
+		opts.Time = time.Now().UTC()
+	} else {
+		opts.Time = opts.Time.UTC()
 	}
 
 	renderCtx, err := loadRenderContext(ctx, opts)
@@ -165,13 +173,33 @@ func loadRenderContext(ctx context.Context, opts Options) (renderContext, error)
 		return renderContext{}, fmt.Errorf("agent %q is not configured", opts.AgentID)
 	}
 
+	attempt, ok := findAttempt(loaded.Run.Status.Attempts, opts.AttemptID)
+	if !ok {
+		return renderContext{}, fmt.Errorf("attempt %q is not present in run %q", opts.AttemptID, loaded.Run.ID)
+	}
+
+	if attempt.StepID != opts.StepID || attempt.AgentID != opts.AgentID {
+		return renderContext{}, fmt.Errorf("attempt %q identity is %s/%s, not %s/%s", opts.AttemptID, attempt.StepID, attempt.AgentID, opts.StepID, opts.AgentID)
+	}
+
 	return renderContext{
 		store:    loaded.Store,
 		run:      loaded.Run,
 		workflow: loaded.Workflow,
 		step:     step,
 		agent:    agent,
+		attempt:  attempt,
 	}, nil
+}
+
+func findAttempt(attempts []runstore.Attempt, id string) (runstore.Attempt, bool) {
+	for _, attempt := range attempts {
+		if attempt.AttemptID == id {
+			return attempt, true
+		}
+	}
+
+	return runstore.Attempt{}, false
 }
 
 func renderSelectionDecision(workflowConfig config.Workflow, run *runstore.Run) (workflow.Decision, error) {
@@ -219,7 +247,18 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	out.WriteString(renderLoopContext(renderCtx, opts))
 	out.WriteString(renderPriorReports(reports))
 	out.WriteString(progressGuidance)
-	out.WriteString(deadlineGuidance)
+
+	group, err := attemptdeadline.GroupForAttempt(renderCtx.run, renderCtx.attempt)
+	if err != nil {
+		return nil, fmt.Errorf("resolve attempt deadline action: %w", err)
+	}
+
+	guidance, err := attemptdeadline.FromAttempt(renderCtx.attempt, opts.Time, group)
+	if err != nil {
+		return nil, fmt.Errorf("calculate attempt deadline: %w", err)
+	}
+
+	renderAttemptDeadline(&out, guidance)
 	out.WriteString(reportContractIntro)
 
 	for _, pair := range allowedPairs(renderCtx.step) {
@@ -232,6 +271,18 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 	out.WriteString(reportOptionalFields)
 
 	return out.Bytes(), nil
+}
+
+func renderAttemptDeadline(out *bytes.Buffer, guidance attemptdeadline.Guidance) {
+	out.WriteString("## Attempt Deadline\n\n")
+	fmt.Fprintf(out, "- started_at: `%s`\n", attemptdeadline.FormatTime(guidance.StartedAt))
+	fmt.Fprintf(out, "- deadline: `%s`\n", attemptdeadline.FormatTime(guidance.Deadline))
+	fmt.Fprintf(out, "- timeout: `%s`\n", guidance.TimeoutRaw)
+	fmt.Fprintf(out, "- calculated_at: `%s`\n", attemptdeadline.FormatTime(guidance.CalculatedAt))
+	fmt.Fprintf(out, "- initial_remaining: `%s`\n", guidance.Remaining)
+	fmt.Fprintf(out, "- initial_phase: `%s`\n", guidance.Phase)
+	fmt.Fprintf(out, "- initial_action: `%s`\n\n", guidance.Action)
+	out.WriteString("These initial values were calculated when Orc rendered this prompt. Use `orc time-left` when you need current deadline, elapsed time, remaining time, timeout, phase, and action guidance. The command reads the injected worker environment by default; `--json` is available for hooks.\n\nDeadline guidance is only an aid during the attempt. Final completion or blockage still goes through `orc report`.\n\n")
 }
 
 func renderLoopContext(renderCtx renderContext, opts Options) string {
@@ -292,14 +343,6 @@ const (
 When useful, send short operator-visible updates with ` + "`orc progress <short update>`" + ` at crucial points such as starting analysis, choosing an approach, beginning tests, or finding a blocker. Do not stream logs, file lists, diffs, frequent heartbeat messages, or routine chatter through live progress.
 
 The launcher injects ` + "`ORC_PROGRESS_SOCKET`" + `, ` + "`ORC_PROGRESS_TOKEN`" + `, ` + "`ORC_RUN_ID`" + `, ` + "`ORC_STEP_ID`" + `, ` + "`ORC_ATTEMPT_ID`" + `, ` + "`ORC_PROJECT_ROOT`" + `, ` + "`ORC_ATTEMPT_STARTED_AT`" + `, ` + "`ORC_ATTEMPT_DEADLINE`" + `, and ` + "`ORC_ATTEMPT_TIMEOUT`" + ` for troubleshooting. You normally do not pass them manually. Live progress is optional operator feedback and is separate from the final report.
-
-`
-
-	deadlineGuidance = `## Attempt Deadline
-
-Use ` + "`orc time-left`" + ` when you need to check this attempt's deadline, elapsed time, remaining time, timeout, phase, and action guidance. The command reads the injected worker environment by default; ` + "`--json`" + ` is available for hooks.
-
-Deadline guidance is only an aid during the attempt. Final completion or blockage still goes through ` + "`orc report`" + `.
 
 `
 

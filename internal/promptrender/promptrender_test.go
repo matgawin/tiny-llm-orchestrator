@@ -13,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/attemptdeadline"
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
+	"tiny-llm-orchestrator/orc/internal/runconfigrefresh"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
 	"tiny-llm-orchestrator/orc/internal/workflow"
@@ -26,6 +28,7 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
 	store := openPromptStore(t, root)
 	writeTaskContextArtifact(t, store, runID, "# Task\n\nBuild prompt rendering.\n", fixedPromptTime().Add(time.Minute))
+	startPromptAttempt(t, store, runID, "plan", "planner", "attempt-001")
 
 	if _, err := store.WriteArtifactContext(context.Background(), runID, runstore.Artifact{
 		Kind:    runstore.KindReport,
@@ -48,8 +51,8 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		t.Fatalf("Render returned error: %v", err)
 	}
 
-	if result.Ref.Kind != runstore.KindPrompt || result.Ref.Path != "prompts/000004-plan.md" {
-		t.Fatalf("prompt ref = %+v, want sequence 4 plan prompt", result.Ref)
+	if result.Ref.Kind != runstore.KindPrompt || result.Ref.Path != "prompts/000005-plan.md" {
+		t.Fatalf("prompt ref = %+v, want sequence 5 plan prompt", result.Ref)
 	}
 
 	persisted := readPromptFile(t, filepath.Join(root, ".orc", "runs", runID, filepath.FromSlash(result.Ref.Path)))
@@ -67,7 +70,7 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"Creates implementation plans and scope boundaries.",
 		"Plan the work and report readiness.",
 		"# Task\n\nBuild prompt rendering.",
-		"### reports/000003-plan.md\n",
+		"### reports/000004-plan.md\n",
 		"# Prior Plan\n\nUse existing run-store artifacts.",
 		"`done/ready`",
 		"`blocked/blocked`",
@@ -82,6 +85,13 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		"`ORC_ATTEMPT_DEADLINE`",
 		"`ORC_ATTEMPT_TIMEOUT`",
 		"## Attempt Deadline",
+		"- started_at: `2026-05-03T21:30:00Z`",
+		"- deadline: `2026-05-03T22:00:00Z`",
+		"- timeout: `30m0s`",
+		"- calculated_at: `2026-05-03T21:33:00Z`",
+		"- initial_remaining: `27m0s`",
+		"- initial_phase: `NORMAL`",
+		"- initial_action: `produce the smallest complete scope envelope`",
 		"`orc time-left`",
 		"deadline, elapsed time, remaining time, timeout, phase, and action guidance",
 		"`--json`",
@@ -109,8 +119,8 @@ func TestRenderSelectedPlanPromptPersistsContractAndContext(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if loaded.Status.LastSequence != 4 {
-		t.Fatalf("last sequence = %d, want 4", loaded.Status.LastSequence)
+	if loaded.Status.LastSequence != 5 {
+		t.Fatalf("last sequence = %d, want 5", loaded.Status.LastSequence)
 	}
 
 	if got := latestArtifactKind(loaded.Status.Artifacts); got != runstore.KindPrompt {
@@ -128,6 +138,7 @@ func TestRenderUsesPinnedAgentDescriptorAfterLiveMutation(t *testing.T) {
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
 	store := openPromptStore(t, root)
 	writeTaskContextArtifact(t, store, runID, "# Task\n\nUse the pinned descriptor.\n", fixedPromptTime())
+	startPromptAttempt(t, store, runID, "plan", "planner", "attempt-1")
 	writePromptFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), `---
 id: planner
 role: planner
@@ -157,12 +168,256 @@ LIVE MUTATED BODY
 	}
 }
 
+func TestRenderUsesAttemptPinnedRoleAfterConfigRefresh(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	writePromptFile(t, filepath.Join(root, ".orc", "agents", "planner.md"), `---
+id: planner
+role: coder
+description: Refreshed descriptor.
+---
+
+Implement the change.
+`)
+
+	if _, err := runconfigrefresh.Refresh(context.Background(), runconfigrefresh.Options{
+		Root: root, RunID: runID, Source: "test", Time: fixedPromptTime().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Refresh returned error: %v", err)
+	}
+
+	startPromptAttempt(t, store, runID, "plan", "planner", "attempt-pinned")
+
+	result, err := Render(context.Background(), Options{
+		Root: root, RunID: runID, StepID: "plan", AgentID: "planner", AttemptID: "attempt-pinned",
+		Time: fixedPromptTime().Add(2 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	if !strings.Contains(string(result.Content), "- initial_action: `produce the smallest complete scope envelope`") {
+		t.Fatalf("prompt did not use the version 1 planning action:\n%s", result.Content)
+	}
+}
+
+func TestRenderDeadlineCanStartExpired(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	startPromptAttempt(t, store, runID, "plan", "planner", "attempt-expired")
+
+	result, err := Render(context.Background(), Options{
+		Root: root, RunID: runID, StepID: "plan", AgentID: "planner", AttemptID: "attempt-expired",
+		Time: fixedPromptTime().Add(31 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	assertPromptContainsAll(t, string(result.Content), []string{
+		"- initial_remaining: `-1m0s`",
+		"- initial_phase: `REPORT_NOW`",
+	})
+}
+
+func TestRenderNormalizesZeroCalculationTime(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	startPromptAttempt(t, store, runID, "plan", "planner", "attempt-zero-time")
+
+	before := time.Now().UTC()
+	result, err := Render(context.Background(), Options{
+		Root: root, RunID: runID, StepID: "plan", AgentID: "planner", AttemptID: "attempt-zero-time",
+	})
+	after := time.Now().UTC()
+
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	prompt := string(result.Content)
+
+	const calculatedAtPrefix = "- calculated_at: `"
+
+	_, after0, ok := strings.Cut(prompt, calculatedAtPrefix)
+	if !ok {
+		t.Fatalf("prompt has no calculated_at field:\n%s", prompt)
+	}
+
+	calculatedAtText := strings.SplitN(after0, "`", 2)[0]
+
+	calculatedAt, err := time.Parse(time.RFC3339Nano, calculatedAtText)
+	if err != nil {
+		t.Fatalf("parse calculated_at %q: %v", calculatedAtText, err)
+	}
+
+	if calculatedAt.Before(before) || calculatedAt.After(after) {
+		t.Fatalf("calculated_at = %s, want between %s and %s", calculatedAt, before, after)
+	}
+
+	loaded, err := store.LoadContext(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if got := loaded.Events[len(loaded.Events)-1].Time; !got.Equal(calculatedAt) {
+		t.Fatalf("artifact event time = %s, want calculation time %s", got, calculatedAt)
+	}
+}
+
+func TestAttemptDeadlineRoleLookupSupportsLegacyVersionAndReturnsSnapshotErrors(t *testing.T) {
+	t.Run("legacy version zero", func(t *testing.T) {
+		root := t.TempDir()
+		writePromptProject(t, root)
+		runID := createPromptRun(t, root, workflow.RunStatusRunning)
+		store := openPromptStore(t, root)
+		startPromptAttemptVersion(t, store, runID, "plan", "planner", "attempt-legacy", 0)
+
+		loaded, err := store.LoadContext(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+
+		group, err := attemptdeadline.GroupForAttempt(loaded, *loaded.Status.ActiveAttempt)
+		if err != nil || group != attemptdeadline.ActionGroupPlanning {
+			t.Fatalf("GroupForAttempt = %q, %v, want planning", group, err)
+		}
+	})
+
+	t.Run("missing snapshot version", func(t *testing.T) {
+		root := t.TempDir()
+		writePromptProject(t, root)
+		runID := createPromptRun(t, root, workflow.RunStatusRunning)
+		store := openPromptStore(t, root)
+		startPromptAttemptVersion(t, store, runID, "plan", "planner", "attempt-missing", 2)
+
+		loaded, err := store.LoadContext(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+
+		_, err = attemptdeadline.GroupForAttempt(loaded, *loaded.Status.ActiveAttempt)
+		if err == nil || !strings.Contains(err.Error(), "config snapshot version 2") {
+			t.Fatalf("GroupForAttempt error = %v, want missing version error", err)
+		}
+	})
+
+	for _, tt := range []struct {
+		name, stepID, agentID, want string
+	}{
+		{"missing step", "missing", "planner", `step "missing" is not present`},
+		{"agent mismatch", "plan", "tester", `uses agent "planner", not attempt agent "tester"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writePromptProject(t, root)
+			runID := createPromptRun(t, root, workflow.RunStatusRunning)
+			store := openPromptStore(t, root)
+			startPromptAttemptVersion(t, store, runID, tt.stepID, tt.agentID, "attempt-invalid", 1)
+
+			loaded, err := store.LoadContext(context.Background(), runID)
+			if err != nil {
+				t.Fatalf("Load returned error: %v", err)
+			}
+
+			_, err = attemptdeadline.GroupForAttempt(loaded, *loaded.Status.ActiveAttempt)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("GroupForAttempt error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+
+	t.Run("missing descriptor", func(t *testing.T) {
+		root := t.TempDir()
+		writePromptProject(t, root)
+		runID := createPromptRun(t, root, workflow.RunStatusRunning)
+		store := openPromptStore(t, root)
+		startPromptAttempt(t, store, runID, "plan", "planner", "attempt-no-agent")
+		mutatePromptResolvedSnapshot(t, root, runID, func(project *config.Project) {
+			delete(project.Agents, "planner")
+		})
+
+		loaded, err := store.LoadContext(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+
+		_, err = attemptdeadline.GroupForAttempt(loaded, *loaded.Status.ActiveAttempt)
+		if err == nil || !strings.Contains(err.Error(), `agent "planner" is not present`) {
+			t.Fatalf("GroupForAttempt error = %v, want missing descriptor error", err)
+		}
+	})
+
+	t.Run("deterministic attempt", func(t *testing.T) {
+		root := t.TempDir()
+		writePromptProject(t, root)
+		runID := createPromptRun(t, root, workflow.RunStatusRunning)
+		store := openPromptStore(t, root)
+		startPromptAttempt(t, store, runID, "plan", "command", "attempt-command")
+		mutatePromptResolvedSnapshot(t, root, runID, func(project *config.Project) {
+			workflowConfig := project.Workflows["implementation"]
+			step := workflowConfig.Steps["plan"]
+			step.Kind = config.StepKindCommand
+			step.Agent = ""
+			workflowConfig.Steps["plan"] = step
+			project.Workflows["implementation"] = workflowConfig
+		})
+
+		loaded, err := store.LoadContext(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+
+		group, err := attemptdeadline.GroupForAttempt(loaded, *loaded.Status.ActiveAttempt)
+		if err != nil || group != attemptdeadline.ActionGroupGeneric {
+			t.Fatalf("GroupForAttempt = %q, %v, want generic", group, err)
+		}
+	})
+}
+
+func TestRenderRejectsMissingOrMismatchedAttemptIdentity(t *testing.T) {
+	root := t.TempDir()
+	writePromptProject(t, root)
+	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	store := openPromptStore(t, root)
+	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	startPromptAttempt(t, store, runID, "plan", "planner", "attempt-plan")
+
+	tests := []struct {
+		name, step, agent, attempt, want string
+	}{
+		{"missing", "plan", "planner", "missing", `attempt "missing" is not present`},
+		{"mismatch", "test", "tester", "attempt-plan", `attempt "attempt-plan" identity is plan/planner, not test/tester`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Render(context.Background(), Options{
+				Root: root, RunID: runID, StepID: tt.step, AgentID: tt.agent, AttemptID: tt.attempt,
+				AllowUnselectedStep: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Render error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestRenderTestStepUsesStepSpecificAllowedResultsWhenAllowed(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
 	store := openPromptStore(t, root)
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	startPromptAttempt(t, store, runID, "test", "tester", "attempt-test")
 
 	result, err := Render(context.Background(), Options{
 		Root:                root,
@@ -210,6 +465,7 @@ func TestRenderIncludesStructuredPriorReportCanonicalArtifactPath(t *testing.T) 
 		ChangedPaths: []string{"internal/promptrender/promptrender.go"},
 		Followups:    []runstore.Followup{{Title: "Document prompt report context", Details: "Keep docs aligned with renderer behavior."}},
 	}, nil)
+	startPromptAttempt(t, store, runID, "test", "tester", "attempt-test")
 
 	result, err := Render(context.Background(), Options{
 		Root:      root,
@@ -335,6 +591,8 @@ func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
 		t.Fatalf("RecordStepSkip returned error: %v", err)
 	}
 
+	startPromptAttempt(t, store, runID, "test", "tester", "attempt-002")
+
 	result, err := Render(context.Background(), Options{
 		Root:      root,
 		RunID:     runID,
@@ -369,6 +627,7 @@ func TestRenderCombinesStructuredPriorReportWithReportArtifact(t *testing.T) {
 		Result:    "ready",
 		Summary:   "Plan is ready for verification.",
 	}, []byte("# Detail\n\nUse the focused test surface.\n"))
+	startPromptAttempt(t, store, runID, "test", "tester", "attempt-test")
 
 	result, err := Render(context.Background(), Options{
 		Root:      root,
@@ -412,6 +671,7 @@ func TestRenderRequiresPriorAttemptReportRef(t *testing.T) {
 		Summary:   "Plan is ready.",
 	}, nil)
 	removeAttemptReportedReportRef(t, root, runID)
+	startPromptAttempt(t, store, runID, "test", "tester", "attempt-test")
 
 	_, err := Render(context.Background(), Options{
 		Root:      root,
@@ -447,6 +707,7 @@ func TestRenderTruncatedPriorReportRequiresReadingFullReport(t *testing.T) {
 		Result:    "ready",
 		Summary:   strings.Repeat("long summary ", 160),
 	}, nil)
+	startPromptAttempt(t, store, runID, "test", "tester", "attempt-test")
 
 	result, err := Render(context.Background(), Options{
 		Root:      root,
@@ -573,6 +834,7 @@ func TestRenderReturnsCommittedPromptRefOnStatusMaterializationFailure(t *testin
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
 	store := openPromptStore(t, root)
 	writeTaskContextArtifact(t, store, runID, "# Task\n", fixedPromptTime())
+	startPromptAttempt(t, store, runID, "plan", "planner", "attempt-001")
 	runPath := filepath.Join(root, ".orc", "runs", runID)
 	denyStatusMaterializationOrSkip(t, runPath)
 
@@ -658,6 +920,7 @@ func TestRenderRequiresTaskContextArtifact(t *testing.T) {
 	root := t.TempDir()
 	writePromptProject(t, root)
 	runID := createPromptRun(t, root, workflow.RunStatusRunning)
+	startPromptAttempt(t, openPromptStore(t, root), runID, "plan", "planner", "attempt-001")
 
 	_, err := Render(context.Background(), Options{
 		Root:      root,
@@ -774,6 +1037,36 @@ func writePromptConfigSnapshot(t *testing.T, root string, store *runstore.Store,
 	}
 }
 
+func mutatePromptResolvedSnapshot(t *testing.T, root, runID string, mutate func(*config.Project)) {
+	t.Helper()
+
+	path := filepath.Join(root, ".orc", "runs", runID, "config", "000001", "resolved.json")
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile resolved snapshot returned error: %v", err)
+	}
+
+	var resolved struct {
+		SchemaVersion int             `json:"schema_version"`
+		Project       *config.Project `json:"project"`
+	}
+	if err := json.Unmarshal(content, &resolved); err != nil {
+		t.Fatalf("Unmarshal resolved snapshot returned error: %v", err)
+	}
+
+	mutate(resolved.Project)
+
+	content, err = json.MarshalIndent(resolved, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal resolved snapshot returned error: %v", err)
+	}
+
+	if err := os.WriteFile(path, append(content, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile resolved snapshot returned error: %v", err)
+	}
+}
+
 func openPromptStore(t *testing.T, root string) *runstore.Store {
 	t.Helper()
 
@@ -783,6 +1076,34 @@ func openPromptStore(t *testing.T, root string) *runstore.Store {
 	}
 
 	return store
+}
+
+func startPromptAttempt(t *testing.T, store *runstore.Store, runID, stepID, agentID, attemptID string) {
+	t.Helper()
+
+	startPromptAttemptVersion(t, store, runID, stepID, agentID, attemptID, 1)
+}
+
+func startPromptAttemptVersion(t *testing.T, store *runstore.Store, runID, stepID, agentID, attemptID string, version int) {
+	t.Helper()
+
+	loaded, err := store.LoadContext(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("Load before StartAttempt returned error: %v", err)
+	}
+
+	req := runstore.StartAttemptRequest{
+		StepID: stepID, AgentID: agentID, AttemptID: attemptID,
+		ConfigSnapshotVersion: version, Timeout: 30 * time.Minute,
+		ReportExitGrace: 30 * time.Second, Time: fixedPromptTime(),
+	}
+	if active := loaded.Status.ActiveAttempt; active != nil {
+		req.ConsumeAttemptID = active.AttemptID
+	}
+
+	if _, _, err := store.StartAttemptContext(context.Background(), runID, req); err != nil {
+		t.Fatalf("StartAttempt returned error: %v", err)
+	}
 }
 
 func writeTaskContextArtifact(t *testing.T, store *runstore.Store, runID, content string, at time.Time) {

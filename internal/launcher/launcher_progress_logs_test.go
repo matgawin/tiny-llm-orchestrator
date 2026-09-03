@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/attemptdeadline"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
@@ -49,6 +50,14 @@ func TestLaunchNextPersistsPromptLogAndMissingReportAttempt(t *testing.T) {
 		"- step_id: `plan`\n",
 		"- agent_id: `planner`\n",
 		"- attempt_id: `" + result.Attempt.AttemptID + "`\n",
+		"## Attempt Deadline\n",
+		"- started_at: `" + attemptdeadline.FormatTime(result.Attempt.StartedAt) + "`",
+		"- deadline: `" + attemptdeadline.FormatTime(result.Attempt.StartedAt.Add(200*time.Millisecond)) + "`",
+		"- timeout: `200ms`",
+		"- calculated_at: `",
+		"- initial_remaining: `",
+		"- initial_phase: `",
+		"- initial_action: `",
 	})
 
 	if !strings.Contains(stdout.String(), "launched attempt "+result.Attempt.AttemptID) {

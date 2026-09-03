@@ -27,8 +27,8 @@ attempt `step_id`. Without worker environment variables, pass explicit ids:
 orc time-left --run <run-id> --attempt <attempt-id>
 ```
 
-Human output includes `deadline`, `elapsed`, `remaining`, `timeout`, `phase`,
-and `action`. It also prints `run`, `step`, `agent`, `attempt`, and
+Human output includes `deadline`, `calculated_at`, `elapsed`, `remaining`,
+`timeout`, `phase`, and `action`. It also prints `run`, `step`, `agent`, `attempt`, and
 `started_at` for troubleshooting. `--json` prints the same fields as JSON for
 hooks:
 
@@ -55,17 +55,42 @@ fields to the run-store schema.
 
 ## Phases
 
-`orc time-left` computes phase from remaining time with fixed v1 thresholds:
+`orc time-left` computes thresholds from the persisted positive attempt timeout:
 
-| Phase | Condition | Action |
-| --- | --- | --- |
-| `NORMAL` | More than 10 minutes remain | Continue scoped work |
-| `NARROW` | 10 minutes or less remain | Stop expanding scope |
-| `WRAP_UP` | 5 minutes or less remain | Stop implementing new behavior and run at most one cheap check |
-| `REPORT_NOW` | 2 minutes or less remain, or the deadline expired | Submit `orc report` now or report `blocked/blocked` now if blocked |
+```text
+NARROW = min(10 minutes, timeout / 3)
+WRAP_UP = min(5 minutes, timeout / 6)
+REPORT_NOW = min(2 minutes, timeout / 15)
+```
 
-For timeouts shorter than a threshold, the same remaining-time checks apply.
-The phase moves only toward higher urgency as the deadline approaches.
+Duration division uses Go integer division. Orc does not round or apply a
+minimum. A phase starts when remaining time is equal to its threshold. Orc
+checks `REPORT_NOW`, `WRAP_UP`, and `NARROW` in that order. Expired attempts
+remain in `REPORT_NOW`. A 30-minute timeout produces 10-minute, 5-minute, and
+2-minute thresholds. A 9-minute timeout produces 3-minute, 1-minute 30-second,
+and 36-second thresholds. Thresholds for a 90-minute timeout stay capped at
+10 minutes, 5 minutes, and 2 minutes.
+
+The action depends on the descriptor `role` in the attempt's pinned config
+snapshot. Legacy snapshot version 0 means version 1. Missing snapshots, steps,
+or descriptors cause a lookup error. Command and script attempts use generic
+actions.
+
+| Group | Roles |
+| --- | --- |
+| Planning | `planner` |
+| Implementation | `coder`, `mechanical-coder` |
+| Review | `reviewer`, `mechanical-reviewer`, `readability-reviewer`, `redundancy-reviewer`, `docs-reviewer` |
+| Verification | `tester`, `test-designer`, `bug-reproducer` |
+| Generic | Unknown custom roles, command steps, and script steps |
+
+| Group | `NORMAL` | `NARROW` | `WRAP_UP` | `REPORT_NOW` |
+| --- | --- | --- | --- | --- |
+| Planning | `produce the smallest complete scope envelope` | `stop discovery and finalize the scope envelope` | `stop adding plan detail and prepare the report` | `submit orc report now or report blocked/blocked now if blocked` |
+| Implementation | `continue the scoped implementation` | `finish the current change and add no new behavior` | `stop editing, run at most one cheap check, and prepare the report` | Same as Planning |
+| Review | `review only the assigned review category` | `stop broad searches and verify current findings` | `stop adding findings and prepare the report` | Same as Planning |
+| Verification | `run the scoped verification` | `stop adding test surfaces and finish the current check` | `run no new checks and prepare the report` | Same as Planning |
+| Generic | `continue scoped work` | `stop expanding scope` | `stop new work and prepare the report` | Same as Planning |
 
 ## Codex PostToolUse Hook
 
@@ -118,6 +143,7 @@ fi
 
 phase=$(printf '%s\n' "$output" | sed -n 's/.*"phase"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 remaining=$(printf '%s\n' "$output" | sed -n 's/.*"remaining"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+action=$(printf '%s\n' "$output" | sed -n 's/.*"action"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
 case "$phase" in
   NORMAL|"")
@@ -137,8 +163,12 @@ case "$phase" in
     ;;
 esac
 
+if [ -z "$remaining" ] || [ -z "$action" ]; then
+  exit 0
+fi
+
 printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"Orc deadline phase: %s. Time remaining: %s. %s."}}\n' \
-  "$phase" "${remaining:-unknown}" "$action"
+  "$phase" "$remaining" "$action"
 ```
 
 Codex command hooks run from the session cwd. The script uses

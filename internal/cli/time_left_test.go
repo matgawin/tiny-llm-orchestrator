@@ -15,12 +15,12 @@ import (
 )
 
 const (
-	timeLeftTestAgentCoder = "coder"
+	timeLeftTestAgentCoder = "planner"
 	timeLeftTestAttemptID  = "attempt-001"
 	timeLeftTestFlag       = "--attempt"
 	timeLeftTestJSONFlag   = "--json"
 	timeLeftTestRunFlag    = "--run"
-	timeLeftTestStepCode   = "code"
+	timeLeftTestStepCode   = "plan"
 	timeLeftTestTask       = "# Task"
 	timeLeftTestTaskFlag   = "--task"
 )
@@ -43,6 +43,7 @@ func TestExecuteTimeLeftUsesWorkerEnvironment(t *testing.T) {
 		"attempt: " + timeLeftTestAttemptID,
 		"started_at: 2026-05-04T12:00:00Z",
 		"deadline: 2026-05-04T12:30:00Z",
+		"calculated_at:",
 		"elapsed:",
 		"remaining:",
 		"timeout: 30m0s",
@@ -72,11 +73,15 @@ func TestExecuteTimeLeftExplicitLookupJSON(t *testing.T) {
 	}
 
 	if payload.RunID != result.runID || payload.StepID != timeLeftTestStepCode || payload.AgentID != timeLeftTestAgentCoder || payload.AttemptID != timeLeftTestAttemptID {
-		t.Fatalf("identity = %+v, want run/code/coder/attempt-001", payload)
+		t.Fatalf("identity = %+v, want run/plan/planner/attempt-001", payload)
 	}
 
 	if payload.StartedAt != "2026-05-04T12:00:00Z" || payload.Deadline != "2026-05-04T12:30:00Z" || payload.Timeout != "30m0s" {
 		t.Fatalf("timing = %+v, want persisted started_at + timeout", payload)
+	}
+
+	if _, err := time.Parse(time.RFC3339Nano, payload.CalculatedAt); err != nil {
+		t.Fatalf("calculated_at = %q, want RFC3339Nano timestamp: %v", payload.CalculatedAt, err)
 	}
 
 	if payload.Phase != "REPORT_NOW" || !strings.Contains(payload.Action, "orc report") {
@@ -168,8 +173,56 @@ func TestExecuteTimeLeftJSONPhaseActions(t *testing.T) {
 				t.Fatalf("unmarshal time-left JSON: %v\n%s", err, output)
 			}
 
-			if payload.Phase != tt.wantPhase || payload.Action != attemptdeadline.Action(tt.wantPhase) {
-				t.Fatalf("phase/action = %s/%s, want %s/%s", payload.Phase, payload.Action, tt.wantPhase, attemptdeadline.Action(tt.wantPhase))
+			if payload.Phase != tt.wantPhase || payload.Action != attemptdeadline.Action(tt.wantPhase, attemptdeadline.ActionGroupPlanning) {
+				t.Fatalf("phase/action = %s/%s, want %s/%s", payload.Phase, payload.Action, tt.wantPhase, attemptdeadline.Action(tt.wantPhase, attemptdeadline.ActionGroupPlanning))
+			}
+
+			if tt.wantPhase == attemptdeadline.PhaseNormal {
+				human := executeCLICommand(t, []string{commandTimeLeft, timeLeftTestRunFlag, result.runID, timeLeftTestFlag, tt.attemptID})
+				assertCLIOutputContainsAll(t, human, []string{
+					"calculated_at: ",
+					"phase: NORMAL",
+					"action: produce the smallest complete scope envelope",
+				})
+			}
+		})
+	}
+}
+
+func TestExecuteTimeLeftRoleActionsMatchHumanAndJSONOutput(t *testing.T) {
+	tests := []struct {
+		role string
+		want string
+	}{
+		{role: "coder", want: "continue the scoped implementation"},
+		{role: "reviewer", want: "review only the assigned review category"},
+		{role: "tester", want: "run the scoped verification"},
+		{role: "custom-role", want: "continue scoped work"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.role, func(t *testing.T) {
+			root := withTempCwd(t)
+			writeCLIProject(t, root, "optional", true)
+			descriptorPath := filepath.Join(root, ".orc", "agents", "planner.md")
+			descriptor := string(readCLIFile(t, descriptorPath))
+			writeCLIFile(t, descriptorPath, strings.Replace(descriptor, "role: planner", "role: "+tt.role, 1))
+			result := executeCLIRunStart(t, root, []string{timeLeftTestTaskFlag, timeLeftTestTask}, nil)
+			attemptID := "attempt-" + tt.role
+			startCLIActiveAttemptWithRemaining(t, root, result.runID, attemptID, 20*time.Minute)
+
+			human := executeCLICommand(t, []string{commandTimeLeft, timeLeftTestRunFlag, result.runID, timeLeftTestFlag, attemptID})
+			assertCLIOutputContainsAll(t, human, []string{"phase: NORMAL", "action: " + tt.want})
+
+			output := executeCLICommand(t, []string{commandTimeLeft, timeLeftTestRunFlag, result.runID, timeLeftTestFlag, attemptID, timeLeftTestJSONFlag})
+
+			var payload timeLeftJSON
+			if err := json.Unmarshal([]byte(output), &payload); err != nil {
+				t.Fatalf("unmarshal time-left JSON: %v\n%s", err, output)
+			}
+
+			if payload.Phase != attemptdeadline.PhaseNormal || payload.Action != tt.want {
+				t.Fatalf("phase/action = %s/%s, want NORMAL/%s", payload.Phase, payload.Action, tt.want)
 			}
 		})
 	}
@@ -216,7 +269,7 @@ func TestExecuteTimeLeftValidatesEnvStepID(t *testing.T) {
 		t.Fatal("Execute returned nil error, want step mismatch")
 	}
 
-	if got := err.Error(); !strings.Contains(got, `ORC_STEP_ID "review" does not match attempt step "code"`) {
+	if got := err.Error(); !strings.Contains(got, `ORC_STEP_ID "review" does not match attempt step "plan"`) {
 		t.Fatalf("error = %q, want step mismatch", got)
 	}
 }

@@ -70,6 +70,7 @@ Do not remove validation, error handling, security checks, accessibility, tests,
 - For Go code, prefer `gopls` through the `go-lsp-workflow` skill for semantic navigation and edited-file diagnostics. Run `task lsp` after Go edits. Use `rg` for text, docs, configs, literals, and broad repository discovery; use `grep` only as a fallback or simple command-pipeline filter.
 - Prefer narrow owner packages over generic helper buckets.
 - Prefer pure helpers and real integration coverage over mock-heavy seam tests.
+- Never use python, in any scripts or anything if not directly asked. Python is strictly forbidden.
 
 ## Subagent Policy
 

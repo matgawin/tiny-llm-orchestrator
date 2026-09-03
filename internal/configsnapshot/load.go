@@ -23,7 +23,7 @@ const (
 	versionDirLength   = 6
 )
 
-// LoadedSnapshot is the validated, current config snapshot for an existing run.
+// LoadedSnapshot is a validated config snapshot for an existing run.
 type LoadedSnapshot struct {
 	Version    int
 	VersionDir string
@@ -66,7 +66,30 @@ func LoadCurrent(run *runstore.Run) (LoadedSnapshot, error) {
 		return LoadedSnapshot{}, err
 	}
 
-	versionPath := filepath.Join(configDir, current.VersionDir)
+	return loadSnapshot(run, current)
+}
+
+// LoadVersion loads one immutable config snapshot version for a run.
+func LoadVersion(run *runstore.Run, version int) (LoadedSnapshot, error) {
+	if run == nil {
+		return LoadedSnapshot{}, fmt.Errorf("run is required")
+	}
+
+	if version <= 0 {
+		return LoadedSnapshot{}, fmt.Errorf("snapshot version must be positive")
+	}
+
+	current := currentSnapshot{
+		SchemaVersion: schemaVersion,
+		Version:       version,
+		VersionDir:    fmt.Sprintf("%06d", version),
+	}
+
+	return loadSnapshot(run, current)
+}
+
+func loadSnapshot(run *runstore.Run, current currentSnapshot) (LoadedSnapshot, error) {
+	versionPath := filepath.Join(run.Path, configDirName, current.VersionDir)
 	resolvedPath := filepath.Join(versionPath, configResolvedName)
 	manifestPath := filepath.Join(versionPath, configManifestName)
 
@@ -87,11 +110,7 @@ func LoadCurrent(run *runstore.Run) (LoadedSnapshot, error) {
 		return LoadedSnapshot{}, snapshotPathError(run.ID, resolvedPath, fmt.Sprintf("workflow %q from run is not present in resolved project", run.Status.Workflow))
 	}
 
-	return LoadedSnapshot{
-		Version:    current.Version,
-		VersionDir: current.VersionDir,
-		Project:    project,
-	}, nil
+	return LoadedSnapshot{Version: current.Version, VersionDir: current.VersionDir, Project: project}, nil
 }
 
 // InspectCurrent loads current snapshot audit metadata without reading live

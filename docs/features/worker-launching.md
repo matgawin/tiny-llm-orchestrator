@@ -221,6 +221,12 @@ PostToolUse hook nudges. See
 [attempt-time-left.md](attempt-time-left.md) for exact formats, phase
 thresholds, and hook behavior.
 
+Immediately before it renders an agent prompt, the launcher captures the
+calculation time. The prompt records the persisted attempt start, deadline,
+timeout, calculation time, initial remaining duration, initial phase, and
+role-specific initial action. Deterministic command and script steps do not
+receive worker prompt deadline fields.
+
 Orc writes command/script reports itself; subprocesses do not call
 `orc report`. Exit mapping is fixed in v1:
 

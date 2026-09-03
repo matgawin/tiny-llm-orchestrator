@@ -258,13 +258,15 @@ func launchDeterministicStep(ctx context.Context, loaded runcontext.Context, opt
 }
 
 func launchAgentStep(ctx context.Context, loaded runcontext.Context, opts Options, attempt runstore.Attempt, at time.Time, softCap *runstore.WorkflowLoopSoftCap, progressDisplay *liveProgressDisplay) (Result, error) {
+	renderTime := time.Now().UTC()
+
 	prompt, err := promptrender.Render(ctx, promptrender.Options{
 		Root:      opts.Root,
 		RunID:     opts.RunID,
 		StepID:    attempt.StepID,
 		AgentID:   attempt.AgentID,
 		AttemptID: attempt.AttemptID,
-		Time:      at,
+		Time:      renderTime,
 	})
 	if err != nil {
 		exitState := exitStatePromptRenderFail

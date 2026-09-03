@@ -70,7 +70,7 @@ tasks:
   lint:
     aliases: ["l"]
     cmds:
-      - golangci-lint run --config .golangci.yml
+      - golangci-lint run --config .golangci.yml --fix
 
   release-notes-preview:
     desc: Preview generated release notes for a first-parent git revision range.

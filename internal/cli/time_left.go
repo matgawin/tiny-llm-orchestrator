@@ -23,17 +23,18 @@ type timeLeftOptions struct {
 }
 
 type timeLeftJSON struct {
-	RunID     string `json:"run_id"`
-	StepID    string `json:"step_id"`
-	AgentID   string `json:"agent_id"`
-	AttemptID string `json:"attempt_id"`
-	StartedAt string `json:"started_at"`
-	Deadline  string `json:"deadline"`
-	Elapsed   string `json:"elapsed"`
-	Remaining string `json:"remaining"`
-	Timeout   string `json:"timeout"`
-	Phase     string `json:"phase"`
-	Action    string `json:"action"`
+	RunID        string `json:"run_id"`
+	StepID       string `json:"step_id"`
+	AgentID      string `json:"agent_id"`
+	AttemptID    string `json:"attempt_id"`
+	StartedAt    string `json:"started_at"`
+	Deadline     string `json:"deadline"`
+	CalculatedAt string `json:"calculated_at"`
+	Elapsed      string `json:"elapsed"`
+	Remaining    string `json:"remaining"`
+	Timeout      string `json:"timeout"`
+	Phase        string `json:"phase"`
+	Action       string `json:"action"`
 }
 
 func newTimeLeftCommand(stdout, stderr io.Writer) *cobra.Command {
@@ -122,7 +123,12 @@ func executeTimeLeft(ctx context.Context, opts timeLeftOptions, stdout io.Writer
 		return fmt.Errorf("orc time-left: ORC_STEP_ID %q does not match attempt step %q", envStepID, attempt.StepID)
 	}
 
-	guidance, err := attemptdeadline.FromAttempt(attempt, time.Now())
+	group, err := attemptdeadline.GroupForAttempt(run, attempt)
+	if err != nil {
+		return fmt.Errorf("orc time-left: %w", err)
+	}
+
+	guidance, err := attemptdeadline.FromAttempt(attempt, time.Now(), group)
 	if err != nil {
 		return fmt.Errorf("orc time-left: %w", err)
 	}
@@ -145,13 +151,14 @@ func findAttempt(attempts []runstore.Attempt, attemptID string) (runstore.Attemp
 }
 
 func writeTimeLeftHuman(stdout io.Writer, guidance attemptdeadline.Guidance) error {
-	_, err := fmt.Fprintf(stdout, "run: %s\nstep: %s\nagent: %s\nattempt: %s\nstarted_at: %s\ndeadline: %s\nelapsed: %s\nremaining: %s\ntimeout: %s\nphase: %s\naction: %s\n",
+	_, err := fmt.Fprintf(stdout, "run: %s\nstep: %s\nagent: %s\nattempt: %s\nstarted_at: %s\ndeadline: %s\ncalculated_at: %s\nelapsed: %s\nremaining: %s\ntimeout: %s\nphase: %s\naction: %s\n",
 		guidance.RunID,
 		guidance.StepID,
 		guidance.AgentID,
 		guidance.AttemptID,
 		attemptdeadline.FormatTime(guidance.StartedAt),
 		attemptdeadline.FormatTime(guidance.Deadline),
+		attemptdeadline.FormatTime(guidance.CalculatedAt),
 		guidance.Elapsed.String(),
 		guidance.Remaining.String(),
 		guidance.TimeoutRaw,
@@ -167,17 +174,18 @@ func writeTimeLeftHuman(stdout io.Writer, guidance attemptdeadline.Guidance) err
 
 func writeTimeLeftJSON(stdout io.Writer, guidance attemptdeadline.Guidance) error {
 	payload := timeLeftJSON{
-		RunID:     guidance.RunID,
-		StepID:    guidance.StepID,
-		AgentID:   guidance.AgentID,
-		AttemptID: guidance.AttemptID,
-		StartedAt: attemptdeadline.FormatTime(guidance.StartedAt),
-		Deadline:  attemptdeadline.FormatTime(guidance.Deadline),
-		Elapsed:   guidance.Elapsed.String(),
-		Remaining: guidance.Remaining.String(),
-		Timeout:   guidance.TimeoutRaw,
-		Phase:     guidance.Phase,
-		Action:    guidance.Action,
+		RunID:        guidance.RunID,
+		StepID:       guidance.StepID,
+		AgentID:      guidance.AgentID,
+		AttemptID:    guidance.AttemptID,
+		StartedAt:    attemptdeadline.FormatTime(guidance.StartedAt),
+		Deadline:     attemptdeadline.FormatTime(guidance.Deadline),
+		CalculatedAt: attemptdeadline.FormatTime(guidance.CalculatedAt),
+		Elapsed:      guidance.Elapsed.String(),
+		Remaining:    guidance.Remaining.String(),
+		Timeout:      guidance.TimeoutRaw,
+		Phase:        guidance.Phase,
+		Action:       guidance.Action,
 	}
 
 	encoded, err := json.MarshalIndent(payload, "", "  ")

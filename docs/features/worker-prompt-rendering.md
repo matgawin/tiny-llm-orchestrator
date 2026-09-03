@@ -52,9 +52,10 @@ runnable step.
 
 The worker launcher intentionally creates the starting attempt before rendering
 the prompt. Prompt rendering still checks the selected step from run status and
-caller-provided step metadata; it does not treat that newly starting attempt as
-	a reason to refuse rendering. The attempt transitions to active only after
-	process metadata is recorded.
+caller-provided step metadata. It finds the persisted attempt by its exact id
+and checks its step and agent ids. It does not treat that newly starting attempt
+as a reason to refuse rendering. The attempt transitions to active only after
+process metadata is recorded.
 
 An internal unselected-step option may render a declared non-selected step in a
 running run for tests or a future debug caller. It does not override terminal
@@ -150,6 +151,11 @@ path.
 Rendered prompts include an `Attempt Deadline` section. It names
 `orc time-left` as the command workers can use to inspect deadline, elapsed
 time, remaining time, timeout, phase, and action guidance during the attempt.
+The section records `started_at`, `deadline`, `timeout`, `calculated_at`,
+`initial_remaining`, `initial_phase`, and `initial_action`. The initial values
+are launch-time values calculated when Orc renders the prompt. They are not
+current values after launch. Orc resolves the action from the attempt's pinned
+configuration snapshot.
 The section keeps `orc report` as the only final completion or blockage path.
 See [attempt-time-left.md](attempt-time-left.md) for phase thresholds and hook
 behavior.
