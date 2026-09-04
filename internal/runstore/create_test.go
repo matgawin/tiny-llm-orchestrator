@@ -73,8 +73,8 @@ func TestCreateRunPersistsInitialWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
-	if got := run.Status.WorkflowLoop.Counts["code"]; got != 1 {
-		t.Fatalf("code count = %d, want 1", got)
+	if got := run.Status.WorkflowLoop.Counts["code"]; got != 0 {
+		t.Fatalf("code count = %d, want 0 before worker routing", got)
 	}
 
 	if got := len(run.Status.WorkflowLoop.Entries); got != 1 {
@@ -82,8 +82,8 @@ func TestCreateRunPersistsInitialWorkflowStateEntry(t *testing.T) {
 	}
 
 	entry := run.Status.WorkflowLoop.Entries[0]
-	if entry.Workflow != "implementation" || entry.State != "code" || entry.Count != 1 || entry.Repeated {
-		t.Fatalf("entry = %+v, want initial code count", entry)
+	if entry.Workflow != "implementation" || entry.State != "code" || entry.Count != 0 || entry.Repeated {
+		t.Fatalf("entry = %+v, want uncounted initial code history", entry)
 	}
 
 	events := readRunEvents(t, run)
@@ -102,8 +102,8 @@ func TestCreateRunPersistsInitialWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
-		t.Fatalf("loaded code count = %d, want 1", got)
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 0 {
+		t.Fatalf("loaded code count = %d, want 0", got)
 	}
 }
 

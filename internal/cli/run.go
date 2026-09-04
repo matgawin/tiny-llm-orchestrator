@@ -117,8 +117,8 @@ With --json, progress and launcher diagnostics are written to stderr so stdout c
 
 func newRunContinueCommand(stdout, stderr io.Writer) *cobra.Command {
 	var (
-		allowLoopCap, resolveBlock bool
-		reasons                    []string
+		allowLoopCap, allowReviewFinding, resolveBlock bool
+		reasons                                        []string
 	)
 
 	cmd := &cobra.Command{
@@ -128,6 +128,7 @@ func newRunContinueCommand(stdout, stderr io.Writer) *cobra.Command {
 
 Usage:
   ` + appName + ` run continue <run-id> --allow-loop-cap
+  ` + appName + ` run continue <run-id> --allow-review-finding
   ` + appName + ` run continue <run-id> --resolve-block --reason <text>`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -136,8 +137,16 @@ Usage:
 				return runFlagError(cmd, stderr, "continue", fmt.Errorf("requires <run-id>"))
 			}
 
-			if allowLoopCap && resolveBlock {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--resolve-block and --allow-loop-cap are mutually exclusive continuation modes"))
+			modes := 0
+
+			for _, selected := range []bool{allowLoopCap, allowReviewFinding, resolveBlock} {
+				if selected {
+					modes++
+				}
+			}
+
+			if modes > 1 {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--allow-loop-cap, --allow-review-finding, and --resolve-block are mutually exclusive continuation modes"))
 			}
 
 			if len(reasons) > 1 {
@@ -152,19 +161,20 @@ Usage:
 				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is required for --resolve-block"))
 			}
 
-			if !allowLoopCap && !resolveBlock {
-				return runFlagError(cmd, stderr, "continue", fmt.Errorf("choose one continuation mode: --allow-loop-cap or --resolve-block --reason <text>"))
+			if modes == 0 {
+				return runFlagError(cmd, stderr, "continue", fmt.Errorf("choose one continuation mode: --allow-loop-cap, --allow-review-finding, or --resolve-block --reason <text>"))
 			}
 
 			if resolveBlock && strings.TrimSpace(reasons[0]) == "" {
 				return runFlagError(cmd, stderr, "continue", fmt.Errorf("--reason is required for --resolve-block and must be non-empty after trimming"))
 			}
 
-			return executeRunContinue(args[0], allowLoopCap, resolveBlock, reasons, stdout, stderr)
+			return executeRunContinue(args[0], allowLoopCap, allowReviewFinding, resolveBlock, reasons, stdout, stderr)
 		},
 	}
 	flags := cmd.Flags()
 	flags.BoolVar(&allowLoopCap, "allow-loop-cap", false, "Explicitly allow one continuation after a hard workflow loop stop")
+	flags.BoolVar(&allowReviewFinding, "allow-review-finding", false, "Explicitly allow one correction after a repeated review finding stop")
 	flags.BoolVar(&resolveBlock, "resolve-block", false, "Retry a non-loop blocked_for_human step after human resolution")
 	flags.StringArrayVar(&reasons, "reason", nil, "Required human attestation for --resolve-block")
 	setRunFlagError(cmd, stderr, "continue")

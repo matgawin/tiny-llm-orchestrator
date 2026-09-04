@@ -84,19 +84,25 @@ exhausted, inspection shows the latest outcome, attempt id, exhausted pair, and
 configured terminal transition.
 
 For selected next-step decisions, `orc run next` also previews workflow
-loop-cap effects using the same effective caps and persisted counters as worker
-launch. Soft-cap previews print a warning for the prospective `soft + 1`
+repeated-finding and loop-cap effects using the same data as worker launch. A
+repeated-finding preview identifies the finding, reviewer, correction target,
+first and repeated report attempts, occurrence count, and
+`repeated_review_finding` reason. It takes precedence over a loop-cap preview.
+Soft-cap previews print a warning for the prospective `soft + 1`
 entry. Hard-cap previews identify the blocked target state, prospective count,
 current count, hard cap, and `loop_hard_cap_reached` reason. These previews are
 read-only: they do not write cap events, increment counters, or move the run to
 human handoff.
 
-`orc run show`/`status` include workflow loop-cap status by workflow state:
-current entry count, soft and hard thresholds, whether the soft threshold has
-been reached, whether a hard cap is currently blocking, and the blocked target
-state with prospective count when a hard-cap human decision is active. If a
-human-reviewed loop-cap override is pending, the status output shows the
-pending override action and the one allowed count-after value.
+`orc run show` and `orc run status` show an active `review_finding_block` and
+its reason, finding ID, reviewer step, proposed correction step, both report
+attempt IDs, and occurrence count. They also show a pending one-use finding
+override when a human has continued the run.
+
+`orc run show` and `orc run status` group workflow loop-cap status by counter
+key. Each group lists its member steps, current entry count, and soft and hard
+limits. A hard-cap block shows both the counter key and actual target step. A
+pending human override shows the same identities and its one allowed count.
 
 `orc run show`/`status` also include audited `skipped_steps` materialized from
 `workflow.step_skipped` events. Each skipped step shows step id, `done/skipped`,

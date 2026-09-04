@@ -23,15 +23,16 @@ const (
 )
 
 const (
-	StopReasonReadyForHuman       = "ready_for_human"
-	StopReasonBlockedForHuman     = "blocked_for_human"
-	StopReasonWorkerBlocked       = "worker_blocked"
-	StopReasonWorkerFailed        = "worker_failed"
-	StopReasonLoopHardCap         = "loop_hard_cap"
-	StopReasonLoopSoftCap         = "loop_soft_cap"
-	StopReasonActiveAttemptExists = "active_attempt_exists"
-	StopReasonMaxStepsReached     = "max_steps_reached"
-	StopReasonError               = "error"
+	StopReasonReadyForHuman         = "ready_for_human"
+	StopReasonBlockedForHuman       = "blocked_for_human"
+	StopReasonWorkerBlocked         = "worker_blocked"
+	StopReasonWorkerFailed          = "worker_failed"
+	StopReasonLoopHardCap           = "loop_hard_cap"
+	StopReasonRepeatedReviewFinding = runstore.RepeatedReviewFindingReason
+	StopReasonLoopSoftCap           = "loop_soft_cap"
+	StopReasonActiveAttemptExists   = "active_attempt_exists"
+	StopReasonMaxStepsReached       = "max_steps_reached"
+	StopReasonError                 = "error"
 )
 
 // AdvanceOptions describes a conservative run advancement request.
@@ -123,7 +124,22 @@ func Advance(ctx context.Context, opts AdvanceOptions) (AdvanceResult, error) {
 			return stopAdvance(result, StopReasonMaxStepsReached, 0), nil
 		}
 
-		capDecision := loopcap.Evaluate(eval.workflowName, eval.loopCaps, eval.status, eval.decision, eval.workflowOutcome, eval.hasWorkflowOutcome)
+		_, block, findingErr := ReviewFindingDecision(eval.workflow, eval.run, eval.decision, eval.workflowOutcome)
+		if findingErr != nil {
+			return result.withError(StopReasonError, 1, findingErr), findingErr
+		}
+
+		if block != nil {
+			launchResult, launchErr := LaunchNext(ctx, launchOptions(opts))
+			result = recordAdvanceLaunch(result, launchResult)
+			result.FinalStatus = workflow.RunStatusBlockedForHuman
+			result.StopReason = StopReasonRepeatedReviewFinding
+			result.ExitCode = advanceExitBlocked
+
+			return result, launchErr
+		}
+
+		capDecision := loopcap.Evaluate(eval.workflow, eval.status, eval.decision, eval.workflowOutcome, eval.hasWorkflowOutcome)
 
 		capResult, handled, err := handleAdvanceLoopCap(ctx, opts, eval, capDecision, result)
 		if handled || err != nil {
@@ -275,9 +291,11 @@ func stopAdvance(result AdvanceResult, reason string, exitCode int) AdvanceResul
 
 type advanceEvaluation struct {
 	store              *runstore.Store
+	run                *runstore.Run
 	status             runstore.Status
 	workflowName       string
 	loopCaps           config.EffectiveLoopCaps
+	workflow           config.Workflow
 	decision           workflow.Decision
 	latestOutcome      runstore.Attempt
 	hasOutcome         bool
@@ -307,9 +325,11 @@ func evaluateAdvance(ctx context.Context, root, runID string) (advanceEvaluation
 
 	return advanceEvaluation{
 		store:              loaded.Store,
+		run:                loaded.Run,
 		status:             loaded.Run.Status,
 		workflowName:       loaded.Workflow.Name,
 		loopCaps:           loaded.Workflow.LoopCaps,
+		workflow:           loaded.Workflow,
 		decision:           decision,
 		latestOutcome:      latestOutcome,
 		hasOutcome:         hasOutcome,

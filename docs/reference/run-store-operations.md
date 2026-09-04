@@ -92,7 +92,10 @@ unless the caller adds its own idempotency key in a future event contract.
   atomically replace `config/current.json`, append
   `config_snapshot_refreshed`, then refresh `status.json`.
 - The refresh event records old and new version pointers, the SHA-256 manifest
-  hash, and the command source. The snapshot files are not run artifacts.
+  hash, the command source, and `workflow_loop_counts`. The count map uses the
+  new workflow's effective counter keys. Refresh maps every stored state entry
+  through the new workflow, so earlier entries remain in the new keyed count.
+  Old entries without `counter_key` use their actual state as the old key.
 - Refresh is rejected while an active attempt exists. Compatibility validation
   is conservative: the workflow name must stay the same, the current workflow
   state and all past attempt step ids must still exist, and the selected or
@@ -101,6 +104,8 @@ unless the caller adds its own idempotency key in a future event contract.
   timeout, report-grace, agent, or runtime settings for future attempts is
   allowed. If safety cannot be proven, refresh fails instead of publishing a
   new current snapshot.
+- Refresh is also rejected during an active loop-cap block, loop-cap override,
+  repeated-finding block, or repeated-finding override.
 - Existing runs adopt live `.orc` edits only through
   `orc run refresh-config <run-id>`. There is no silent live reload and no
   `--force` override in v1.

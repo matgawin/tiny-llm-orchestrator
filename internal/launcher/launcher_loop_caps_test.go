@@ -8,9 +8,60 @@ import (
 	"testing"
 	"time"
 
+	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
 )
+
+func TestWorkflowLoopHardCapOverrideMatchesLegacyCounterKeyFallback(t *testing.T) {
+	override := &runstore.WorkflowLoopHardCapOverride{
+		Workflow:            "implementation",
+		TargetState:         "plan",
+		CountBeforeOverride: 2,
+		CountAfterOverride:  3,
+		Soft:                1,
+		Hard:                2,
+		Reason:              runstore.WorkflowLoopHardCapReason,
+	}
+	decision := loopcap.Decision{
+		Workflow:         "implementation",
+		State:            "plan",
+		CounterKey:       "plan",
+		CurrentCount:     2,
+		ProspectiveCount: 3,
+		Soft:             1,
+		Hard:             2,
+	}
+
+	if !workflowLoopHardCapOverrideMatches(override, decision) {
+		t.Fatal("legacy override did not match target-step counter key")
+	}
+}
+
+func TestWorkflowLoopHardCapOverrideRejectsDifferentSharedCounterKey(t *testing.T) {
+	override := &runstore.WorkflowLoopHardCapOverride{
+		Workflow:            "implementation",
+		TargetState:         "plan",
+		CountBeforeOverride: 2,
+		CountAfterOverride:  3,
+		Soft:                1,
+		Hard:                2,
+		Reason:              runstore.WorkflowLoopHardCapReason,
+	}
+	decision := loopcap.Decision{
+		Workflow:         "implementation",
+		State:            "plan",
+		CounterKey:       "shared-review",
+		CurrentCount:     2,
+		ProspectiveCount: 3,
+		Soft:             1,
+		Hard:             2,
+	}
+
+	if workflowLoopHardCapOverrideMatches(override, decision) {
+		t.Fatal("legacy override matched a different shared counter key")
+	}
+}
 
 func TestLaunchNextAppliesWorkflowLoopHardCapAfterResolvedHumanBlock(t *testing.T) {
 	root, runID := createLoopCapLauncherRun(t, "enabled: true\nsoft: 1\nhard: 2\n", "")

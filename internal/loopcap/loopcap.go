@@ -22,6 +22,7 @@ type Decision struct {
 	Kind             DecisionKind
 	Workflow         string
 	State            string
+	CounterKey       string
 	CurrentCount     int
 	ProspectiveCount int
 	Soft             int
@@ -35,17 +36,21 @@ type Decision struct {
 // apply when routing enters a worker-selecting state with a new state-entry
 // count; retries, terminals, handoffs, active waits, and disabled caps bypass
 // enforcement.
-func Evaluate(workflowName string, caps config.EffectiveLoopCaps, status runstore.Status, routing workflow.Decision, latest runstore.Attempt, hasLatest bool) Decision {
+func Evaluate(workflowConfig config.Workflow, status runstore.Status, routing workflow.Decision, latest runstore.Attempt, hasLatest bool) Decision {
+	caps := workflowConfig.LoopCaps
 	if !caps.Enabled || routing.Kind != workflow.DecisionSelectStep {
 		return Decision{}
 	}
 
-	current := status.WorkflowLoop.Counts[routing.Step]
+	key, caps := workflowConfig.EffectiveStepLoop(routing.Step)
+
+	current := status.WorkflowLoop.Counts[key]
 	prospective := current + 1
 
 	decision := Decision{
-		Workflow:         workflowName,
+		Workflow:         workflowConfig.Name,
 		State:            routing.Step,
+		CounterKey:       key,
 		CurrentCount:     current,
 		ProspectiveCount: prospective,
 		Soft:             caps.Soft,
@@ -77,6 +82,7 @@ func (d Decision) SoftCap() runstore.WorkflowLoopSoftCap {
 	return runstore.WorkflowLoopSoftCap{
 		Workflow:      d.Workflow,
 		State:         d.State,
+		CounterKey:    d.CounterKey,
 		Count:         d.ProspectiveCount,
 		Soft:          d.Soft,
 		Hard:          d.Hard,
@@ -91,6 +97,7 @@ func (d Decision) HardCap() runstore.WorkflowLoopHardCap {
 	return runstore.WorkflowLoopHardCap{
 		Workflow:         d.Workflow,
 		BlockedState:     d.State,
+		CounterKey:       d.CounterKey,
 		CurrentCount:     d.CurrentCount,
 		ProspectiveCount: d.ProspectiveCount,
 		Soft:             d.Soft,

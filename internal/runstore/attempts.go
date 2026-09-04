@@ -91,6 +91,7 @@ func (s *Store) commitStartAttempt(ctx context.Context, runID string, req StartA
 		SupersedeReason:                     routing.SupersedeReason,
 		WorkflowStateEntry:                  workflowEntry,
 		ConsumedWorkflowLoopHardCapOverride: req.ConsumeWorkflowLoopHardCapOverride,
+		ConsumedReviewFindingOverride:       req.ConsumeReviewFindingOverride,
 	})
 	if err != nil {
 		return Status{}, Event{}, err
@@ -130,8 +131,8 @@ func prepareStartAttempt(status Status, runID string, req StartAttemptRequest, a
 
 func prepareStartAttemptWorkflowEntry(status Status, req StartAttemptRequest) (*WorkflowStateEntry, error) {
 	if req.WorkflowStateEntry.State == "" {
-		if req.ConsumeWorkflowLoopHardCapOverride != nil {
-			return nil, errors.New("workflow loop hard-cap override consumption requires workflow state entry")
+		if req.ConsumeWorkflowLoopHardCapOverride != nil || req.ConsumeReviewFindingOverride != nil {
+			return nil, errors.New("human override consumption requires workflow state entry")
 		}
 
 		return nil, nil //nolint:nilnil // Nil entry is the explicit no-workflow-entry result for this optional event field.
@@ -148,6 +149,12 @@ func prepareStartAttemptWorkflowEntry(status Status, req StartAttemptRequest) (*
 		}
 	}
 
+	if override := req.ConsumeReviewFindingOverride; override != nil {
+		if status.PendingReviewFindingOverride == nil || *status.PendingReviewFindingOverride != *override || override.TargetStep != entry.State {
+			return nil, errors.New("review finding override does not match the pending target")
+		}
+	}
+
 	return &entry, nil
 }
 
@@ -160,6 +167,10 @@ func applyStartAttemptStatus(status *Status, event Event, req StartAttemptReques
 
 	if req.ConsumeWorkflowLoopHardCapOverride != nil {
 		status.WorkflowLoop.PendingHardCapOverride = nil
+	}
+
+	if req.ConsumeReviewFindingOverride != nil {
+		status.PendingReviewFindingOverride = nil
 	}
 
 	status.Continued = nil

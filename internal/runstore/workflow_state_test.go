@@ -39,17 +39,17 @@ func TestStartAttemptPersistsWorkflowStateEntry(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 2 {
-		t.Fatalf("code count = %d, want 2", got)
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
+		t.Fatalf("code count = %d, want 1", got)
 	}
 
-	if got := loaded.Status.WorkflowLoop.RepeatedStates; len(got) != 1 || got[0] != "code" {
-		t.Fatalf("repeated states = %+v, want [code]", got)
+	if got := loaded.Status.WorkflowLoop.RepeatedStates; len(got) != 0 {
+		t.Fatalf("repeated states = %+v, want none", got)
 	}
 
 	entry := loaded.Status.WorkflowLoop.Entries[1]
-	if entry.State != "code" || entry.Count != 2 || !entry.Repeated || entry.PreviousState != "test" || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != "ready" {
-		t.Fatalf("entry = %+v, want repeated code entry with trigger", entry)
+	if entry.State != "code" || entry.Count != 1 || entry.Repeated || entry.PreviousState != "test" || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != "ready" {
+		t.Fatalf("entry = %+v, want first routed code entry with trigger", entry)
 	}
 
 	var payload attemptStartedPayload
@@ -85,8 +85,8 @@ func TestStartAttemptWithoutWorkflowStateEntryDoesNotIncrementLoopCounters(t *te
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
-		t.Fatalf("code count = %d, want unchanged initial count 1", got)
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 0 {
+		t.Fatalf("code count = %d, want unchanged initial count 0", got)
 	}
 
 	if got := len(loaded.Status.WorkflowLoop.Entries); got != 1 {
@@ -168,6 +168,7 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 			State: stateRunning,
 			WorkflowStateEntry: WorkflowStateEntryRequest{
 				State:         "review",
+				CounterKey:    "review-group",
 				PreviousState: "code",
 				TriggerStatus: attemptStatusDone,
 				TriggerResult: "skipped",
@@ -186,12 +187,12 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 		t.Fatalf("attempts = %d active=%+v, want unchanged empty attempts", len(status.Attempts), status.ActiveAttempt)
 	}
 
-	if got := status.WorkflowLoop.Counts["review"]; got != 1 {
-		t.Fatalf("review loop count = %d, want 1", got)
+	if got := status.WorkflowLoop.Counts["review-group"]; got != 1 {
+		t.Fatalf("review-group loop count = %d, want 1", got)
 	}
 
 	entry := status.WorkflowLoop.Entries[1]
-	if entry.State != "review" || entry.PreviousState != "code" || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != "skipped" {
+	if entry.State != "review" || entry.CounterKey != "review-group" || entry.PreviousState != "code" || entry.TriggerStatus != attemptStatusDone || entry.TriggerResult != "skipped" {
 		t.Fatalf("workflow entry = %+v, want skip transition to review", entry)
 	}
 
@@ -225,6 +226,10 @@ func TestRecordStepSkipPersistsAuditHistoryAndTransition(t *testing.T) {
 	if got := loaded.Status.WorkflowLoop.Entries[1]; got != entry {
 		t.Fatalf("replayed workflow entry = %+v, want %+v", got, entry)
 	}
+
+	if got := loaded.Status.WorkflowLoop.Counts["review-group"]; got != 1 {
+		t.Fatalf("replayed review-group loop count = %d, want 1", got)
+	}
 }
 
 func TestRecordStepSkipRejectsBlankReasonWithoutMutation(t *testing.T) {
@@ -254,6 +259,33 @@ func TestRecordStepSkipRejectsBlankReasonWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestRecordWorkflowLoopSoftCapDeduplicatesByCounterKey(t *testing.T) {
+	store := openStore(t, t.TempDir())
+
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "soft-key", Workflow: "implementation", InitialState: "code"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	for _, state := range []string{"code", "code_fixer"} {
+		_, _, err := store.RecordWorkflowLoopSoftCapContext(context.Background(), run.ID, WorkflowLoopSoftCap{
+			Workflow: "implementation", State: state, CounterKey: "coding", Count: 3, Soft: 2, Hard: 3,
+		}, time.Time{})
+		if err != nil {
+			t.Fatalf("RecordWorkflowLoopSoftCap returned error: %v", err)
+		}
+	}
+
+	loaded, err := store.LoadContext(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if got := loaded.Status.WorkflowLoop.SoftCapWarnings; len(got) != 1 || got[0].CounterKey != "coding" || got[0].State != "code" {
+		t.Fatalf("soft warnings = %+v, want one warning for coding", got)
+	}
+}
+
 func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
@@ -271,8 +303,8 @@ func TestRecordIgnoredReportDoesNotIncrementWorkflowLoopCounters(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
-		t.Fatalf("code count = %d, want unchanged initial count 1", got)
+	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 0 {
+		t.Fatalf("code count = %d, want unchanged initial count 0", got)
 	}
 
 	if got := len(loaded.Status.WorkflowLoop.Entries); got != 1 {
@@ -291,6 +323,7 @@ func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 	block := WorkflowLoopHardCap{
 		Workflow:         "implementation",
 		BlockedState:     "code",
+		CounterKey:       "coding",
 		CurrentCount:     1,
 		ProspectiveCount: 2,
 		Soft:             1,
@@ -326,6 +359,30 @@ func TestAllowWorkflowLoopHardCapPersistsPendingOverride(t *testing.T) {
 
 	if loaded.Status.WorkflowLoop.PendingHardCapOverride == nil || *loaded.Status.WorkflowLoop.PendingHardCapOverride != *override {
 		t.Fatalf("loaded override = %+v, want %+v", loaded.Status.WorkflowLoop.PendingHardCapOverride, override)
+	}
+}
+
+func TestReplayWorkflowLoopHardCapOverrideRejectsDifferentEffectiveCounterKey(t *testing.T) {
+	block := WorkflowLoopHardCap{Workflow: "implementation", BlockedState: "code", CounterKey: "coding", CurrentCount: 1, ProspectiveCount: 2, Soft: 1, Hard: 1, Reason: WorkflowLoopHardCapReason}
+	override := WorkflowLoopHardCapOverride{Workflow: block.Workflow, TargetState: block.BlockedState, CounterKey: "different", CountBeforeOverride: block.CurrentCount, CountAfterOverride: block.ProspectiveCount, Soft: block.Soft, Hard: block.Hard, Reason: block.Reason}
+	status := Status{Workflow: "implementation", State: stateBlockedHuman, WorkflowLoop: WorkflowLoop{HardCapBlock: &block}}
+
+	err := validateReplayedWorkflowHardCapOverride(status, Event{Sequence: 3}, workflowLoopHardCapOverridePayload{Override: override, State: stateRunning})
+	if err == nil || !strings.Contains(err.Error(), "does not match active hard-cap block") {
+		t.Fatalf("validation error = %v, want counter-key mismatch rejection", err)
+	}
+}
+
+func TestReplayAcceptsLegacyCountedInitialWorkflowState(t *testing.T) {
+	status := Status{Workflow: "implementation"}
+	entry := WorkflowStateEntry{Workflow: "implementation", State: "review", Count: 1}
+
+	if err := applyReplayedWorkflowStateEntry(&status, Event{Sequence: 1}, &entry); err != nil {
+		t.Fatalf("legacy initial entry replay error = %v", err)
+	}
+
+	if got := status.WorkflowLoop.Counts["review"]; got != 1 {
+		t.Fatalf("legacy review count = %d, want 1", got)
 	}
 }
 
@@ -567,7 +624,7 @@ func TestResolveHumanBlockRefusalsDoNotMutate(t *testing.T) {
 func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "consume-loop-override", Workflow: "implementation", InitialState: "code"})
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "consume-loop-override", Workflow: "implementation"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -575,8 +632,9 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 	block := WorkflowLoopHardCap{
 		Workflow:         "implementation",
 		BlockedState:     "code",
-		CurrentCount:     1,
-		ProspectiveCount: 2,
+		CounterKey:       "coding",
+		CurrentCount:     0,
+		ProspectiveCount: 1,
 		Soft:             1,
 		Hard:             1,
 		Reason:           WorkflowLoopHardCapReason,
@@ -602,7 +660,7 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 		Timeout:                            time.Minute,
 		ReportExitGrace:                    time.Second,
 		Time:                               time.Date(2026, 5, 2, 16, 2, 0, 0, time.UTC),
-		WorkflowStateEntry:                 WorkflowStateEntryRequest{State: "code", PreviousState: "code", TriggerStatus: attemptStatusDone, TriggerResult: "ready"},
+		WorkflowStateEntry:                 WorkflowStateEntryRequest{State: "code", CounterKey: "coding", PreviousState: "code", TriggerStatus: attemptStatusDone, TriggerResult: "ready"},
 		ConsumeWorkflowLoopHardCapOverride: override,
 	})
 	if err != nil {
@@ -623,8 +681,8 @@ func TestStartAttemptConsumesWorkflowLoopHardCapOverrideOnce(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 2 {
-		t.Fatalf("code count = %d, want overridden prospective count 2", got)
+	if got := loaded.Status.WorkflowLoop.Counts["coding"]; got != 1 {
+		t.Fatalf("coding count = %d, want overridden prospective count 1", got)
 	}
 
 	if loaded.Status.WorkflowLoop.PendingHardCapOverride != nil {

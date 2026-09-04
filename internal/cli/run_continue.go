@@ -10,7 +10,7 @@ import (
 	"tiny-llm-orchestrator/orc/internal/runstore"
 )
 
-func executeRunContinue(runID string, allowLoopCap, resolveBlock bool, reasons []string, stdout, stderr io.Writer) error {
+func executeRunContinue(runID string, allowLoopCap, allowReviewFinding, resolveBlock bool, reasons []string, stdout, stderr io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("execute run continue: %w", err)
@@ -25,13 +25,13 @@ func executeRunContinue(runID string, allowLoopCap, resolveBlock bool, reasons [
 		return executeResolveBlockContinue(store, runID, reasons, stdout, stderr)
 	}
 
+	if allowReviewFinding {
+		return executeReviewFindingContinue(store, runID, stdout, stderr)
+	}
+
 	status, _, err := store.AllowWorkflowLoopHardCap(runID, "allow_loop_cap", time.Time{})
 	if err != nil {
-		if _, writeErr := fmt.Fprintf(stderr, "%s run continue: %v\n", appName, err); writeErr != nil {
-			return fmt.Errorf("execute run continue: %w", writeErr)
-		}
-
-		return fmt.Errorf("execute run continue: %w", err)
+		return writeRunContinueError(stderr, err)
 	}
 
 	override := status.WorkflowLoop.PendingHardCapOverride
@@ -47,16 +47,31 @@ func executeRunContinue(runID string, allowLoopCap, resolveBlock bool, reasons [
 	return nil
 }
 
+func executeReviewFindingContinue(store *runstore.Store, runID string, stdout, stderr io.Writer) error {
+	status, _, err := store.AllowRepeatedReviewFinding(runID, time.Time{})
+	if err != nil {
+		return writeRunContinueError(stderr, err)
+	}
+
+	override := status.PendingReviewFindingOverride
+	if override == nil {
+		return fmt.Errorf("run %q review-finding override was not persisted", runID)
+	}
+
+	_, err = fmt.Fprintf(stdout, "continued run %s after repeated review finding; allowed one routing decision into %s\n", runID, override.TargetStep)
+	if err != nil {
+		return fmt.Errorf("write review-finding continuation: %w", err)
+	}
+
+	return nil
+}
+
 func executeResolveBlockContinue(store *runstore.Store, runID string, reasons []string, stdout, stderr io.Writer) error {
 	reason := strings.TrimSpace(reasons[0])
 
 	status, event, err := store.ResolveHumanBlock(runID, reason, time.Time{})
 	if err != nil {
-		if _, writeErr := fmt.Fprintf(stderr, "%s run continue: %v\n", appName, err); writeErr != nil {
-			return fmt.Errorf("execute run continue: %w", writeErr)
-		}
-
-		return fmt.Errorf("execute run continue: %w", err)
+		return writeRunContinueError(stderr, err)
 	}
 
 	if status.Continued == nil {
@@ -69,4 +84,12 @@ func executeResolveBlockContinue(store *runstore.Store, runID string, reasons []
 	}
 
 	return nil
+}
+
+func writeRunContinueError(stderr io.Writer, err error) error {
+	if _, writeErr := fmt.Fprintf(stderr, "%s run continue: %v\n", appName, err); writeErr != nil {
+		return fmt.Errorf("execute run continue: %w", writeErr)
+	}
+
+	return fmt.Errorf("execute run continue: %w", err)
 }

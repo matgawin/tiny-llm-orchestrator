@@ -131,11 +131,11 @@ func loadWorkflows(orcDir, realOrcDir string, defaults LoopCapsConfig, workflowR
 			return nil, fmt.Errorf("workflow map key %q does not match workflow name %q", name, workflow.Name)
 		}
 
+		workflow.LoopCaps = resolveLoopCaps(defaults, ref.LoopCaps)
 		if err := validateWorkflow(workflow, agents, runtimes); err != nil {
 			return nil, fmt.Errorf("workflow %q: %w", name, err)
 		}
 
-		workflow.LoopCaps = resolveLoopCaps(defaults, ref.LoopCaps)
 		workflow.ReferencedAgents = workflowAgentRefs(workflow, agentPaths)
 		workflows[name] = workflow
 	}

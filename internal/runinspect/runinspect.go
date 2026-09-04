@@ -17,6 +17,7 @@ import (
 
 	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
+	"tiny-llm-orchestrator/orc/internal/launcher"
 	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
@@ -60,9 +61,7 @@ func Next(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	renderNext(inspection.stdout, inspection.workflow, inspection.run, inspection.decision)
-
-	return nil
+	return renderNext(inspection.stdout, inspection.workflow, inspection.run, inspection.decision)
 }
 
 // SummaryContext prints compact review context from persisted run state.
@@ -236,11 +235,27 @@ func renderStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run
 	printDecisionOutcomeDetails(w, workflowConfig, run, decision)
 	printSkippedSteps(w, run.Status.SkippedSteps)
 	printWorkflowLoopStatus(w, workflowConfig, run)
+	printReviewFindingStatus(w, run.Status)
 	reports := reportPaths(run.Status.Artifacts)
 	printReportPaths(w, reports)
 	printReviewFindings(w, run.Status.Attempts)
 	printArtifacts(w, run.Status.Artifacts)
 	printTerminalHumanState(w, run, decision, reports)
+}
+
+func printReviewFindingStatus(w io.Writer, status runstore.Status) {
+	_, _ = fmt.Fprintln(w, "review_finding_block:")
+
+	block := status.ReviewFindingBlock
+	if block == nil {
+		_, _ = fmt.Fprintln(w, "  none")
+	} else {
+		_, _ = fmt.Fprintf(w, "  reason: %s\n  finding_id: %s\n  reviewer_step_id: %s\n  proposed_correction_step_id: %s\n  first_report_attempt_id: %s\n  repeated_report_attempt_id: %s\n  occurrence_count: %d\n", block.Reason, block.FindingID, block.ReviewerStepID, block.ProposedCorrectionStepID, block.FirstReportAttemptID, block.RepeatedReportAttemptID, block.OccurrenceCount)
+	}
+
+	if override := status.PendingReviewFindingOverride; override != nil {
+		_, _ = fmt.Fprintf(w, "pending_review_finding_override:\n  human_action: %s\n  target_step: %s\n", override.HumanAction, override.TargetStep)
+	}
 }
 
 func printReviewFindings(w io.Writer, attempts []runstore.Attempt) {
@@ -322,38 +337,40 @@ func printConfigRefreshHistory(w io.Writer, events []runstore.Event) {
 func printWorkflowLoopStatus(w io.Writer, workflowConfig config.Workflow, run *runstore.Run) {
 	_, _ = fmt.Fprintln(w, "workflow_loop:")
 
-	states := workflowLoopStates(workflowConfig, run.Status.WorkflowLoop)
-	if len(states) == 0 {
+	keys := workflowLoopKeys(workflowConfig, run.Status.WorkflowLoop)
+	if len(keys) == 0 {
 		_, _ = fmt.Fprintln(w, "  states: none")
 		return
 	}
 
 	_, _ = fmt.Fprintln(w, "  states:")
 
-	for _, state := range states {
-		count := run.Status.WorkflowLoop.Counts[state]
-		softReached := workflowLoopSoftReached(run.Status.WorkflowLoop, state, workflowConfig.LoopCaps.Soft)
+	for _, key := range keys {
+		members, soft, hard := workflowLoopMembersAndLimits(workflowConfig, key)
+		count := run.Status.WorkflowLoop.Counts[key]
+		softReached := workflowLoopSoftReached(run.Status.WorkflowLoop, key, soft)
 		hardBlocking := false
 		blockedProspective := 0
 
-		if block := run.Status.WorkflowLoop.HardCapBlock; block != nil && block.BlockedState == state {
+		if block := run.Status.WorkflowLoop.HardCapBlock; block != nil && workflowCounterKey(block.CounterKey, block.BlockedState) == key {
 			hardBlocking = true
 			blockedProspective = block.ProspectiveCount
 		}
 
-		_, _ = fmt.Fprintf(w, "    %s:\n", state)
+		_, _ = fmt.Fprintf(w, "    %s:\n", key)
+		_, _ = fmt.Fprintf(w, "      member_steps: [%s]\n", strings.Join(members, ", "))
 		_, _ = fmt.Fprintf(w, "      current_count: %d\n", count)
-		_, _ = fmt.Fprintf(w, "      soft_threshold: %d\n", workflowConfig.LoopCaps.Soft)
-		_, _ = fmt.Fprintf(w, "      hard_threshold: %d\n", workflowConfig.LoopCaps.Hard)
+		_, _ = fmt.Fprintf(w, "      soft_threshold: %d\n", soft)
+		_, _ = fmt.Fprintf(w, "      hard_threshold: %d\n", hard)
 		_, _ = fmt.Fprintf(w, "      soft_reached: %t\n", softReached)
 
 		_, _ = fmt.Fprintf(w, "      hard_blocking: %t\n", hardBlocking)
 		if hardBlocking {
-			_, _ = fmt.Fprintf(w, "      blocked_target_state: %s\n", state)
+			_, _ = fmt.Fprintf(w, "      blocked_target_state: %s\n", run.Status.WorkflowLoop.HardCapBlock.BlockedState)
 			_, _ = fmt.Fprintf(w, "      blocked_prospective_count: %d\n", blockedProspective)
 		}
 
-		if override := run.Status.WorkflowLoop.PendingHardCapOverride; override != nil && override.TargetState == state {
+		if override := run.Status.WorkflowLoop.PendingHardCapOverride; override != nil && workflowCounterKey(override.CounterKey, override.TargetState) == key {
 			_, _ = fmt.Fprintf(w, "      pending_override: %s\n", override.HumanAction)
 			_, _ = fmt.Fprintf(w, "      pending_override_count_after: %d\n", override.CountAfterOverride)
 		}
@@ -381,14 +398,18 @@ func printSkippedSteps(w io.Writer, skipped []runstore.SkippedStep) {
 	}
 }
 
-func workflowLoopStates(workflowConfig config.Workflow, loop runstore.WorkflowLoop) []string {
+func workflowLoopKeys(workflowConfig config.Workflow, loop runstore.WorkflowLoop) []string {
 	seen := map[string]bool{}
 
 	var states []string
 
 	for state := range workflowConfig.Steps {
-		seen[state] = true
-		states = append(states, state)
+		key, _ := workflowConfig.EffectiveStepLoop(state)
+
+		if !seen[key] {
+			seen[key] = true
+			states = append(states, key)
+		}
 	}
 
 	for state := range loop.Counts {
@@ -398,18 +419,51 @@ func workflowLoopStates(workflowConfig config.Workflow, loop runstore.WorkflowLo
 		}
 	}
 
-	if block := loop.HardCapBlock; block != nil && !seen[block.BlockedState] {
-		seen[block.BlockedState] = true
-		states = append(states, block.BlockedState)
+	if block := loop.HardCapBlock; block != nil {
+		key := workflowCounterKey(block.CounterKey, block.BlockedState)
+		if !seen[key] {
+			seen[key] = true
+			states = append(states, key)
+		}
 	}
 
-	if override := loop.PendingHardCapOverride; override != nil && !seen[override.TargetState] {
-		states = append(states, override.TargetState)
+	if override := loop.PendingHardCapOverride; override != nil {
+		key := workflowCounterKey(override.CounterKey, override.TargetState)
+		if !seen[key] {
+			states = append(states, key)
+		}
 	}
 
 	slices.Sort(states)
 
 	return states
+}
+
+func workflowLoopMembersAndLimits(workflowConfig config.Workflow, key string) ([]string, int, int) {
+	members := make([]string, 0)
+
+	soft, hard := workflowConfig.LoopCaps.Soft, workflowConfig.LoopCaps.Hard
+	for state := range workflowConfig.Steps {
+		stepKey, caps := workflowConfig.EffectiveStepLoop(state)
+
+		if stepKey == key {
+			members = append(members, state)
+
+			soft, hard = caps.Soft, caps.Hard
+		}
+	}
+
+	slices.Sort(members)
+
+	return members, soft, hard
+}
+
+func workflowCounterKey(key, state string) string {
+	if key != "" {
+		return key
+	}
+
+	return state
 }
 
 func workflowLoopSoftReached(loop runstore.WorkflowLoop, state string, soft int) bool {
@@ -422,17 +476,33 @@ func workflowLoopSoftReached(loop runstore.WorkflowLoop, state string, soft int)
 	}
 
 	return slices.ContainsFunc(loop.SoftCapWarnings, func(warning runstore.WorkflowLoopSoftCap) bool {
-		return warning.State == state
+		return workflowCounterKey(warning.CounterKey, warning.State) == state
 	})
 }
 
-func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
+func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) error {
 	printRunHeader(w, run, decision)
 
 	_, _ = fmt.Fprintf(w, "decision: %s\n", decision.Kind)
 	switch decision.Kind {
 	case workflow.DecisionSelectStep:
 		printSelectedStep(w, workflowConfig, decision.Step)
+
+		latest, _ := runstore.LatestConsumableOutcome(run.Status)
+
+		_, findingBlock, err := launcher.ReviewFindingDecision(workflowConfig, run, decision, latest)
+		if err != nil {
+			return fmt.Errorf("preview repeated review finding: %w", err)
+		}
+
+		if findingBlock != nil {
+			_, _ = fmt.Fprintf(w, "blocked: repeated review finding %s from reviewer %s would stop before target step %s (first report %s, repeated report %s, occurrences %d)\n", findingBlock.FindingID, findingBlock.ReviewerStepID, findingBlock.ProposedCorrectionStepID, findingBlock.FirstReportAttemptID, findingBlock.RepeatedReportAttemptID, findingBlock.OccurrenceCount)
+			_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", runstore.RepeatedReviewFindingReason)
+			_, _ = fmt.Fprintln(w, "launch: not launched")
+
+			return nil
+		}
+
 		printLoopCapPreview(w, workflowConfig, run, decision)
 		_, _ = fmt.Fprintln(w, "launch: not launched")
 	case workflow.DecisionRetryStep:
@@ -455,18 +525,20 @@ func renderNext(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, 
 		printReportPaths(w, reports)
 		printTerminalHumanState(w, run, decision, reports)
 	}
+
+	return nil
 }
 
 func printLoopCapPreview(w io.Writer, workflowConfig config.Workflow, run *runstore.Run, decision workflow.Decision) {
 	latest, hasLatest := runstore.LatestConsumableOutcome(run.Status)
 
-	capDecision := loopcap.Evaluate(workflowConfig.Name, workflowConfig.LoopCaps, run.Status, decision, latest, hasLatest)
+	capDecision := loopcap.Evaluate(workflowConfig, run.Status, decision, latest, hasLatest)
 	switch capDecision.Kind {
 	case loopcap.DecisionNone:
 	case loopcap.DecisionSoft:
-		_, _ = fmt.Fprintf(w, "warning: workflow loop soft cap will be reached for state %s at count %d (soft %d, hard %d)\n", capDecision.State, capDecision.ProspectiveCount, capDecision.Soft, capDecision.Hard)
+		_, _ = fmt.Fprintf(w, "warning: workflow loop soft cap will be reached for counter %s and target step %s at count %d (soft %d, hard %d)\n", capDecision.CounterKey, capDecision.State, capDecision.ProspectiveCount, capDecision.Soft, capDecision.Hard)
 	case loopcap.DecisionHard:
-		_, _ = fmt.Fprintf(w, "blocked: workflow loop hard cap would be reached for state %s at prospective count %d (current %d, hard %d)\n", capDecision.State, capDecision.ProspectiveCount, capDecision.CurrentCount, capDecision.Hard)
+		_, _ = fmt.Fprintf(w, "blocked: workflow loop hard cap would be reached for counter %s and target step %s at prospective count %d (current %d, hard %d)\n", capDecision.CounterKey, capDecision.State, capDecision.ProspectiveCount, capDecision.CurrentCount, capDecision.Hard)
 		_, _ = fmt.Fprintf(w, "terminal_reason: %s\n", runstore.WorkflowLoopHardCapReason)
 	}
 }
@@ -543,6 +615,17 @@ func renderSummaryContext(ctx context.Context, inspection inspection) error {
 
 	if state == workflow.RunStatusBlockedForHuman {
 		printStringField(w, "human_attention", workflow.RunStatusBlockedForHuman)
+	}
+
+	if block := run.Status.ReviewFindingBlock; block != nil {
+		_, _ = fmt.Fprintln(w, "- review_finding_block:")
+		printIndentedStringField(w, "reason", block.Reason)
+		printIndentedStringField(w, "finding_id", block.FindingID)
+		printIndentedStringField(w, "reviewer_step", block.ReviewerStepID)
+		printIndentedStringField(w, "proposed_correction_step", block.ProposedCorrectionStepID)
+		printIndentedStringField(w, "first_report_attempt", block.FirstReportAttemptID)
+		printIndentedStringField(w, "repeated_report_attempt", block.RepeatedReportAttemptID)
+		_, _ = fmt.Fprintf(w, "  occurrence_count: %d\n", block.OccurrenceCount)
 	}
 
 	_, _ = fmt.Fprintln(w)

@@ -57,6 +57,10 @@ func seedProcessedLauncherAttempt(t *testing.T, store *runstore.Store, runID, at
 		Timeout:         200 * time.Millisecond,
 		ReportExitGrace: 30 * time.Millisecond,
 		Time:            fixedLauncherTime(),
+		WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+			State:      stepID,
+			CounterKey: stepID,
+		},
 	})
 	if err != nil {
 		t.Fatalf("StartAttempt returned error: %v", err)
@@ -297,14 +301,15 @@ func seedReportedLoopAttempt(t *testing.T, store *runstore.Store, runID, attempt
 		ReportExitGrace:  30 * time.Millisecond,
 		Time:             fixedLauncherTime(),
 		ConsumeAttemptID: consumeAttemptID,
+		WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+			State:      "plan",
+			CounterKey: "plan",
+		},
 	}
 	if consumeAttemptID != "" {
-		req.WorkflowStateEntry = runstore.WorkflowStateEntryRequest{
-			State:         "plan",
-			PreviousState: "plan",
-			TriggerStatus: "done",
-			TriggerResult: "ready",
-		}
+		req.WorkflowStateEntry.PreviousState = "plan"
+		req.WorkflowStateEntry.TriggerStatus = "done"
+		req.WorkflowStateEntry.TriggerResult = "ready"
 	}
 
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, req); err != nil {

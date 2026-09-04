@@ -15,9 +15,14 @@ import (
 	"tiny-llm-orchestrator/orc/internal/configsnapshot"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/testutil"
+	"tiny-llm-orchestrator/orc/internal/workflow"
 )
 
-const refreshEmptyPathEnv = "PATH="
+const (
+	refreshEmptyPathEnv = "PATH="
+	refreshCodeStep     = "code"
+	refreshPlanStep     = "plan"
+)
 
 func TestRefreshPublishesNextSnapshotAndEvent(t *testing.T) {
 	root, store, runID := writeRefreshRun(t)
@@ -121,13 +126,14 @@ steps:
 	}
 
 	var payload struct {
-		OldVersion            int    `json:"old_version"`
-		OldVersionDir         string `json:"old_version_dir"`
-		NewVersion            int    `json:"new_version"`
-		NewVersionDir         string `json:"new_version_dir"`
-		ManifestHashAlgorithm string `json:"manifest_hash_algorithm"`
-		ManifestHash          string `json:"manifest_hash"`
-		Source                string `json:"source"`
+		OldVersion            int            `json:"old_version"`
+		OldVersionDir         string         `json:"old_version_dir"`
+		NewVersion            int            `json:"new_version"`
+		NewVersionDir         string         `json:"new_version_dir"`
+		ManifestHashAlgorithm string         `json:"manifest_hash_algorithm"`
+		ManifestHash          string         `json:"manifest_hash"`
+		Source                string         `json:"source"`
+		WorkflowLoopCounts    map[string]int `json:"workflow_loop_counts"`
 	}
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal refresh payload: %v", err)
@@ -136,6 +142,81 @@ steps:
 	if payload.OldVersion != 1 || payload.OldVersionDir != "000001" || payload.NewVersion != 2 || payload.NewVersionDir != "000002" ||
 		payload.ManifestHashAlgorithm != "sha256" || payload.ManifestHash != wantManifestHash || payload.Source != "cli" {
 		t.Fatalf("payload = %+v, want refresh event details", payload)
+	}
+
+	if payload.WorkflowLoopCounts[refreshPlanStep] != 0 || loaded.Status.WorkflowLoop.Counts[refreshPlanStep] != 0 {
+		t.Fatalf("refreshed loop counts payload=%v status=%v, want uncounted initial state", payload.WorkflowLoopCounts, loaded.Status.WorkflowLoop.Counts)
+	}
+}
+
+func TestRefreshedLoopCountsUseNewKeyMembership(t *testing.T) {
+	wf := config.Workflow{Steps: map[string]config.Step{
+		refreshCodeStep: {Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}},
+		"fix":           {Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}},
+	}}
+
+	counts, err := refreshedLoopCounts([]runstore.WorkflowStateEntry{{State: refreshCodeStep, Count: 1}, {State: "fix", Count: 1}}, wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if counts["coding"] != 2 {
+		t.Fatalf("counts = %#v, want coding=2", counts)
+	}
+}
+
+func TestRefreshCountsEntryCompletedAfterInitialLoad(t *testing.T) {
+	root, store, runID := writeRefreshRun(t)
+
+	_, err := Refresh(context.Background(), Options{
+		Root: root, RunID: runID, Env: []string{refreshEmptyPathEnv}, Time: fixedRefreshTime(),
+		beforeLockedRefresh: func() {
+			_, _, skipErr := store.RecordStepSkipContext(context.Background(), runID, runstore.RecordStepSkipRequest{
+				StepID: refreshPlanStep, Reason: "race test", Time: fixedRefreshTime(),
+			}, func(runstore.Status) (runstore.StepSkipTransition, error) {
+				return runstore.StepSkipTransition{
+					State: workflow.RunStatusRunning,
+					WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+						State: refreshPlanStep, PreviousState: refreshPlanStep, TriggerStatus: "done", TriggerResult: "skipped",
+					},
+				}, nil
+			})
+			if skipErr != nil {
+				t.Fatalf("RecordStepSkip returned error: %v", skipErr)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.LoadContext(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := loaded.Status.WorkflowLoop.Counts[refreshPlanStep]; got != 1 {
+		t.Fatalf("refreshed plan count = %d, want one routed entry", got)
+	}
+}
+
+func TestRefreshedLoopCountsPreserveTerminalStates(t *testing.T) {
+	wf := config.Workflow{Steps: map[string]config.Step{refreshCodeStep: {}}}
+
+	counts, err := refreshedLoopCounts([]runstore.WorkflowStateEntry{{State: refreshCodeStep, Count: 1}, {State: workflow.RunStatusReadyForHuman, Count: 1}}, wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if counts[refreshCodeStep] != 1 || counts[workflow.RunStatusReadyForHuman] != 1 {
+		t.Fatalf("counts = %#v, want code and terminal state counts", counts)
+	}
+}
+
+func TestRefreshedLoopCountsRejectRemovedStep(t *testing.T) {
+	_, err := refreshedLoopCounts([]runstore.WorkflowStateEntry{{State: "removed", Count: 1}}, config.Workflow{Steps: map[string]config.Step{refreshCodeStep: {}}})
+	if err == nil || !strings.Contains(err.Error(), `step "removed" is not declared`) {
+		t.Fatalf("error = %v, want removed step rejection", err)
 	}
 }
 
@@ -165,6 +246,34 @@ func TestRefreshRejectsActiveAttempt(t *testing.T) {
 
 	if _, statErr := os.Stat(filepath.Join(root, ".orc", "runs", runID, "config", "000002")); !os.IsNotExist(statErr) {
 		t.Fatalf("000002 stat err = %v, want no published refresh snapshot", statErr)
+	}
+}
+
+//nolint:goconst // Exact workflow names keep the compatibility fixture clear.
+func TestValidateCompatibilityRejectsLoopAndFindingBlocksAndOverrides(t *testing.T) {
+	project := &config.Project{Workflows: map[string]config.Workflow{"implementation": {Name: "implementation"}}}
+	tests := []struct {
+		name   string
+		mutate func(*runstore.Status)
+	}{
+		{"loop block", func(status *runstore.Status) { status.WorkflowLoop.HardCapBlock = &runstore.WorkflowLoopHardCap{} }},
+		{"loop override", func(status *runstore.Status) {
+			status.WorkflowLoop.PendingHardCapOverride = &runstore.WorkflowLoopHardCapOverride{}
+		}},
+		{"finding block", func(status *runstore.Status) { status.ReviewFindingBlock = &runstore.ReviewFindingBlock{} }},
+		{"finding override", func(status *runstore.Status) { status.PendingReviewFindingOverride = &runstore.ReviewFindingOverride{} }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := &runstore.Run{ID: "refresh-run", Status: runstore.Status{Workflow: "implementation"}}
+			tt.mutate(&run.Status)
+
+			err := validateCompatibility(run, project, project)
+			if err == nil || !strings.Contains(err.Error(), "active loop or review-finding block or override") {
+				t.Fatalf("validateCompatibility error = %v, want active block or override rejection", err)
+			}
+		})
 	}
 }
 

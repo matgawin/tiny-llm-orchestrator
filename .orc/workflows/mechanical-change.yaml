@@ -39,6 +39,7 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   mechanical-code:
+    loop: {key: coding, soft: 4, hard: 6}
     agent: mechanical-coder
     model: gpt-5.6-sol
     reasoning: low
@@ -82,6 +83,7 @@ steps:
       failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   mechanical-review:
+    loop: {key: mechanical-review, soft: 1, hard: 2}
     agent: mechanical-reviewer
     skippable: true
     allowed_results:

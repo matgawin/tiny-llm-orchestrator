@@ -59,7 +59,7 @@ Required event fields:
     "workflow_state_entry": {
       "workflow": "implementation",
       "state": "plan",
-      "count": 1
+      "count": 0
     }
   }
 }
@@ -77,6 +77,7 @@ types are `run.created`, `status.updated`, `artifact.written`,
 `attempt.finished`, `attempt.recovered`, `attempt.reported`, `attempt.warning`,
 `report.ignored`, `run.continued`, `workflow.loop_soft_cap`,
 `workflow.loop_hard_cap`, `workflow.loop_hard_cap_override`,
+`workflow.repeated_review_finding`, `workflow.repeated_review_finding_override`,
 `workflow.step_skipped`, and `config_snapshot_refreshed`; those are written
 only through the dedicated store APIs.
 
@@ -103,6 +104,10 @@ references.
 reserve the final run directory atomically; creation fails if that path already
 exists, including an empty directory.
 
+The initial `workflow_state_entry` records start-state history with count `0`.
+Loop counts increase only when routing starts a worker. Replay also accepts
+legacy `run.created` entries that counted the initial state as `1`.
+
 ```json
 {
   "workflow": "implementation",
@@ -110,7 +115,7 @@ exists, including an empty directory.
   "workflow_state_entry": {
     "workflow": "implementation",
     "state": "plan",
-    "count": 1
+    "count": 0
   }
 }
 ```
@@ -123,6 +128,7 @@ exists, including an empty directory.
   "workflow_state_entry": {
     "workflow": "implementation",
     "state": "ready_for_human",
+    "counter_key": "ready_for_human",
     "count": 1,
     "previous_state": "code",
     "trigger_status": "done",
@@ -135,6 +141,24 @@ The `workflow_state_entry` field is present when the status update is an
 accepted workflow transition into a terminal or human-handoff state. Terminal
 states are counted for auditability; loop cap enforcement applies only to
 worker-selecting transitions.
+
+New state entries, warnings, hard blocks, and hard-cap overrides store
+`counter_key`. The `state`, `blocked_target_state`, and `target_state` fields
+keep the actual workflow step. During replay, an event without `counter_key`
+uses its actual state or target step as the counter key.
+
+`config_snapshot_refreshed` stores `workflow_loop_counts`. Orc computes this
+map from all state entries and the new step membership. Replay replaces the
+current counts with this map. Refresh does not create a warning or a block.
+
+`workflow.repeated_review_finding` records a `repeated_review_finding` human
+stop before another correction attempt starts. The block records the finding
+ID, reviewer and proposed correction steps, the first and repeated report
+attempt IDs, and the accepted occurrence count. A
+`workflow.repeated_review_finding_override` event records the fixed
+`allow_review_finding` human action and permits one routing decision for its
+target step. The next matching `attempt.started` event consumes the override.
+Replay keeps finding history and workflow loop counters.
 
 `artifact.written` is written when the store persists a standalone artifact.
 Canonical report artifacts for accepted valid reported attempts are the
@@ -201,12 +225,13 @@ are added beside the `attempt` object:
 }
 ```
 
-Workflow state entries are counted by state name. The initial workflow start
-state is recorded at run creation with count `1`. Later counts increment only
-when routing is accepted into durable run state: a selected worker state in
-`attempt.started`, a terminal/human state in `status.updated`, or an audited
-skip transition in `workflow.step_skipped`. Failed report validation and
-`report.ignored` events do not increment these counters.
+Workflow state entries increment counts by effective counter key. If a legacy
+event omits `counter_key`, its actual state is the counter key. The initial
+workflow start state is recorded at run creation with count `0`. Later counts
+increment only when routing enters durable run state: a selected worker state
+in `attempt.started`, a terminal or human state in `status.updated`, or an
+audited skip transition in `workflow.step_skipped`. Failed report validation
+and `report.ignored` events do not increment these counters.
 
 `workflow.step_skipped` is written by the internal trusted skip service when a
 human decision bypasses the currently selected skippable step. It records the
@@ -229,6 +254,7 @@ workflow evaluation do not consume it again.
   "workflow_state_entry": {
     "workflow": "implementation",
     "state": "redundancy-review",
+    "counter_key": "redundancy-review",
     "count": 1,
     "previous_state": "review",
     "trigger_status": "done",
@@ -254,11 +280,15 @@ does not add an artifact reference; config snapshots live under `config/`.
   "new_version_dir": "000002",
   "manifest_hash_algorithm": "sha256",
   "manifest_hash": "<sha256 of manifest.json bytes>",
-  "source": "cli"
+  "source": "cli",
+  "workflow_loop_counts": {
+    "coding": 2,
+    "review": 1
+  }
 }
 ```
 
-`workflow.loop_soft_cap` is written once per workflow state when a
+`workflow.loop_soft_cap` is written once per workflow counter key when a
 worker-selecting transition reaches prospective count `soft + 1`. The launcher
 still starts the worker.
 
@@ -267,6 +297,7 @@ still starts the worker.
   "cap": {
     "workflow": "implementation",
     "state": "code",
+    "counter_key": "coding",
     "count": 3,
     "soft": 2,
     "hard": 4,
@@ -279,7 +310,7 @@ still starts the worker.
 
 `workflow.loop_hard_cap` is written instead of starting a worker when a
 worker-selecting transition would reach prospective count `hard + 1`. The
-target state's persisted count is not incremented by this event, and the run
+counter key count is not incremented by this event, and the run
 state is materialized as `blocked_for_human`.
 
 ```json
@@ -288,6 +319,7 @@ state is materialized as `blocked_for_human`.
   "cap": {
     "workflow": "implementation",
     "blocked_target_state": "code",
+    "counter_key": "coding",
     "current_count": 4,
     "prospective_count": 5,
     "soft": 2,
@@ -313,6 +345,7 @@ the normal workflow state entry.
   "override": {
     "workflow": "implementation",
     "target_state": "code",
+    "counter_key": "coding",
     "count_before_override": 4,
     "count_after_override": 5,
     "soft": 2,

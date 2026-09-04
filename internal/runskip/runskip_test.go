@@ -132,6 +132,63 @@ func TestSkipConsumesPriorOutcomeWhenSelectedStepCameFromRouting(t *testing.T) {
 	}
 }
 
+func TestValidateSkipUsesKeyedTargetCounterAndCaps(t *testing.T) {
+	wf := config.Workflow{
+		Name:     "implementation",
+		Start:    "plan",
+		LoopCaps: config.EffectiveLoopCaps{Enabled: true, Soft: 9, Hard: 10},
+		Steps: map[string]config.Step{
+			"plan": {
+				Skippable:      true,
+				AllowedResults: map[string][]string{"done": {"skipped"}},
+				On:             map[string]string{"done/skipped": "code_fixer"},
+			},
+			"code_fixer": {
+				Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3},
+			},
+		},
+	}
+	status := runstore.Status{
+		RunID: "skip-keyed",
+		State: "running",
+		WorkflowLoop: runstore.WorkflowLoop{
+			Counts:  map[string]int{"coding": 3},
+			Entries: []runstore.WorkflowStateEntry{{State: "plan", Count: 1}},
+		},
+	}
+
+	transition, err := validateSkip(wf, status, "plan")
+	if err != nil {
+		t.Fatalf("validateSkip returned error: %v", err)
+	}
+
+	if got := transition.WorkflowStateEntry.CounterKey; got != "coding" {
+		t.Fatalf("counter key = %q, want coding", got)
+	}
+
+	decision := skipLoopCapDecision(wf, status, transition)
+	if decision.Kind != "hard" || decision.CounterKey != "coding" || decision.State != "code_fixer" || decision.CurrentCount != 3 {
+		t.Fatalf("loop decision = %+v, want keyed hard stop for code_fixer", decision)
+	}
+}
+
+func TestValidateSkipRejectsPendingHumanOverride(t *testing.T) {
+	wf := config.Workflow{Name: "implementation", Start: "plan", Steps: map[string]config.Step{"plan": {}}}
+	status := runstore.Status{
+		RunID: "skip-override",
+		State: "running",
+		WorkflowLoop: runstore.WorkflowLoop{
+			Entries:                []runstore.WorkflowStateEntry{{State: "plan", Count: 1}},
+			PendingHardCapOverride: &runstore.WorkflowLoopHardCapOverride{},
+		},
+	}
+
+	_, err := validateSkip(wf, status, "plan")
+	if err == nil || !strings.Contains(err.Error(), "pending one-use human override") {
+		t.Fatalf("validateSkip error = %v, want pending override rejection", err)
+	}
+}
+
 func TestSkipRejectsIneligibleStateWithoutMutation(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -146,6 +146,21 @@ func applyReplayedEvent(status *Status, event Event) error {
 		return applyReplayedWorkflowHardCap(status, event)
 	case eventWorkflowHardCapOverride:
 		return applyReplayedWorkflowHardCapOverride(status, event)
+	case eventRepeatedReviewFinding:
+		return applyReplayedReviewFindingBlock(status, event)
+	case eventReviewFindingOverride:
+		return applyReplayedReviewFindingOverride(status, event)
+	case EventConfigSnapshotRefreshed:
+		var payload configSnapshotRefreshedPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return fmt.Errorf("event %d config snapshot refreshed payload: %w", event.Sequence, err)
+		}
+
+		if payload.WorkflowLoopCounts != nil {
+			applyRefreshedWorkflowLoopCounts(status, payload.WorkflowLoopCounts)
+		}
+
+		return nil
 	default:
 		return nil
 	}
@@ -208,6 +223,14 @@ func applyReplayedAttemptStarted(status *Status, event Event) error {
 		status.WorkflowLoop.PendingHardCapOverride = nil
 	}
 
+	if payload.ConsumedReviewFindingOverride != nil {
+		if status.PendingReviewFindingOverride == nil || *status.PendingReviewFindingOverride != *payload.ConsumedReviewFindingOverride {
+			return fmt.Errorf("event %d consumes a review finding override that is not pending", event.Sequence)
+		}
+
+		status.PendingReviewFindingOverride = nil
+	}
+
 	status.Continued = nil
 	attempt := payload.Attempt
 
@@ -239,6 +262,17 @@ func validateReplayedAttemptStart(status Status, event Event, payload attemptSta
 
 		if err := validateWorkflowLoopHardCapOverrideConsumption(status, *payload.WorkflowStateEntry, *payload.ConsumedWorkflowLoopHardCapOverride); err != nil {
 			return fmt.Errorf("event %d workflow loop hard cap override consumption: %w", event.Sequence, err)
+		}
+	}
+
+	if override := payload.ConsumedReviewFindingOverride; override != nil {
+		if payload.WorkflowStateEntry == nil {
+			return fmt.Errorf("event %d consumes review finding override without workflow state entry", event.Sequence)
+		}
+
+		if status.PendingReviewFindingOverride == nil || *status.PendingReviewFindingOverride != *override ||
+			override.TargetStep != payload.WorkflowStateEntry.State || override.TargetStep != payload.Attempt.StepID {
+			return fmt.Errorf("event %d review finding override does not match the pending target", event.Sequence)
 		}
 	}
 
@@ -462,6 +496,7 @@ func validateReplayedWorkflowHardCapOverride(status Status, event Event, payload
 
 	if block.Workflow != payload.Override.Workflow ||
 		block.BlockedState != payload.Override.TargetState ||
+		effectiveWorkflowCounterKey(block.CounterKey, block.BlockedState) != effectiveWorkflowCounterKey(payload.Override.CounterKey, payload.Override.TargetState) ||
 		block.CurrentCount != payload.Override.CountBeforeOverride ||
 		block.ProspectiveCount != payload.Override.CountAfterOverride ||
 		block.Soft != payload.Override.Soft ||

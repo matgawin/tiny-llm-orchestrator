@@ -107,21 +107,32 @@ for the next decision. `select_step` and `retry_step` are executable decisions.
 Terminal runs do not launch. Runs with an active attempt refuse a second worker
 until that active attempt terminalizes or is recovered.
 
-For `select_step` decisions, the launcher checks the workflow's effective loop
-caps against the persisted workflow state-entry counters before starting the
-worker. Disabled caps bypass this policy. A soft-cap hit at prospective count
-`soft + 1` records one advisory event for that workflow state, prints a clear
-warning, and still launches the selected worker. A hard-cap hit at prospective
-count `hard + 1` records a hard-cap event, leaves the target state's persisted
-count at `hard`, and moves the run to `blocked_for_human` with reason
+For `select_step` decisions, the launcher checks the effective counter key and
+loop caps before it starts the worker. A step loop uses its configured key and
+limits. An unconfigured step uses its step ID and the workflow limits. Disabled
+caps bypass this policy. A soft-cap hit at prospective count `soft + 1` records
+one advisory event for the counter key and actual target step. It also prints a
+warning and starts the selected worker. A hard-cap hit at prospective count
+`hard + 1` records a hard-cap event, leaves the counter at `hard`, and moves the
+run to `blocked_for_human` with reason
 `loop_hard_cap_reached` instead of starting another worker. Retry decisions and
 terminal or human-handoff states do not trigger loop-cap enforcement.
 After human review, `orc run continue <run-id> --allow-loop-cap` records a
-one-shot override for the currently blocked target state and returns the run to
-`running`. The next matching launch consumes that override, starts the selected
-worker, and increments the target state's count to the previously blocked
-prospective count. The override does not raise configured caps or reset loop
-counters; a later hard-cap hit requires another explicit continue command.
+one-shot override for the blocked counter key and target step. It then returns
+the run to `running`. The next matching launch consumes that override. It starts
+the selected worker and increments the shared counter once. The override does
+not raise configured caps or reset loop counters. A later hard-cap hit requires
+another explicit continue command.
+
+Before the loop-cap check, the launcher checks stable finding IDs. A second
+accepted `done/changes_requested` report for one finding stops before another
+correction attempt only when the correction step selected by the first
+report's config snapshot completed with an accepted `done/ready` report. The
+stop records `repeated_review_finding`, both review attempt IDs, the reviewer,
+the proposed correction step, and the occurrence count. `orc run continue
+<run-id> --allow-review-finding` permits one routing decision for that
+correction target. It does not clear finding history or loop counters. The
+normal loop-cap check can still stop the permitted target.
 
 For non-loop `blocked_for_human` runs, `orc run continue <run-id>
 --resolve-block --reason <text>` records a human attestation that the external
@@ -148,6 +159,8 @@ workflow-loop hard-cap block. Start a separate workflow when the run is not in
   launch, exit code 2.
 - `loop_hard_cap`: the workflow hard loop cap blocked the run before another
   launch, exit code 2.
+- `repeated_review_finding`: a reviewer repeated a stable finding after its
+  selected correction step completed, exit code 2.
 - `max_steps_reached`: the max-step guard stopped before another launch, exit
   code 0.
 - `active_attempt_exists`: the command started while a worker attempt was

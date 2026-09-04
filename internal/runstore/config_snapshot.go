@@ -32,16 +32,17 @@ type configCurrent struct {
 }
 
 // ConfigSnapshotRefreshValidator validates a locked run before refresh publication.
-type ConfigSnapshotRefreshValidator func(run *Run, current CurrentConfigSnapshot) error
+type ConfigSnapshotRefreshValidator func(run *Run, current CurrentConfigSnapshot) (map[string]int, error)
 
 type configSnapshotRefreshedPayload struct {
-	OldVersion            int    `json:"old_version"`
-	OldVersionDir         string `json:"old_version_dir"`
-	NewVersion            int    `json:"new_version"`
-	NewVersionDir         string `json:"new_version_dir"`
-	ManifestHashAlgorithm string `json:"manifest_hash_algorithm"`
-	ManifestHash          string `json:"manifest_hash"`
-	Source                string `json:"source"`
+	OldVersion            int            `json:"old_version"`
+	OldVersionDir         string         `json:"old_version_dir"`
+	NewVersion            int            `json:"new_version"`
+	NewVersionDir         string         `json:"new_version_dir"`
+	ManifestHashAlgorithm string         `json:"manifest_hash_algorithm"`
+	ManifestHash          string         `json:"manifest_hash"`
+	Source                string         `json:"source"`
+	WorkflowLoopCounts    map[string]int `json:"workflow_loop_counts,omitempty"`
 }
 
 // WriteInitialConfigSnapshotContext persists config snapshot version 000001 for runID unless ctx is canceled.
@@ -111,9 +112,12 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 			return fmt.Errorf("run %q config snapshot %s: %w", runID, configCurrentName, err)
 		}
 
-		if err := validate(run, CurrentConfigSnapshot{Version: current.Version, VersionDir: current.VersionDir}); err != nil {
+		workflowLoopCounts, err := validate(run, CurrentConfigSnapshot{Version: current.Version, VersionDir: current.VersionDir})
+		if err != nil {
 			return err
 		}
+
+		req.WorkflowLoopCounts = workflowLoopCounts
 
 		if req.Snapshot.Version != current.Version+1 {
 			return fmt.Errorf("run %q refresh config snapshot version = %d, want %d", runID, req.Snapshot.Version, current.Version+1)
@@ -136,6 +140,7 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 			ManifestHashAlgorithm: req.ManifestHashAlgorithm,
 			ManifestHash:          req.ManifestHash,
 			Source:                req.Source,
+			WorkflowLoopCounts:    req.WorkflowLoopCounts,
 		}
 
 		eventPayload, err := marshalPayload(payload)
@@ -146,6 +151,10 @@ func (s *Store) RefreshConfigSnapshotContext(ctx context.Context, runID string, 
 		event := Event{Time: req.Time, Type: EventConfigSnapshotRefreshed, Payload: eventPayload}
 
 		_, event, err = commitStatusBackedEvent(runID, run, event, func(status *Status, event Event) {
+			if req.WorkflowLoopCounts != nil {
+				applyRefreshedWorkflowLoopCounts(status, req.WorkflowLoopCounts)
+			}
+
 			status.UpdatedAt = event.Time
 			status.LastSequence = event.Sequence
 		})

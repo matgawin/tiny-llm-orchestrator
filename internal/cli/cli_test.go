@@ -449,6 +449,71 @@ steps:
 `)
 }
 
+func writeCLIReviewFixLoopProject(t *testing.T, root string) {
+	t.Helper()
+	writeCLIImplementationProject(t, root)
+
+	orcDir := filepath.Join(root, ".orc")
+	writeCLIFile(t, filepath.Join(orcDir, "config.yaml"), `version: 1
+setup_version: 1
+defaults:
+  loop_caps: {enabled: true, soft: 9, hard: 10}
+workflows:
+  review-fix: workflows/review-fix.yaml
+agents:
+  coder: agents/coder.md
+  reviewer: agents/reviewer.md
+runtimes:
+  codex: runtimes/codex.yaml
+`)
+	writeCLIFile(t, filepath.Join(orcDir, "workflows", "review-fix.yaml"), `name: review-fix
+start: review
+execution: {mode: sequential}
+task_context: {beads: optional, markdown_fallback: true}
+defaults:
+  timeout: 30m
+  report_exit_grace: 30s
+  runtime: codex
+  retries:
+    failed/missing_report: 0
+    failed/timeout: 0
+    failed/invalid_report: 0
+    failed/process_error: 0
+    failed/error: 0
+steps:
+  review:
+    loop: {key: review, soft: 1, hard: 2}
+    agent: reviewer
+    allowed_results:
+      done: [approved, changes_requested]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/approved: ready_for_human
+      done/changes_requested: code
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+  code:
+    agent: coder
+    allowed_results:
+      done: [ready]
+      blocked: [blocked]
+      failed: [error, timeout, missing_report, invalid_report, process_error]
+    on:
+      done/ready: review
+      blocked/blocked: blocked_for_human
+      failed/error: blocked_for_human
+      failed/timeout: blocked_for_human
+      failed/missing_report: blocked_for_human
+      failed/invalid_report: blocked_for_human
+      failed/process_error: blocked_for_human
+`)
+}
+
 func writeCLIAdvanceCommandProject(t *testing.T, root, reviewStep, loopCaps string) {
 	t.Helper()
 

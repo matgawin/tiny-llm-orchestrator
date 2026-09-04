@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"tiny-llm-orchestrator/orc/internal/config"
+	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/runcontext"
 	"tiny-llm-orchestrator/orc/internal/runstate"
 	"tiny-llm-orchestrator/orc/internal/runstore"
@@ -72,16 +73,49 @@ func Skip(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("skip: %w", err)
 	}
 
+	transition, err := validateSkip(loaded.Workflow, loaded.Run.Status, opts.StepID)
+	if err != nil {
+		return Result{}, fmt.Errorf("skip: %w", err)
+	}
+
+	capDecision := skipLoopCapDecision(loaded.Workflow, loaded.Run.Status, transition)
+	if capDecision.Kind == loopcap.DecisionHard {
+		status, event, err := loaded.Store.BlockWorkflowLoopHardCapContext(ctx, opts.RunID, capDecision.HardCap(), opts.Time)
+		if err != nil {
+			return Result{}, fmt.Errorf("skip: %w", err)
+		}
+
+		return Result{RunID: opts.RunID, StepID: opts.StepID, Status: status, Event: event}, fmt.Errorf("skip: run %q workflow loop hard cap reached for counter %q and target step %q", opts.RunID, capDecision.CounterKey, capDecision.State)
+	}
+
 	status, event, err := loaded.Store.RecordStepSkipContext(ctx, opts.RunID, runstore.RecordStepSkipRequest{
 		StepID: opts.StepID,
 		Reason: opts.Reason,
 		Source: opts.Source,
 		Time:   opts.Time,
 	}, func(status runstore.Status) (runstore.StepSkipTransition, error) {
-		return validateSkip(loaded.Workflow, status, opts.StepID)
+		transition, err := validateSkip(loaded.Workflow, status, opts.StepID)
+		if err != nil {
+			return runstore.StepSkipTransition{}, err
+		}
+
+		if skipLoopCapDecision(loaded.Workflow, status, transition).Kind == loopcap.DecisionHard {
+			return runstore.StepSkipTransition{}, errors.New("workflow loop hard cap changed while skip was in progress")
+		}
+
+		return transition, nil
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("skip: %w", err)
+	}
+
+	if capDecision.Kind == loopcap.DecisionSoft {
+		softCap := capDecision.SoftCap()
+
+		status, _, err = loaded.Store.RecordWorkflowLoopSoftCapContext(ctx, opts.RunID, softCap, opts.Time)
+		if err != nil {
+			return Result{}, fmt.Errorf("skip: %w", err)
+		}
 	}
 
 	return Result{RunID: opts.RunID, StepID: opts.StepID, Status: status, Event: event}, nil
@@ -90,6 +124,10 @@ func Skip(ctx context.Context, opts Options) (Result, error) {
 func validateSkip(workflowConfig config.Workflow, status runstore.Status, stepID string) (runstore.StepSkipTransition, error) {
 	if status.ActiveAttempt != nil {
 		return runstore.StepSkipTransition{}, fmt.Errorf("run %q has active attempt %q; cannot skip step", status.RunID, status.ActiveAttempt.AttemptID)
+	}
+
+	if status.WorkflowLoop.PendingHardCapOverride != nil || status.PendingReviewFindingOverride != nil {
+		return runstore.StepSkipTransition{}, fmt.Errorf("run %q has a pending one-use human override; cannot skip step", status.RunID)
 	}
 
 	switch status.State {
@@ -139,10 +177,13 @@ func validateSkip(workflowConfig config.Workflow, status runstore.Status, stepID
 
 	switch skipDecision.Kind {
 	case workflow.DecisionSelectStep:
+		counterKey, _ := workflowConfig.EffectiveStepLoop(skipDecision.Step)
+
 		return runstore.StepSkipTransition{
 			State: workflow.RunStatusRunning,
 			WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
 				State:         skipDecision.Step,
+				CounterKey:    counterKey,
 				PreviousState: stepID,
 				TriggerStatus: config.SystemSkipStatus,
 				TriggerResult: config.SystemSkipResult,
@@ -163,6 +204,20 @@ func validateSkip(workflowConfig config.Workflow, status runstore.Status, stepID
 	}
 
 	return runstore.StepSkipTransition{}, fmt.Errorf("step %q %s transition produced %s; skip cannot be retried or wait", stepID, config.SystemSkipPair, skipDecision.Kind)
+}
+
+func skipLoopCapDecision(workflowConfig config.Workflow, status runstore.Status, transition runstore.StepSkipTransition) loopcap.Decision {
+	if transition.WorkflowStateEntry.State == "" || transition.State != workflow.RunStatusRunning {
+		return loopcap.Decision{}
+	}
+
+	entry := transition.WorkflowStateEntry
+
+	return loopcap.Evaluate(workflowConfig, status, workflow.Decision{Kind: workflow.DecisionSelectStep, Step: entry.State}, runstore.Attempt{
+		StepID: entry.PreviousState,
+		Status: entry.TriggerStatus,
+		Result: entry.TriggerResult,
+	}, true)
 }
 
 func declaresSkipOutcome(step config.Step) bool {

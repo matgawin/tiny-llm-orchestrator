@@ -88,7 +88,7 @@ func TestExecuteRunShowDisplaysWorkflowLoopCapStatus(t *testing.T) {
 	assertCLIOutputContainsAll(t, output, []string{
 		"workflow_loop:\n",
 		"    plan:\n",
-		"      current_count: 1\n",
+		"      current_count: 0\n",
 		"      soft_threshold:",
 		"      hard_threshold:",
 		"      soft_reached:",

@@ -25,6 +25,7 @@ defaults:
     failed/error: 0
 steps:
   review:
+    loop: {key: review, soft: 1, hard: 2}
     agent: reviewer
     skippable: true
     allowed_results:
@@ -42,6 +43,7 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   code:
+    loop: {key: coding, soft: 4, hard: 6}
     agent: coder
     model: gpt-5.6-sol
     reasoning: low
@@ -89,6 +91,7 @@ steps:
       failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   redundancy-review:
+    loop: {key: redundancy-review, soft: 1, hard: 2}
     agent: redundancy-reviewer
     skippable: true
     allowed_results:
@@ -106,6 +109,7 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   code_fixer:
+    loop: {key: coding, soft: 4, hard: 6}
     agent: coder
     model: gpt-5.6-sol
     reasoning: low
@@ -153,6 +157,7 @@ steps:
       failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   readability-review:
+    loop: {key: readability-review, soft: 1, hard: 2}
     agent: readability-reviewer
     skippable: true
     allowed_results:
@@ -170,6 +175,7 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   code_cleaner:
+    loop: {key: coding, soft: 4, hard: 6}
     agent: coder
     model: gpt-5.6-sol
     reasoning: low

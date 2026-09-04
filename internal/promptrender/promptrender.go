@@ -297,7 +297,7 @@ func renderPrompt(ctx context.Context, renderCtx renderContext, opts Options) ([
 }
 ` + "```" + `
 
-All five fields are required, must be non-empty, and must be trimmed. ` + "`finding_id`" + ` must match ` + "`[a-z0-9][a-z0-9._-]{0,63}`" + ` and must be unique in one report. ` + "`path`" + ` must be a clean project-relative slash path. It must not be absolute, contain a backslash or empty segment, or contain ` + "`.`" + ` or ` + "`..`" + ` segments. A ` + "`done/changes_requested`" + ` report requires one or more findings. A ` + "`done/approved`" + ` report must not contain findings.
+All five fields are required, must be non-empty, and must be trimmed. ` + "`finding_id`" + ` must match ` + "`[a-z0-9][a-z0-9._-]{0,63}`" + ` and must be unique in one report. Reuse an existing finding ID for the same defect. Create a new finding ID only for a new regression introduced by the correction and inside the original task scope. ` + "`path`" + ` must be a clean project-relative slash path. It must not be absolute, contain a backslash or empty segment, or contain ` + "`.`" + ` or ` + "`..`" + ` segments. A ` + "`done/changes_requested`" + ` report requires one or more findings. A ` + "`done/approved`" + ` report must not contain findings.
 `)
 	}
 
@@ -322,7 +322,9 @@ func renderLoopContext(renderCtx renderContext, opts Options) string {
 		return ""
 	}
 
-	count := renderCtx.run.Status.WorkflowLoop.Counts[opts.StepID]
+	key, caps := renderCtx.workflow.EffectiveStepLoop(opts.StepID)
+
+	count := renderCtx.run.Status.WorkflowLoop.Counts[key]
 	if count <= caps.Soft {
 		return ""
 	}
@@ -330,12 +332,13 @@ func renderLoopContext(renderCtx renderContext, opts Options) string {
 	var out strings.Builder
 	out.WriteString("## Workflow Loop Context\n\n")
 	fmt.Fprintf(&out, "- workflow: `%s`\n", renderCtx.workflow.Name)
-	fmt.Fprintf(&out, "- repeated_state: `%s`\n", opts.StepID)
+	fmt.Fprintf(&out, "- counter_key: `%s`\n", key)
+	fmt.Fprintf(&out, "- target_step: `%s`\n", opts.StepID)
 	fmt.Fprintf(&out, "- current_count: `%d`\n", count)
 	fmt.Fprintf(&out, "- soft_cap: `%d`\n", caps.Soft)
 	fmt.Fprintf(&out, "- hard_cap: `%d`\n", caps.Hard)
 
-	statuses := priorLoopStatuses(renderCtx.run.Status.WorkflowLoop.Entries, opts.StepID)
+	statuses := priorLoopStatuses(renderCtx.workflow, renderCtx.run.Status.WorkflowLoop.Entries, key)
 	if len(statuses) > 0 {
 		fmt.Fprintf(&out, "- prior_statuses: `%s`\n", strings.Join(statuses, "`, `"))
 	} else {
@@ -347,11 +350,13 @@ func renderLoopContext(renderCtx renderContext, opts Options) string {
 	return out.String()
 }
 
-func priorLoopStatuses(entries []runstore.WorkflowStateEntry, state string) []string {
+func priorLoopStatuses(workflowConfig config.Workflow, entries []runstore.WorkflowStateEntry, key string) []string {
 	statuses := make([]string, 0)
 
 	for _, entry := range entries {
-		if entry.State != state || entry.TriggerStatus == "" {
+		entryKey, _ := workflowConfig.EffectiveStepLoop(entry.State)
+
+		if entryKey != key || entry.TriggerStatus == "" {
 			continue
 		}
 

@@ -3,6 +3,7 @@ package launcher
 import (
 	"maps"
 
+	"tiny-llm-orchestrator/orc/internal/config"
 	"tiny-llm-orchestrator/orc/internal/loopcap"
 	"tiny-llm-orchestrator/orc/internal/runstore"
 	"tiny-llm-orchestrator/orc/internal/workflow"
@@ -33,17 +34,24 @@ func startRoutingForDecision(decision workflow.Decision, attempt runstore.Attemp
 	return routing
 }
 
-func workflowStateEntryForDecision(decision workflow.Decision, attempt runstore.Attempt, ok bool) runstore.WorkflowStateEntryRequest {
-	if decision.Kind != workflow.DecisionSelectStep || !ok {
+func workflowStateEntryForDecision(workflowConfig config.Workflow, decision workflow.Decision, attempt runstore.Attempt, ok bool) runstore.WorkflowStateEntryRequest {
+	if decision.Kind != workflow.DecisionSelectStep {
 		return runstore.WorkflowStateEntryRequest{}
 	}
 
-	return runstore.WorkflowStateEntryRequest{
-		State:         decision.Step,
-		PreviousState: attempt.StepID,
-		TriggerStatus: attempt.Status,
-		TriggerResult: attempt.Result,
+	key, _ := workflowConfig.EffectiveStepLoop(decision.Step)
+
+	entry := runstore.WorkflowStateEntryRequest{
+		State:      decision.Step,
+		CounterKey: key,
 	}
+	if ok {
+		entry.PreviousState = attempt.StepID
+		entry.TriggerStatus = attempt.Status
+		entry.TriggerResult = attempt.Result
+	}
+
+	return entry
 }
 
 func workflowEntryOutcome(status runstore.Status, latestOutcome runstore.Attempt, hasOutcome bool) (runstore.Attempt, bool) {
@@ -59,8 +67,19 @@ func workflowLoopHardCapOverrideMatches(override *runstore.WorkflowLoopHardCapOv
 		return false
 	}
 
+	overrideKey := override.CounterKey
+	if overrideKey == "" {
+		overrideKey = override.TargetState
+	}
+
+	decisionKey := decision.CounterKey
+	if decisionKey == "" {
+		decisionKey = decision.State
+	}
+
 	return override.Workflow == decision.Workflow &&
 		override.TargetState == decision.State &&
+		overrideKey == decisionKey &&
 		override.CountBeforeOverride == decision.CurrentCount &&
 		override.CountAfterOverride == decision.ProspectiveCount &&
 		override.Soft == decision.Soft &&

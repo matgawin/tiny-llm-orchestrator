@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -466,6 +467,8 @@ func TestRenderReviewerReportContractDefinesFindings(t *testing.T) {
 		`"summary": "The command returns an error without writing it."`,
 		"All five fields are required, must be non-empty, and must be trimmed.",
 		"`finding_id` must match `[a-z0-9][a-z0-9._-]{0,63}` and must be unique in one report.",
+		"Reuse an existing finding ID for the same defect.",
+		"Create a new finding ID only for a new regression introduced by the correction and inside the original task scope.",
 		"`path` must be a clean project-relative slash path.",
 		"It must not be absolute, contain a backslash or empty segment, or contain `.` or `..` segments.",
 		"A `done/changes_requested` report requires one or more findings.",
@@ -585,13 +588,34 @@ func TestRenderIncludesWorkflowLoopContextAfterSoftCap(t *testing.T) {
 	assertPromptContainsAll(t, string(result.Content), []string{
 		"## Workflow Loop Context",
 		"- workflow: `implementation`",
-		"- repeated_state: `plan`",
+		"- counter_key: `plan`",
+		"- target_step: `plan`",
 		"- current_count: `3`",
 		"- soft_cap: `2`",
 		"- hard_cap: `4`",
 		"- prior_statuses: `done/ready`, `done/ready`",
 		"break the loop with new information",
 	})
+}
+
+func TestPriorLoopStatusesUsesCurrentSharedKeyMembership(t *testing.T) {
+	wf := config.Workflow{Steps: map[string]config.Step{
+		"code":   {Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}},
+		"fixer":  {Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}},
+		"review": {Loop: &config.StepLoopConfig{Key: "review", Soft: 1, Hard: 2}},
+	}}
+	entries := []runstore.WorkflowStateEntry{
+		{State: "code", TriggerStatus: "done", TriggerResult: "ready"},
+		{State: "review", TriggerStatus: "done", TriggerResult: "changes_requested"},
+		{State: "fixer", TriggerStatus: "done", TriggerResult: "ready"},
+	}
+
+	got := priorLoopStatuses(wf, entries, "coding")
+
+	want := []string{"done/ready", "done/ready"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("priorLoopStatuses = %v, want %v", got, want)
+	}
 }
 
 func TestRenderIncludesSkippedStepPriorContext(t *testing.T) {
@@ -1457,14 +1481,15 @@ func recordReportedLoopPromptAttempt(t *testing.T, store *runstore.Store, runID,
 		ReportExitGrace:  30 * time.Second,
 		Time:             fixedPromptTime().Add(time.Minute),
 		ConsumeAttemptID: consumeAttemptID,
+		WorkflowStateEntry: runstore.WorkflowStateEntryRequest{
+			State:      "plan",
+			CounterKey: "plan",
+		},
 	}
 	if consumeAttemptID != "" {
-		req.WorkflowStateEntry = runstore.WorkflowStateEntryRequest{
-			State:         "plan",
-			PreviousState: "plan",
-			TriggerStatus: "done",
-			TriggerResult: "ready",
-		}
+		req.WorkflowStateEntry.PreviousState = "plan"
+		req.WorkflowStateEntry.TriggerStatus = "done"
+		req.WorkflowStateEntry.TriggerResult = "ready"
 	}
 
 	if _, _, err := store.StartAttemptContext(context.Background(), runID, req); err != nil {

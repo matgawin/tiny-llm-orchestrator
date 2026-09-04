@@ -30,6 +30,8 @@ type Options struct {
 	Source string
 	Env    []string
 	Time   time.Time
+
+	beforeLockedRefresh func()
 }
 
 // Result describes the committed refresh.
@@ -101,23 +103,36 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 
 	manifestHash := configsnapshot.ManifestHash(snapshot.Manifest)
 
+	if opts.beforeLockedRefresh != nil {
+		opts.beforeLockedRefresh()
+	}
+
 	refresh, err := store.RefreshConfigSnapshotContext(ctx, opts.RunID, runstore.RefreshConfigSnapshotRequest{
 		Snapshot:              snapshot,
 		Source:                source,
 		ManifestHashAlgorithm: hashAlgorithm,
 		ManifestHash:          manifestHash,
 		Time:                  opts.Time,
-	}, func(lockedRun *runstore.Run, lockedCurrent runstore.CurrentConfigSnapshot) error {
+	}, func(lockedRun *runstore.Run, lockedCurrent runstore.CurrentConfigSnapshot) (map[string]int, error) {
 		if lockedCurrent.Version != current.Version || lockedCurrent.VersionDir != current.VersionDir {
-			return fmt.Errorf("run %q config snapshot changed from %s to %s during refresh; retry refresh-config", opts.RunID, current.VersionDir, lockedCurrent.VersionDir)
+			return nil, fmt.Errorf("run %q config snapshot changed from %s to %s during refresh; retry refresh-config", opts.RunID, current.VersionDir, lockedCurrent.VersionDir)
 		}
 
 		lockedOld, err := configsnapshot.LoadCurrent(lockedRun)
 		if err != nil {
-			return fmt.Errorf("refresh: %w", err)
+			return nil, fmt.Errorf("refresh: %w", err)
 		}
 
-		return validateCompatibility(lockedRun, lockedOld.Project, project)
+		if err := validateCompatibility(lockedRun, lockedOld.Project, project); err != nil {
+			return nil, err
+		}
+
+		loopCounts, err := refreshedLoopCounts(lockedRun.Status.WorkflowLoop.Entries, project.Workflows[lockedRun.Status.Workflow])
+		if err != nil {
+			return nil, fmt.Errorf("refresh: %w", err)
+		}
+
+		return loopCounts, nil
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("refresh: %w", err)
@@ -142,9 +157,39 @@ func Refresh(ctx context.Context, opts Options) (Result, error) {
 	return result, nil
 }
 
+func refreshedLoopCounts(entries []runstore.WorkflowStateEntry, workflowConfig config.Workflow) (map[string]int, error) {
+	counts := map[string]int{}
+
+	for _, entry := range entries {
+		if entry.Count == 0 {
+			continue
+		}
+
+		_, ok := workflowConfig.Steps[entry.State]
+		if !ok {
+			if terminalStatus(entry.State) {
+				counts[entry.State]++
+				continue
+			}
+
+			return nil, fmt.Errorf("workflow state entry step %q is not declared", entry.State)
+		}
+
+		key, _ := workflowConfig.EffectiveStepLoop(entry.State)
+
+		counts[key]++
+	}
+
+	return counts, nil
+}
+
 func validateCompatibility(run *runstore.Run, oldProject, newProject *config.Project) error {
 	if run.Status.ActiveAttempt != nil {
 		return fmt.Errorf("run %q has active attempt %q; cannot refresh config", run.ID, run.Status.ActiveAttempt.AttemptID)
+	}
+
+	if run.Status.WorkflowLoop.HardCapBlock != nil || run.Status.WorkflowLoop.PendingHardCapOverride != nil || run.Status.ReviewFindingBlock != nil || run.Status.PendingReviewFindingOverride != nil {
+		return fmt.Errorf("run %q has an active loop or review-finding block or override; cannot refresh config", run.ID)
 	}
 
 	oldWorkflow, ok := oldProject.Workflows[run.Status.Workflow]
@@ -264,14 +309,6 @@ func validateReferencedSteps(status runstore.Status, workflowConfig config.Workf
 	for _, entry := range status.WorkflowLoop.Entries {
 		add(entry.State, "workflow loop entry")
 		add(entry.PreviousState, "workflow loop previous state")
-	}
-
-	for state := range status.WorkflowLoop.Counts {
-		add(state, "workflow loop count")
-	}
-
-	for _, state := range status.WorkflowLoop.RepeatedStates {
-		add(state, "workflow loop repeated state")
 	}
 
 	for _, warning := range status.WorkflowLoop.SoftCapWarnings {

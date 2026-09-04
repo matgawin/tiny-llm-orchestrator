@@ -181,7 +181,7 @@ func statusBackedEventPossiblyCommitted(err error) bool {
 
 func reservedEventType(eventType string) bool {
 	switch eventType {
-	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventRunContinued, eventWorkflowSoftCap, eventWorkflowHardCap, eventWorkflowHardCapOverride, eventWorkflowStepSkipped, EventConfigSnapshotRefreshed:
+	case eventRunCreated, eventStatusUpdated, eventArtifactWritten, eventAttemptStarted, eventAttemptPrompted, eventAttemptLogged, eventAttemptProcess, eventAttemptFinished, eventAttemptRecovered, eventAttemptReported, eventAttemptWarning, eventReportIgnored, eventRunContinued, eventWorkflowSoftCap, eventWorkflowHardCap, eventWorkflowHardCapOverride, eventRepeatedReviewFinding, eventReviewFindingOverride, eventWorkflowStepSkipped, EventConfigSnapshotRefreshed:
 		return true
 	default:
 		return false

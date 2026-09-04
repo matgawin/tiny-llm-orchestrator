@@ -51,6 +51,7 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   test-code:
+    loop: {key: coding, soft: 4, hard: 6}
     agent: coder
     skippable: true
     allowed_results:
@@ -92,6 +93,7 @@ steps:
       failed/timeout: blocked_for_human
       failed/process_error: blocked_for_human
   review:
+    loop: {key: review, soft: 1, hard: 2}
     agent: reviewer
     skippable: true
     allowed_results:

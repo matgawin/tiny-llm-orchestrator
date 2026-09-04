@@ -31,6 +31,8 @@ const (
 	eventWorkflowSoftCap         = "workflow.loop_soft_cap"
 	eventWorkflowHardCap         = "workflow.loop_hard_cap"
 	eventWorkflowHardCapOverride = "workflow.loop_hard_cap_override"
+	eventRepeatedReviewFinding   = "workflow.repeated_review_finding"
+	eventReviewFindingOverride   = "workflow.repeated_review_finding_override"
 	eventWorkflowStepSkipped     = "workflow.step_skipped"
 	eventWorkflowStepSelected    = "workflow.step.selected"
 	eventWorkflowStepFinished    = "workflow.step.finished"
@@ -114,21 +116,23 @@ type Run struct {
 
 // Status is the materialized latest state stored in status.json.
 type Status struct {
-	SchemaVersion int              `json:"schema_version"`
-	RunID         string           `json:"run_id"`
-	Workflow      string           `json:"workflow"`
-	State         string           `json:"state"`
-	CreatedAt     time.Time        `json:"created_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
-	LastSequence  int              `json:"last_sequence"`
-	Artifacts     []ArtifactRef    `json:"artifacts"`
-	ActiveAttempt *Attempt         `json:"active_attempt,omitempty"`
-	Attempts      []Attempt        `json:"attempts"`
-	RetryLineage  *RetryLineage    `json:"retry_lineage,omitempty"`
-	Warnings      []AttemptWarning `json:"warnings"`
-	WorkflowLoop  WorkflowLoop     `json:"workflow_loop"`
-	SkippedSteps  []SkippedStep    `json:"skipped_steps,omitempty"`
-	Continued     *RunContinuation `json:"continued,omitempty"`
+	SchemaVersion                int                    `json:"schema_version"`
+	RunID                        string                 `json:"run_id"`
+	Workflow                     string                 `json:"workflow"`
+	State                        string                 `json:"state"`
+	CreatedAt                    time.Time              `json:"created_at"`
+	UpdatedAt                    time.Time              `json:"updated_at"`
+	LastSequence                 int                    `json:"last_sequence"`
+	Artifacts                    []ArtifactRef          `json:"artifacts"`
+	ActiveAttempt                *Attempt               `json:"active_attempt,omitempty"`
+	Attempts                     []Attempt              `json:"attempts"`
+	RetryLineage                 *RetryLineage          `json:"retry_lineage,omitempty"`
+	Warnings                     []AttemptWarning       `json:"warnings"`
+	WorkflowLoop                 WorkflowLoop           `json:"workflow_loop"`
+	ReviewFindingBlock           *ReviewFindingBlock    `json:"review_finding_block,omitempty"`
+	PendingReviewFindingOverride *ReviewFindingOverride `json:"pending_review_finding_override,omitempty"`
+	SkippedSteps                 []SkippedStep          `json:"skipped_steps,omitempty"`
+	Continued                    *RunContinuation       `json:"continued,omitempty"`
 }
 
 // StatusUpdate describes latest-state fields to materialize with an event.
@@ -301,6 +305,7 @@ type WorkflowLoop struct {
 type WorkflowStateEntry struct {
 	Workflow      string `json:"workflow"`
 	State         string `json:"state"`
+	CounterKey    string `json:"counter_key,omitempty"`
 	Count         int    `json:"count"`
 	Repeated      bool   `json:"repeated,omitempty"`
 	PreviousState string `json:"previous_state,omitempty"`
@@ -312,6 +317,7 @@ type WorkflowStateEntry struct {
 // routing callers. The run store computes Count and Repeated atomically.
 type WorkflowStateEntryRequest struct {
 	State         string
+	CounterKey    string
 	PreviousState string
 	TriggerStatus string
 	TriggerResult string
@@ -330,6 +336,7 @@ type RefreshConfigSnapshotRequest struct {
 	ManifestHashAlgorithm string
 	ManifestHash          string
 	Time                  time.Time
+	WorkflowLoopCounts    map[string]int
 }
 
 // ConfigSnapshotRefresh records a completed config snapshot refresh.
@@ -348,6 +355,7 @@ type ConfigSnapshotRefresh struct {
 type WorkflowLoopSoftCap struct {
 	Workflow      string `json:"workflow"`
 	State         string `json:"state"`
+	CounterKey    string `json:"counter_key,omitempty"`
 	Count         int    `json:"count"`
 	Soft          int    `json:"soft"`
 	Hard          int    `json:"hard"`
@@ -361,6 +369,7 @@ type WorkflowLoopSoftCap struct {
 type WorkflowLoopHardCap struct {
 	Workflow         string `json:"workflow"`
 	BlockedState     string `json:"blocked_target_state"`
+	CounterKey       string `json:"counter_key,omitempty"`
 	CurrentCount     int    `json:"current_count"`
 	ProspectiveCount int    `json:"prospective_count"`
 	Soft             int    `json:"soft"`
@@ -376,12 +385,33 @@ type WorkflowLoopHardCap struct {
 type WorkflowLoopHardCapOverride struct {
 	Workflow            string `json:"workflow"`
 	TargetState         string `json:"target_state"`
+	CounterKey          string `json:"counter_key,omitempty"`
 	CountBeforeOverride int    `json:"count_before_override"`
 	CountAfterOverride  int    `json:"count_after_override"`
 	Soft                int    `json:"soft"`
 	Hard                int    `json:"hard"`
 	HumanAction         string `json:"human_action"`
 	Reason              string `json:"reason"`
+}
+
+const RepeatedReviewFindingReason = "repeated_review_finding"
+
+// ReviewFindingBlock records a repeated review finding that needs a human decision.
+type ReviewFindingBlock struct {
+	Reason                   string `json:"reason"`
+	FindingID                string `json:"finding_id"`
+	ReviewerStepID           string `json:"reviewer_step_id"`
+	ProposedCorrectionStepID string `json:"proposed_correction_step_id"`
+	FirstReportAttemptID     string `json:"first_report_attempt_id"`
+	RepeatedReportAttemptID  string `json:"repeated_report_attempt_id"`
+	OccurrenceCount          int    `json:"occurrence_count"`
+}
+
+// ReviewFindingOverride permits one routing decision after a repeated finding stop.
+type ReviewFindingOverride struct {
+	ReviewFindingBlock
+	HumanAction string `json:"human_action"`
+	TargetStep  string `json:"target_step"`
 }
 
 // FollowupSource identifies where a recorded follow-up was proposed.
@@ -447,6 +477,7 @@ type StartAttemptRequest struct {
 	WorkflowStateEntry WorkflowStateEntryRequest
 	// ConsumeWorkflowLoopHardCapOverride consumes the pending one-shot human override for this state entry.
 	ConsumeWorkflowLoopHardCapOverride *WorkflowLoopHardCapOverride
+	ConsumeReviewFindingOverride       *ReviewFindingOverride
 }
 
 // AttemptPromptRequest links the rendered prompt artifact to the active attempt.
@@ -514,6 +545,7 @@ type attemptStartedPayload struct {
 	SupersedeReason                     string                       `json:"supersede_reason,omitempty"`
 	WorkflowStateEntry                  *WorkflowStateEntry          `json:"workflow_state_entry,omitempty"`
 	ConsumedWorkflowLoopHardCapOverride *WorkflowLoopHardCapOverride `json:"consumed_workflow_loop_hard_cap_override,omitempty"`
+	ConsumedReviewFindingOverride       *ReviewFindingOverride       `json:"consumed_review_finding_override,omitempty"`
 }
 
 type attemptPromptedPayload struct {
@@ -577,6 +609,15 @@ type workflowLoopHardCapPayload struct {
 type workflowLoopHardCapOverridePayload struct {
 	Override WorkflowLoopHardCapOverride `json:"override"`
 	State    string                      `json:"state"`
+}
+
+type reviewFindingBlockPayload struct {
+	Block ReviewFindingBlock `json:"block"`
+	State string             `json:"state"`
+}
+type reviewFindingOverridePayload struct {
+	Override ReviewFindingOverride `json:"override"`
+	State    string                `json:"state"`
 }
 
 // RecordStepSkipRequest describes a trusted, system-owned skip event to append.

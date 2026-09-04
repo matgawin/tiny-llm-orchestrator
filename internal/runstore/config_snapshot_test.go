@@ -96,3 +96,38 @@ func TestWriteInitialConfigSnapshotRejectsExistingCurrent(t *testing.T) {
 	})
 	requireErrorContains(t, err, "current.json already exists")
 }
+
+func TestRefreshConfigSnapshotUsesCountsFromLockedValidator(t *testing.T) {
+	store := openStore(t, t.TempDir())
+
+	run, err := store.CreateContext(context.Background(), CreateRunRequest{RunID: "config-refresh-counts-run", Workflow: "implementation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.WriteInitialConfigSnapshotContext(context.Background(), run.ID, ConfigSnapshot{
+		Version: 1, Resolved: []byte("{}\n"), Manifest: []byte("{}\n"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.RefreshConfigSnapshotContext(context.Background(), run.ID, RefreshConfigSnapshotRequest{
+		Snapshot: ConfigSnapshot{Version: 2, Resolved: []byte("{}\n"), Manifest: []byte("{}\n")},
+		Source:   "test", ManifestHashAlgorithm: "sha256", ManifestHash: "hash",
+		WorkflowLoopCounts: map[string]int{"stale": 1},
+	}, func(*Run, CurrentConfigSnapshot) (map[string]int, error) {
+		return map[string]int{"coding": 2}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.LoadContext(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.Status.WorkflowLoop.Counts["coding"] != 2 || loaded.Status.WorkflowLoop.Counts["stale"] != 0 {
+		t.Fatalf("workflow loop counts = %v, want locked validator counts", loaded.Status.WorkflowLoop.Counts)
+	}
+}

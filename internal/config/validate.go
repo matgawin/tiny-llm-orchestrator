@@ -28,7 +28,10 @@ const (
 	SandboxPathModeHostEntries = "host_entries"
 )
 
-var sandboxEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var (
+	sandboxEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	workflowIDPattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+)
 
 func validateProjectConfig(projectRoot string, cfg *ProjectConfig) error {
 	if cfg.Version != schemaVersion {
@@ -519,8 +522,19 @@ func validateWorkflow(workflow Workflow, agents map[string]Agent, runtimes map[s
 	}
 
 	declaredPairs := resultPairSet{}
+	loopMembers := map[string]string{}
 
 	for stepName, step := range workflow.Steps {
+		if err := validateStepLoop(stepName, step.Loop); err != nil {
+			return err
+		}
+
+		key, caps := workflow.EffectiveStepLoop(stepName)
+
+		if err := validateLoopMember(stepName, key, caps.Soft, caps.Hard, loopMembers); err != nil {
+			return err
+		}
+
 		stepPairs, err := validateStep(stepName, step, workflow, workflow.Steps, agents, runtimes)
 		if err != nil {
 			return err
@@ -532,6 +546,38 @@ func validateWorkflow(workflow Workflow, agents map[string]Agent, runtimes map[s
 	}
 
 	return validateRetries(workflow.Defaults.Retries, declaredPairs)
+}
+
+func validateLoopMember(stepName, key string, soft, hard int, members map[string]string) error {
+	limits := fmt.Sprintf("%d/%d", soft, hard)
+	if first, ok := members[key]; ok && !strings.HasSuffix(first, ":"+limits) {
+		firstStep, firstLimits, _ := strings.Cut(first, ":")
+		return fmt.Errorf("loop key %q has conflicting limits: steps %q and %q use %s and %s", key, firstStep, stepName, firstLimits, limits)
+	}
+
+	members[key] = stepName + ":" + limits
+
+	return nil
+}
+
+func validateStepLoop(stepName string, loop *StepLoopConfig) error {
+	if loop == nil {
+		return nil
+	}
+
+	if !workflowIDPattern.MatchString(loop.Key) {
+		return fmt.Errorf("step %q loop.key %q must match ^[A-Za-z][A-Za-z0-9_-]*$", stepName, loop.Key)
+	}
+
+	if loop.Soft <= 0 {
+		return fmt.Errorf("step %q loop.soft must be > 0", stepName)
+	}
+
+	if loop.Hard <= loop.Soft {
+		return fmt.Errorf("step %q loop.hard must be greater than loop.soft", stepName)
+	}
+
+	return nil
 }
 
 func validateWorkflowShape(workflow Workflow) error {

@@ -26,7 +26,7 @@ files:
   - path: .orc/workflows/bugfix.yaml
     sha256: 863581b2997c7d78168fa5eec112d2ad8afeb60449361e856e80f97d3d69d204
   - path: .orc/workflows/docs-update.yaml
-    sha256: 28dc0024c4a6f95208addf11f1ec9e7bbc7220f59555a1811bc41859e0f2302d
+    sha256: e1e54c678853f0cd7751a8639d287d3d864876a049f2e730237b5d0719604eda
   - path: .orc/workflows/mechanical-change.yaml
     sha256: 84d155e9147595697c49602a49a4aa5d42c18e18630742d083e7ed73b96b02d4
   - path: .orc/workflows/review-docs.yaml
@@ -40,4 +40,4 @@ files:
   - path: .orc/workflows/review-redundancy.yaml
     sha256: 3337d3135f116d5b1cb544333c53a499222989ca0f685d31ec4fb2f376320b54
   - path: .orc/workflows/test-only.yaml
-    sha256: 0a8e4aadfab38a855eda309a5a3f3bd0f4c4f5d8ff1efa78296df26c545b7613
+    sha256: 4951976679cff247af7b3dd4766da46bc81b10b127172201bee3a94d6fd9db23

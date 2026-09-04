@@ -171,13 +171,8 @@ func initialRunState(runID string, req CreateRunRequest, now time.Time) (Status,
 	var workflowEntry *WorkflowStateEntry
 
 	if req.InitialState != "" {
-		entry, err := nextWorkflowStateEntry(status, WorkflowStateEntryRequest{State: req.InitialState})
-		if err != nil {
-			return Status{}, Event{}, err
-		}
-
-		workflowEntry = &entry
-		applyWorkflowStateEntry(&status, entry)
+		workflowEntry = &WorkflowStateEntry{Workflow: req.Workflow, State: req.InitialState}
+		applyWorkflowStateEntry(&status, *workflowEntry)
 	}
 
 	payload, err := marshalPayload(createRunPayload{

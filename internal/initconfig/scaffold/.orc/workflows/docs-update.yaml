@@ -23,6 +23,7 @@ defaults:
     failed/error: 0
 steps:
   docs-code:
+    loop: {key: coding, soft: 4, hard: 6}
     agent: coder
     allowed_results:
       done: [ready]
@@ -37,6 +38,7 @@ steps:
       failed/invalid_report: blocked_for_human
       failed/process_error: blocked_for_human
   docs-review:
+    loop: {key: docs-review, soft: 1, hard: 2}
     agent: docs-reviewer
     skippable: true
     allowed_results:

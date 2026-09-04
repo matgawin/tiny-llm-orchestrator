@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -40,7 +41,12 @@ func (s *Store) RecordWorkflowLoopSoftCapContext(ctx context.Context, runID stri
 			return err
 		}
 
-		if workflowSoftCapRecorded(run.Status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, loopCap.State) {
+		key := loopCap.CounterKey
+		if key == "" {
+			key = loopCap.State
+		}
+
+		if workflowSoftCapRecorded(run.Status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, key) {
 			status = run.Status
 			return nil
 		}
@@ -176,6 +182,7 @@ func (s *Store) AllowWorkflowLoopHardCap(runID, humanAction string, at time.Time
 		override := WorkflowLoopHardCapOverride{
 			Workflow:            block.Workflow,
 			TargetState:         block.BlockedState,
+			CounterKey:          block.CounterKey,
 			CountBeforeOverride: block.CurrentCount,
 			CountAfterOverride:  block.ProspectiveCount,
 			Soft:                block.Soft,
@@ -420,11 +427,17 @@ func nextWorkflowStateEntry(status Status, req WorkflowStateEntryRequest) (Workf
 		return WorkflowStateEntry{}, errors.New("workflow state entry state is required")
 	}
 
-	count := status.WorkflowLoop.Counts[req.State] + 1
+	key := req.CounterKey
+	if key == "" {
+		key = req.State
+	}
+
+	count := status.WorkflowLoop.Counts[key] + 1
 
 	return WorkflowStateEntry{
 		Workflow:      status.Workflow,
 		State:         req.State,
+		CounterKey:    key,
 		Count:         count,
 		Repeated:      count > 1,
 		PreviousState: req.PreviousState,
@@ -433,30 +446,68 @@ func nextWorkflowStateEntry(status Status, req WorkflowStateEntryRequest) (Workf
 	}, nil
 }
 
+func effectiveWorkflowCounterKey(key, state string) string {
+	if key != "" {
+		return key
+	}
+
+	return state
+}
+
 func applyWorkflowStateEntry(status *Status, entry WorkflowStateEntry) {
 	if status.WorkflowLoop.Counts == nil {
 		status.WorkflowLoop.Counts = map[string]int{}
 	}
 
-	status.WorkflowLoop.Counts[entry.State] = entry.Count
+	key := entry.CounterKey
+	if key == "" {
+		key = entry.State
+	}
+
+	if entry.Count > 0 {
+		status.WorkflowLoop.Counts[key] = entry.Count
+	}
 
 	status.WorkflowLoop.Entries = append(status.WorkflowLoop.Entries, entry)
-	if entry.Repeated && !slices.Contains(status.WorkflowLoop.RepeatedStates, entry.State) {
-		status.WorkflowLoop.RepeatedStates = append(status.WorkflowLoop.RepeatedStates, entry.State)
+	if entry.Repeated && !slices.Contains(status.WorkflowLoop.RepeatedStates, key) {
+		status.WorkflowLoop.RepeatedStates = append(status.WorkflowLoop.RepeatedStates, key)
 	}
 }
 
+func applyRefreshedWorkflowLoopCounts(status *Status, counts map[string]int) {
+	status.WorkflowLoop.Counts = maps.Clone(counts)
+	status.WorkflowLoop.RepeatedStates = nil
+
+	for key, count := range counts {
+		if count > 1 {
+			status.WorkflowLoop.RepeatedStates = append(status.WorkflowLoop.RepeatedStates, key)
+		}
+	}
+
+	slices.Sort(status.WorkflowLoop.RepeatedStates)
+}
+
 func applyWorkflowLoopSoftCap(status *Status, loopCap WorkflowLoopSoftCap) {
-	if workflowSoftCapRecorded(status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, loopCap.State) {
+	key := loopCap.CounterKey
+	if key == "" {
+		key = loopCap.State
+	}
+
+	if workflowSoftCapRecorded(status.WorkflowLoop.SoftCapWarnings, loopCap.Workflow, key) {
 		return
 	}
 
 	status.WorkflowLoop.SoftCapWarnings = append(status.WorkflowLoop.SoftCapWarnings, loopCap)
 }
 
-func workflowSoftCapRecorded(caps []WorkflowLoopSoftCap, workflow, state string) bool {
+func workflowSoftCapRecorded(caps []WorkflowLoopSoftCap, workflow, key string) bool {
 	return slices.ContainsFunc(caps, func(existing WorkflowLoopSoftCap) bool {
-		return existing.Workflow == workflow && existing.State == state
+		existingKey := existing.CounterKey
+		if existingKey == "" {
+			existingKey = existing.State
+		}
+
+		return existing.Workflow == workflow && existingKey == key
 	})
 }
 
@@ -623,6 +674,17 @@ func validateWorkflowLoopHardCapOverrideConsumption(status Status, entry Workflo
 	}
 
 	pending := status.WorkflowLoop.PendingHardCapOverride
+
+	key := entry.CounterKey
+	if key == "" {
+		key = entry.State
+	}
+
+	overrideKey := override.CounterKey
+	if overrideKey == "" {
+		overrideKey = override.TargetState
+	}
+
 	switch {
 	case pending == nil:
 		return errors.New("workflow loop hard-cap override consumption requires pending override")
@@ -632,10 +694,12 @@ func validateWorkflowLoopHardCapOverrideConsumption(status Status, entry Workflo
 		return fmt.Errorf("workflow loop hard-cap override workflow = %q, want %q", override.Workflow, entry.Workflow)
 	case entry.State != override.TargetState:
 		return fmt.Errorf("workflow loop hard-cap override target state = %q, want %q", override.TargetState, entry.State)
+	case key != overrideKey:
+		return fmt.Errorf("workflow loop hard-cap override counter key = %q, want %q", overrideKey, key)
 	case entry.Count != override.CountAfterOverride:
 		return fmt.Errorf("workflow loop hard-cap override count after = %d, want workflow entry count %d", override.CountAfterOverride, entry.Count)
-	case status.WorkflowLoop.Counts[entry.State] != override.CountBeforeOverride:
-		return fmt.Errorf("workflow loop hard-cap override count before = %d, want current count %d", override.CountBeforeOverride, status.WorkflowLoop.Counts[entry.State])
+	case status.WorkflowLoop.Counts[key] != override.CountBeforeOverride:
+		return fmt.Errorf("workflow loop hard-cap override count before = %d, want current count %d", override.CountBeforeOverride, status.WorkflowLoop.Counts[key])
 	}
 
 	return nil
@@ -646,13 +710,19 @@ func applyReplayedWorkflowStateEntry(status *Status, event Event, entry *Workflo
 		return nil
 	}
 
+	key := entry.CounterKey
+	if key == "" {
+		key = entry.State
+	}
+
+	initialHistory := event.Sequence == 1 && entry.Count == 0 && !entry.Repeated
 	switch {
 	case entry.Workflow != status.Workflow:
 		return fmt.Errorf("event %d workflow state entry workflow %q does not match status workflow %q", event.Sequence, entry.Workflow, status.Workflow)
 	case entry.State == "":
 		return fmt.Errorf("event %d workflow state entry state is required", event.Sequence)
-	case entry.Count != status.WorkflowLoop.Counts[entry.State]+1:
-		return fmt.Errorf("event %d workflow state entry %q count = %d, want %d", event.Sequence, entry.State, entry.Count, status.WorkflowLoop.Counts[entry.State]+1)
+	case !initialHistory && entry.Count != status.WorkflowLoop.Counts[key]+1:
+		return fmt.Errorf("event %d workflow state entry %q counter %q count = %d, want %d", event.Sequence, entry.State, key, entry.Count, status.WorkflowLoop.Counts[key]+1)
 	case entry.Repeated != (entry.Count > 1):
 		return fmt.Errorf("event %d workflow state entry %q repeated = %t, want %t", event.Sequence, entry.State, entry.Repeated, entry.Count > 1)
 	}

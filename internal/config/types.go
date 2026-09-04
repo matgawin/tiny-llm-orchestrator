@@ -453,6 +453,13 @@ type EffectiveLoopCaps struct {
 	Hard    int  `json:"Hard"`
 }
 
+// StepLoopConfig declares a shared counter and its effective limits.
+type StepLoopConfig struct {
+	Key  string `yaml:"key" json:"Key"`
+	Soft int    `yaml:"soft" json:"Soft"`
+	Hard int    `yaml:"hard" json:"Hard"`
+}
+
 // Workflow is a validated workflow definition.
 type Workflow struct {
 	Name             string              `yaml:"name" json:"Name"`
@@ -467,6 +474,16 @@ type Workflow struct {
 	StepOrder        []string            `yaml:"-" json:"StepOrder"`
 	SourcePath       string              `yaml:"-" json:"SourcePath"`
 	ReferencedAgents map[string]AgentRef `yaml:"-" json:"ReferencedAgents"`
+}
+
+// EffectiveStepLoop returns the counter key and limits for a workflow step.
+func (w Workflow) EffectiveStepLoop(stepID string) (string, EffectiveLoopCaps) {
+	caps := w.LoopCaps
+	if loop := w.Steps[stepID].Loop; loop != nil {
+		return loop.Key, EffectiveLoopCaps{Enabled: caps.Enabled, Soft: loop.Soft, Hard: loop.Hard}
+	}
+
+	return stepID, caps
 }
 
 // VerificationConfig declares the reviewer fallback full check.
@@ -686,6 +703,7 @@ type Step struct {
 	CWD            string              `yaml:"cwd" json:"CWD"`
 	Env            map[string]string   `yaml:"env" json:"Env"`
 	Verification   string              `yaml:"verification" json:"Verification"`
+	Loop           *StepLoopConfig     `yaml:"loop,omitempty" json:"Loop,omitempty"`
 	Skippable      bool                `yaml:"skippable" json:"Skippable"`
 	AllowedResults map[string][]string `yaml:"allowed_results" json:"AllowedResults"`
 	On             map[string]string   `yaml:"on" json:"On"`

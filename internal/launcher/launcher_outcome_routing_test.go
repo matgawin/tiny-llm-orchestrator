@@ -249,7 +249,7 @@ func TestLaunchNextRoutesReportedOutcomeToNextWorkerStep(t *testing.T) {
 	}
 
 	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 1 {
-		t.Fatalf("plan count = %d, want initial count 1", got)
+		t.Fatalf("plan count = %d, want first routed worker count 1", got)
 	}
 
 	if got := loaded.Status.WorkflowLoop.Counts["code"]; got != 1 {
@@ -301,6 +301,6 @@ func TestLaunchNextRetriesReportedRetryStepOutcome(t *testing.T) {
 	}
 
 	if got := loaded.Status.WorkflowLoop.Counts["plan"]; got != 1 {
-		t.Fatalf("plan count = %d, want retry to preserve initial workflow count 1", got)
+		t.Fatalf("plan count = %d, want retry to preserve routed worker count 1", got)
 	}
 }

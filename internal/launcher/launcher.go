@@ -120,8 +120,23 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 
 	routing := startRoutingForDecision(decision, latestOutcome, hasOutcome)
 	workflowOutcome, hasWorkflowOutcome := workflowEntryOutcome(loaded.Run.Status, latestOutcome, hasOutcome)
-	workflowEntry := workflowStateEntryForDecision(decision, workflowOutcome, hasWorkflowOutcome)
-	capDecision := loopcap.Evaluate(loaded.Workflow.Name, loaded.Workflow.LoopCaps, loaded.Run.Status, decision, workflowOutcome, hasWorkflowOutcome)
+	workflowEntry := workflowStateEntryForDecision(loaded.Workflow, decision, workflowOutcome, hasWorkflowOutcome)
+
+	consumeReviewOverride, findingBlock, err := ReviewFindingDecision(loaded.Workflow, loaded.Run, decision, latestOutcome)
+	if err != nil {
+		return Result{}, fmt.Errorf("evaluate repeated review finding: %w", err)
+	}
+
+	if findingBlock != nil && consumeReviewOverride == nil {
+		status, _, blockErr := loaded.Store.BlockRepeatedReviewFindingContext(ctx, opts.RunID, *findingBlock, at)
+		if blockErr != nil {
+			return Result{}, fmt.Errorf("record repeated review finding stop: %w", blockErr)
+		}
+
+		return Result{RunID: opts.RunID, Attempt: latestOutcome}, fmt.Errorf("run %q stopped with reason %s; transitioned to %s", opts.RunID, runstore.RepeatedReviewFindingReason, status.State)
+	}
+
+	capDecision := loopcap.Evaluate(loaded.Workflow, loaded.Run.Status, decision, workflowOutcome, hasWorkflowOutcome)
 
 	consumeLoopCapOverride, result, handled, err := handleLaunchLoopHardCap(ctx, opts, loaded, capDecision, latestOutcome, at)
 	if handled || err != nil {
@@ -141,6 +156,7 @@ func LaunchNext(ctx context.Context, opts Options) (Result, error) {
 		SupersedeReason:                    routing.supersedeReason,
 		WorkflowStateEntry:                 workflowEntry,
 		ConsumeWorkflowLoopHardCapOverride: consumeLoopCapOverride,
+		ConsumeReviewFindingOverride:       consumeReviewOverride,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("launch next: %w", err)
@@ -229,7 +245,7 @@ func handleLaunchLoopHardCap(ctx context.Context, opts Options, loaded runcontex
 		return nil, Result{}, true, fmt.Errorf("launch next: %w", err)
 	}
 
-	err = fmt.Errorf("run %q workflow loop hard cap reached for state %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
+	err = fmt.Errorf("run %q workflow loop hard cap reached for counter %q and target step %q: current count %d, prospective count %d, hard cap %d; transitioned to %s with reason %s", opts.RunID, capDecision.CounterKey, capDecision.State, capDecision.CurrentCount, capDecision.ProspectiveCount, capDecision.Hard, status.State, runstore.WorkflowLoopHardCapReason)
 
 	return nil, Result{RunID: opts.RunID, Attempt: latestOutcome}, true, err
 }

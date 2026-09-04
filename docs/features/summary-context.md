@@ -82,7 +82,9 @@ The approved v1 section order is:
 10. `Suggested Human Review Focus`
 
 `Run` shows the run id, workflow, persisted state, effective state, terminal
-state label, and last sequence.
+state label, and last sequence. For a `repeated_review_finding` stop, it also
+shows the finding ID, reviewer step, proposed correction step, first and
+repeated report attempt IDs, and occurrence count.
 
 `Task Context` renders a bounded Markdown excerpt from `task/context.md`.
 

@@ -69,7 +69,7 @@ Rendered prompts include:
 - explicit attempt metadata
 - the project-local role descriptor frontmatter fields and Markdown body
 - captured task context from `task/context.md`
-- workflow loop context after the selected state has passed its soft cap
+- workflow loop context after the selected counter key has passed its soft cap
 - prior report context
 - the worker-reportable `status/result` pairs for the selected step
 - the exact required `orc report` command shape
@@ -92,10 +92,11 @@ one separate structured risk for each path:
 Review prompts inspect the repository diff and compare each unexpected path
 and reason with the human task, planner scope, and actual diff.
 
-Loop context includes the workflow name, repeated state, current count, soft
-cap, hard cap, prior statuses when recorded by workflow state-entry metadata,
-and guidance to break the loop or escalate instead of repeating the same
-outcome.
+Loop context includes `counter_key`, `target_step`, `current_count`, `soft_cap`,
+`hard_cap`, and `prior_statuses`. The counter key identifies the shared counter.
+The target step identifies the actual step for the new attempt. Prior statuses
+come from state entries whose step maps to the counter key in the current
+workflow configuration.
 
 Prior report context selects accepted reports for the current route. It orders planner scope, the latest implementation report, the latest modifying report, fresh full-verification evidence, the routing report, and finding origins. It removes duplicate attempt ids. It does not include unrelated history or a history index.
 

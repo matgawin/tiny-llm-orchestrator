@@ -4,6 +4,7 @@ package config
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -354,6 +355,96 @@ agents:
 			if got := project.Workflows["implementation"].LoopCaps; got != tt.want {
 				t.Fatalf("loop caps = %+v, want %+v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestValidateLoopMemberRejectsConflictingSharedLimits(t *testing.T) {
+	members := map[string]string{}
+	if err := validateLoopMember("code", "coding", 2, 3, members); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validateLoopMember("fix", "coding", 1, 2, members)
+	if err == nil || !strings.Contains(err.Error(), `loop key "coding" has conflicting limits: steps "code" and "fix"`) {
+		t.Fatalf("validateLoopMember error = %v", err)
+	}
+}
+
+func TestLoadRejectsExplicitLoopKeyWithDifferentImplicitLimits(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{workflow: workflowYAML(t, func(w Workflow) Workflow {
+		plan := w.Steps["plan"]
+		plan.Loop = &StepLoopConfig{Key: "code", Soft: 2, Hard: 3}
+		plan.On = map[string]string{"done/ready": "code"}
+		w.Steps["plan"] = plan
+		w.Steps["code"] = Step{
+			Agent:          "planner",
+			AllowedResults: map[string][]string{"done": {"ready"}},
+			On:             map[string]string{"done/ready": "ready_for_human"},
+		}
+
+		return w
+	})})
+
+	assertLoadErrorContains(t, root, `workflow "implementation": loop key "code" has conflicting limits`)
+}
+
+func TestLoadStepLoopOnAllStepKinds(t *testing.T) {
+	root := writeMinimalProject(t, projectFixture{workflow: workflowYAML(t, func(w Workflow) Workflow {
+		w.Steps = map[string]Step{
+			"plan": {
+				Agent: "planner", Loop: &StepLoopConfig{Key: "coding", Soft: 2, Hard: 3},
+				AllowedResults: map[string][]string{"done": {"ready"}}, On: map[string]string{"done/ready": "command"},
+			},
+			"command": {
+				Kind: StepKindCommand, Command: CommandStep{Argv: []string{"true"}}, Loop: &StepLoopConfig{Key: "coding", Soft: 2, Hard: 3},
+				AllowedResults: map[string][]string{"done": {"passed"}}, On: map[string]string{"done/passed": "script"},
+			},
+			"script": {
+				Kind: StepKindScript, Script: ScriptStep{Path: "check.sh"}, Loop: &StepLoopConfig{Key: "coding", Soft: 2, Hard: 3},
+				AllowedResults: map[string][]string{"done": {"passed"}}, On: map[string]string{"done/passed": "ready_for_human"},
+			},
+		}
+
+		return w
+	})})
+	writeFile(t, filepath.Join(root, "check.sh"), "#!/bin/sh\nexit 0\n")
+
+	project, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, stepID := range []string{"plan", "command", "script"} {
+		if got := project.Workflows["implementation"].Steps[stepID].Loop; got == nil || *got != (StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}) {
+			t.Fatalf("step %q loop = %+v", stepID, got)
+		}
+	}
+}
+
+func TestValidateStepLoopRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name string
+		loop StepLoopConfig
+		want string
+	}{
+		{name: "missing key", loop: StepLoopConfig{Soft: 2, Hard: 3}, want: "loop.key"},
+		{name: "invalid key", loop: StepLoopConfig{Key: "1coding", Soft: 2, Hard: 3}, want: "must match"},
+		{name: "missing soft", loop: StepLoopConfig{Key: "coding", Hard: 3}, want: "loop.soft must be > 0"},
+		{name: "negative soft", loop: StepLoopConfig{Key: "coding", Soft: -1, Hard: 3}, want: "loop.soft must be > 0"},
+		{name: "missing hard", loop: StepLoopConfig{Key: "coding", Soft: 2}, want: "loop.hard must be greater"},
+		{name: "hard equals soft", loop: StepLoopConfig{Key: "coding", Soft: 2, Hard: 2}, want: "loop.hard must be greater"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeMinimalProject(t, projectFixture{workflow: workflowYAML(t, func(w Workflow) Workflow {
+				step := w.Steps["plan"]
+				step.Loop = &tt.loop
+				w.Steps["plan"] = step
+
+				return w
+			})})
+			assertLoadErrorContains(t, root, tt.want)
 		})
 	}
 }

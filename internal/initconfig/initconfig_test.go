@@ -53,9 +53,12 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	if _, err := config.Load(root); err != nil {
+	project, err := config.Load(root)
+	if err != nil {
 		t.Fatalf("generated config did not validate: %v", err)
 	}
+
+	assertScaffoldLoopPolicy(t, project)
 
 	assertGeneratedScaffoldMatchesFixture(t, root)
 	assertGeneratedScaffoldManifest(t, root)
@@ -84,6 +87,47 @@ func TestRunYesCreatesValidScaffoldAndIgnoreEntry(t *testing.T) {
 
 	if output := stdout.String(); !strings.Contains(output, "skipped AGENTS.md creation") {
 		t.Fatalf("output = %q, want AGENTS.md skip", output)
+	}
+}
+
+//nolint:goconst // Exact workflow and step names keep this scaffold contract readable.
+func assertScaffoldLoopPolicy(t *testing.T, project *config.Project) {
+	t.Helper()
+
+	want := map[string]map[string]config.StepLoopConfig{
+		"implementation": {
+			"code": {Key: "coding", Soft: 2, Hard: 3}, "code_fixer": {Key: "coding", Soft: 2, Hard: 3}, "code_cleaner": {Key: "coding", Soft: 2, Hard: 3},
+			"review": {Key: "review", Soft: 1, Hard: 2}, "redundancy-review": {Key: "redundancy-review", Soft: 1, Hard: 2}, "readability-review": {Key: "readability-review", Soft: 1, Hard: 2},
+		},
+		"review-fix": {
+			"code": {Key: "coding", Soft: 2, Hard: 3}, "code_fixer": {Key: "coding", Soft: 2, Hard: 3}, "code_cleaner": {Key: "coding", Soft: 2, Hard: 3},
+			"review": {Key: "review", Soft: 1, Hard: 2}, "redundancy-review": {Key: "redundancy-review", Soft: 1, Hard: 2}, "readability-review": {Key: "readability-review", Soft: 1, Hard: 2},
+		},
+		"bugfix":            {"code": {Key: "coding", Soft: 2, Hard: 3}, "review": {Key: "review", Soft: 1, Hard: 2}},
+		"mechanical-change": {"mechanical-code": {Key: "coding", Soft: 2, Hard: 3}, "mechanical-review": {Key: "mechanical-review", Soft: 1, Hard: 2}},
+		"docs-update":       {"docs-code": {Key: "coding", Soft: 2, Hard: 3}, "docs-review": {Key: "docs-review", Soft: 1, Hard: 2}},
+		"test-only":         {"test-code": {Key: "coding", Soft: 2, Hard: 3}, "review": {Key: "review", Soft: 1, Hard: 2}},
+	}
+
+	for workflowName, workflow := range project.Workflows {
+		wantSteps := want[workflowName]
+		for stepName, wantLoop := range wantSteps {
+			step, ok := workflow.Steps[stepName]
+			if !ok || step.Loop == nil || *step.Loop != wantLoop {
+				t.Fatalf("workflow %s step %s loop = %+v, want %+v", workflowName, stepName, step.Loop, wantLoop)
+			}
+		}
+
+		for stepName, step := range workflow.Steps {
+			_, configured := wantSteps[stepName]
+			if !configured {
+				if step.Loop != nil {
+					t.Fatalf("workflow %s step %s loop = %+v, want none", workflowName, stepName, step.Loop)
+				}
+
+				continue
+			}
+		}
 	}
 }
 

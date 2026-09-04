@@ -160,6 +160,37 @@ func TestRunAdvanceContinuesAfterReviewChangesRequestedRoute(t *testing.T) {
 	}
 }
 
+func TestReviewFixLoopBudgetCountsRoutedReviewWorkers(t *testing.T) {
+	root := withTempCwd(t)
+	writeCLIReviewFixLoopProject(t, root)
+	run := executeCLIRunStart(t, root, []string{"--workflow", "review-fix", "--task", "# Task"}, nil)
+	shim := installCLICodexShim(t, root)
+	t.Setenv("PATH", shim.binDir)
+	t.Setenv("ORC_CLI_CODEX_SHIM", "1")
+	t.Setenv("ORC_CLI_CODEX_MODE", "worker-report")
+
+	first := launchCLIWorkerReport(t, run.runID, changesRequested("First review."))
+	if strings.Contains(first, "workflow loop soft cap") {
+		t.Fatalf("first review output = %q, want no loop warning", first)
+	}
+
+	launchCLIWorkerReport(t, run.runID, ready("Correction is ready."))
+
+	second := launchCLIWorkerReport(t, run.runID, approved("Second review."))
+	if !strings.Contains(second, "workflow loop soft cap") {
+		t.Fatalf("second review output = %q, want soft-cap warning", second)
+	}
+
+	loaded := loadCLIRun(t, root, run.runID)
+	if got := loaded.Status.WorkflowLoop.Counts["review"]; got != 2 {
+		t.Fatalf("review count = %d, want two routed review workers", got)
+	}
+
+	if loaded.Status.WorkflowLoop.HardCapBlock != nil {
+		t.Fatalf("hard-cap block = %+v, want two reviews within hard limit", loaded.Status.WorkflowLoop.HardCapBlock)
+	}
+}
+
 func TestRunAdvanceStopsOnWorkerBlockedAndFailed(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

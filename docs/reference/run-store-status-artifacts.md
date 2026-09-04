@@ -66,13 +66,17 @@ workflow/report layers own the allowed-state policy.
   status.
 - Process warnings are materialized in `warnings`.
 - Workflow loop state is materialized in `workflow_loop`. `counts` stores the
-  latest count per workflow state, `entries` preserves the accepted run path,
-  `repeated_states` lists states whose count has reached at least `2`,
+  latest count per counter key, `entries` preserves the accepted run path,
+  `repeated_states` lists counter keys whose count has reached at least `2`,
   `soft_cap_warnings` stores advisory threshold hits, and `hard_cap_block`
   stores the active hard-cap human-decision stop when present.
   `pending_hard_cap_override` stores the one-shot human-reviewed continuation
   created by `orc run continue --allow-loop-cap` until the next matching
   `attempt.started` consumes it.
+- A repeated-finding stop is materialized in `review_finding_block`.
+  `pending_review_finding_override` stores the one-use continuation created by
+  `orc run continue <run-id> --allow-review-finding` until the matching
+  correction attempt starts.
 - Non-loop human-block continuation state is materialized in `continued` with
   mode `resolve_block` until the next `attempt.started` clears it. This marker
   records the human reason and resolved attempt fields needed to retry the same

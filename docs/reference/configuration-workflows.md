@@ -138,6 +138,18 @@ Agent steps declare:
 Agent steps may also set `kind: agent`; they must not set `command` or
 `script`.
 
+Any step kind can declare one shared loop counter:
+
+```yaml
+loop: {key: coding, soft: 2, hard: 3}
+```
+
+The `key`, `soft`, and `hard` fields are required. The key uses the workflow
+identifier syntax. Both limits are positive, and `hard` is greater than
+`soft`. All steps that use one key must use the same limits. If `loop` is
+absent, Orc uses the step id and the effective workflow `loop_caps` limits.
+The effective `loop_caps.enabled` value controls both keyed and unkeyed caps.
+
 Validation uses the selected runtime descriptor. A selected runtime must exist.
 Model values are rejected when `model.supported` is false, required when
 `model.required` is true and no effective model resolves, and checked against

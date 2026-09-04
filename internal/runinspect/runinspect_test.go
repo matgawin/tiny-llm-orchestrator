@@ -37,6 +37,46 @@ func TestPrintReviewFindingsIncludesFullStructuredValues(t *testing.T) {
 	}
 }
 
+func TestWorkflowLoopMembersAndLimitsUsesMatchingKeyLimits(t *testing.T) {
+	workflowConfig := config.Workflow{
+		LoopCaps: config.EffectiveLoopCaps{Soft: 4, Hard: 5},
+		Steps: map[string]config.Step{
+			"code":   {Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}},
+			"review": {Loop: &config.StepLoopConfig{Key: "review", Soft: 1, Hard: 2}},
+		},
+	}
+
+	members, soft, hard := workflowLoopMembersAndLimits(workflowConfig, "coding")
+	if diff := fmt.Sprintf("%v %d/%d", members, soft, hard); diff != "[code] 2/3" {
+		t.Fatalf("coding loop = %s, want [code] 2/3", diff)
+	}
+}
+
+func TestPrintWorkflowLoopStatusShowsCounterKeyAndTargetStep(t *testing.T) {
+	wf := config.Workflow{
+		LoopCaps: config.EffectiveLoopCaps{Enabled: true, Soft: 4, Hard: 5},
+		Steps: map[string]config.Step{
+			"code":  {Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}},
+			"fixer": {Loop: &config.StepLoopConfig{Key: "coding", Soft: 2, Hard: 3}},
+		},
+	}
+	run := &runstore.Run{Status: runstore.Status{WorkflowLoop: runstore.WorkflowLoop{
+		Counts: map[string]int{"coding": 3},
+		HardCapBlock: &runstore.WorkflowLoopHardCap{
+			CounterKey: "coding", BlockedState: "fixer", ProspectiveCount: 4,
+		},
+	}}}
+
+	var out bytes.Buffer
+	printWorkflowLoopStatus(&out, wf, run)
+
+	for _, want := range []string{"    coding:\n", "      member_steps: [code, fixer]\n", "      blocked_target_state: fixer\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("inspection output = %q, want %q", out.String(), want)
+		}
+	}
+}
+
 func TestStatusShowsNewRunSelectedStartStep(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root)
