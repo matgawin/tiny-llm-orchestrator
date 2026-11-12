@@ -33,7 +33,7 @@ const (
 	placeholderReasoning       = "{reasoning}"
 	placeholderDir             = "{dir}"
 
-	reportPollInterval = 10 * time.Millisecond
+	reportPollInterval = 250 * time.Millisecond
 )
 
 var runtimeArgPlaceholderRegex = regexp.MustCompile(`\{[^{}]+\}`)

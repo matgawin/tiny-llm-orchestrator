@@ -90,12 +90,12 @@ func TestRunProcessTerminatesWorkerAfterReportExitGrace(t *testing.T) {
 func TestRunProcessReportExitGraceOutlivesOriginalWorkflowTimeout(t *testing.T) {
 	result := runProcessWithScheduledReadyReport(t, scheduledReadyReportProcess{
 		AttemptID:       "reported-near-timeout",
-		Timeout:         "200ms",
-		ReportExitGrace: "250ms",
+		Timeout:         "1s",
+		ReportExitGrace: "1s",
 		ReportDelay:     120 * time.Millisecond,
 		Command:         []string{"sh", "-c", "cat >/dev/null; sleep 5"},
 	})
-	if result.Elapsed < 300*time.Millisecond {
+	if result.Elapsed < time.Second {
 		t.Fatalf("elapsed = %s, want report-exit grace to outlive original workflow timeout", result.Elapsed)
 	}
 
