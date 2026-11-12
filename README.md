@@ -41,7 +41,7 @@ Runtime entrypoint:
 
 Primary dependencies:
 
-- Go `1.26.x`
+- Go `1.27.4`
 - `github.com/spf13/cobra` for CLI command routing and help
 - `github.com/goccy/go-yaml` for YAML config parsing
 - Nix development shell with `go-task`, `jujutsu`, `beads`, formatters, and lint tooling

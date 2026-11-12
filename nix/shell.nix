@@ -64,7 +64,7 @@
       codexWithBeads
       goplsCheck
       bubblewrap
-      go
+      go_1_27
       gofumpt
       golangci-lint
       go-tools

@@ -22,7 +22,7 @@ Contributors running the repo locally for development, debugging, or test verifi
 
 ## Prerequisites
 
-- Go `1.26.x`
+- Go `1.27.3`
 - The go-task `task` binary
 - `golangci-lint`, `gofumpt`, and `goimports` for the standard check workflow
 
@@ -85,8 +85,8 @@ go run ./cmd/orc version
 - `orc` in the Nix development shell is the flake-built CLI used for project orchestration.
 - `task lsp` runs `gopls` diagnostics on changed Go files through the Nix shell helper.
 - `task tests` runs `go test ./...`.
-- `task tests-race` runs `go test -race ./...` through `task test-unit-race`.
-- `task check` runs fix, format, lint, tests, and build.
+- `task tests-race` runs `go test -race ./...`.
+- `task check` runs fix, format, lint, tests, race tests, and build.
 
 ## Troubleshooting
 
